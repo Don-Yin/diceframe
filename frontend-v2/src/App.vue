@@ -3,7 +3,7 @@ import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import {
   NConfigProvider, NMessageProvider, NDialogProvider, NLoadingBarProvider, NIcon,
-  zhCN, enUS, deDE, dateZhCN, dateEnUS, dateDeDE,
+  zhCN, enUS, deDE, ruRU, dateZhCN, dateEnUS, dateDeDE, dateRuRU,
 } from 'naive-ui'
 import { useTheme } from '@/composables/useTheme'
 import { initializeBackgroundImages } from '@/composables/useBackgroundImages'
@@ -33,15 +33,17 @@ const route = useRoute()
 const { naiveTheme, overrides, loadPluginThemes, suspendPluginTheme, restorePluginTheme } = useTheme()
 const { locale, setLocale, t } = useLocale()
 const { updateAvailable } = useUpdateCheck()
-// naive-ui 无 ja locale；ja 界面回退英文组件语言，而非中文。de 有内置 locale，直接使用。
+// naive-ui 无 ja locale；ja 界面回退英文组件语言，而非中文。de/ru 有内置 locale，直接使用。
 const naiveLocale = computed(() => {
   if (locale.value === 'zh-CN') return zhCN
   if (locale.value === 'de') return deDE
+  if (locale.value === 'ru') return ruRU
   return enUS
 })
 const naiveDateLocale = computed(() => {
   if (locale.value === 'zh-CN') return dateZhCN
   if (locale.value === 'de') return dateDeDE
+  if (locale.value === 'ru') return dateRuRU
   return dateEnUS
 })
 
@@ -211,6 +213,7 @@ watch(publicRoute, (isPublic) => {
                         <option value="en">English</option>
                         <option value="ja">日本語</option>
                         <option value="de">Deutsch</option>
+                        <option value="ru">Русский</option>
                       </select>
                     </label>
                     <div class="operator-chip" :title="currentGameText">
