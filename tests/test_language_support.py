@@ -156,3 +156,29 @@ def test_ruleset_bundle_selects_english_for_an_unsupported_locale():
         assert loader.load("dnd2024_srd", language).locale == "en"
     # No request at all still means the bundle default.
     assert loader.load("dnd2024_srd", "").locale == "zh-CN"
+
+
+def test_default_character_sheet_carries_no_chinese_into_other_languages():
+    import re
+
+    from src.engine.character_utils import make_default_character
+
+    templates = ROOT / "templates"
+    han = re.compile(r"[\u4e00-\u9fff]")
+
+    # A Chinese game keeps its Chinese sheet.
+    chinese = make_default_character("T", "freeform_fantasy", templates, "zh-CN")
+    assert han.search(str(chinese))
+
+    # Every other language must not leak Chinese into the sheet, because the
+    # sheet goes into the GM context and pulls narration back to Chinese.
+    for language in ("en", "ru", "de"):
+        sheet = make_default_character("T", "freeform_fantasy", templates, language)
+        assert not han.search(str(sheet)), f"Chinese leaked into the {language} sheet"
+        assert sheet["race"]
+        assert sheet["inventory"][0]["name"]
+        assert sheet["resources"]["hp"]["label"]
+
+    # ja ships its own rule locale and must keep its own script.
+    japanese = make_default_character("T", "freeform_fantasy", templates, "ja")
+    assert japanese["race"] == "人間"
