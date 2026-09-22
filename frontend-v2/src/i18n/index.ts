@@ -26,6 +26,32 @@ export function normalizeLocale(value: unknown): Locale {
   return text === 'en' || text.startsWith('en-') ? 'en' : 'zh-CN'
 }
 
+/**
+ * Fallback order mirroring the backend `localized_text` chain in
+ * src/engine/language.py: the requested locale, then English, then Chinese.
+ * Without this, any locale beyond zh-CN/en silently lands on Chinese content.
+ */
+export function localeChain(locale: Locale): Locale[] {
+  const chain: Locale[] = [locale]
+  for (const fallback of ['en', 'zh-CN'] as const) {
+    if (!chain.includes(fallback)) chain.push(fallback)
+  }
+  return chain
+}
+
+/** BCP-47 tag handed to the speech backend for a UI locale. */
+const SPEECH_TAGS: Record<Locale, string> = {
+  'zh-CN': 'zh-CN',
+  en: 'en-US',
+  ja: 'ja-JP',
+  de: 'de-DE',
+  ru: 'ru-RU',
+}
+
+export function speechLocaleTag(locale: Locale): string {
+  return SPEECH_TAGS[locale] || 'en-US'
+}
+
 function initialLocale(): Locale {
   if (typeof localStorage !== 'undefined') {
     const stored = localStorage.getItem(LOCALE_STORAGE_KEY)

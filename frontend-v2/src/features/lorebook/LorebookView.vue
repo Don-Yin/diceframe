@@ -8,7 +8,7 @@ import { useToast } from '@/composables/useToast'
 import { useConfirm } from '@/composables/useConfirm'
 import { useLocale, type Locale } from '@/composables/useLocale'
 import type { MessageKey } from '@/i18n'
-import { contentLanguageOf, filterByContentLanguage } from '@/utils/contentLanguage'
+import { contentLanguageOf, filterByContentLanguage, localeLabel } from '@/utils/contentLanguage'
 import Modal from '@/components/ui/Modal.vue'
 import LorePerspectiveInspector from './LorePerspectiveInspector.vue'
 import LoreVisibilityBadge from './LoreVisibilityBadge.vue'
@@ -869,7 +869,7 @@ async function removeBinding(bindingId: string) {
     </div>
 
     <p class="memory-meta" v-if="currentWorldId">
-      {{ worldNameOf(currentWorld) || currentWorldId }} · {{ worldLanguage === 'en' ? t('english') : t('chinese') }} · {{ t('lorebookEntryCount', { count: entries.length }) }}
+      {{ worldNameOf(currentWorld) || currentWorldId }} · {{ localeLabel(worldLanguage) }} · {{ t('lorebookEntryCount', { count: entries.length }) }}
     </p>
 
     <section v-if="entries.length" class="lore-entry-toolbar" :aria-label="t('loreFilterLabel')">
