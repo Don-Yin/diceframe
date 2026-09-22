@@ -50,6 +50,30 @@ def localized_text(language: object, texts: dict[str, str], fallback: str = "") 
     return texts.get(lang) or texts.get("en") or texts.get("zh-CN") or fallback
 
 
+def content_locale_candidates(locale: object) -> list[str]:
+    """Ordered locale tags to try when resolving localized content on disk.
+
+    Mirrors the `localized_text` chain: the requested tag, its bare language
+    subtag, then English. Chinese is deliberately left out of the chain — the
+    core template file already carries the Chinese text, so a Chinese request
+    must fall through to it instead of picking up an English overlay.
+
+    Without the English step, every locale that ships no content of its own
+    (ru, de today; ja for worlds) resolved straight to the Chinese core, so a
+    Russian game listed Chinese worlds and rules.
+    """
+    requested = str(locale or "").strip().replace("_", "-")
+    if not requested:
+        return []
+    candidates: list[str] = []
+    for value in (requested, requested.split("-", 1)[0]):
+        if value and value not in candidates:
+            candidates.append(value)
+    if not requested.lower().startswith("zh") and "en" not in candidates:
+        candidates.append("en")
+    return candidates
+
+
 def lang_suffix(language: object) -> str:
     """本地化字段后缀：中文（zh-*）无后缀（用原字段），其他语言返回登记的后缀。
 
