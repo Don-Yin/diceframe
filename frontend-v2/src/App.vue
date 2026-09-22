@@ -8,6 +8,7 @@ import {
 import { useTheme } from '@/composables/useTheme'
 import { initializeBackgroundImages } from '@/composables/useBackgroundImages'
 import { useLocale, type Locale } from '@/composables/useLocale'
+import { SUPPORTED_LOCALES, localeEndonym } from '@/i18n'
 import { useUpdateCheck } from '@/composables/useUpdateCheck'
 import { useAnnouncements } from '@/composables/useAnnouncements'
 import ThemeToggle from '@/components/ThemeToggle.vue'
@@ -209,11 +210,7 @@ watch(publicRoute, (isPublic) => {
                     <label class="locale-select header-locale">
                       <span>{{ t('language') }}</span>
                       <select :value="locale" @change="onLocaleChange">
-                        <option value="zh-CN">简体中文</option>
-                        <option value="en">English</option>
-                        <option value="ja">日本語</option>
-                        <option value="de">Deutsch</option>
-                        <option value="ru">Русский</option>
+                        <option v-for="code in SUPPORTED_LOCALES" :key="code" :value="code">{{ localeEndonym(code) }}</option>
                       </select>
                     </label>
                     <div class="operator-chip" :title="currentGameText">

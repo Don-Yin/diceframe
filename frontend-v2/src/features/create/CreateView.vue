@@ -5,7 +5,7 @@ import { api, errorMessage } from '@/api/client'
 import type { AdventureSummary, AdventuresResponse, CharacterCard, CharacterCardsResponse, CharacterSheet, GameMutationResponse, GeneratedRuleResponse, GeneratedWorldResponse, GmStyle, RuleDetailResponse, RuleSummary, RuleTemplate, RulesResponse, SceneImageRef, WorldListResponse, WorldSummary, WorldTemplateSummary, WorldTemplatesResponse } from '@/api/types'
 import { useToast } from '@/composables/useToast'
 import { useLocale, type Locale } from '@/composables/useLocale'
-import { localeChain, normalizeLocale } from '@/i18n'
+import { SUPPORTED_LOCALES, localeChain, normalizeLocale } from '@/i18n'
 import CharacterWizard from '@/components/admin/CharacterWizard.vue'
 import CharacterCardPicker from '@/components/admin/CharacterCardPicker.vue'
 import PortraitImage from '@/components/PortraitImage.vue'
@@ -652,7 +652,7 @@ async function create() {
 
         <section v-if="step === 1" class="create-step-card create-content-stage">
           <div class="create-field-grid create-field-grid-compact">
-            <label><span>{{ t('gameLanguage') }}</span><select v-model="gameLanguage"><option value="zh-CN">{{ t('chinese') }}</option><option value="en">{{ t('english') }}</option><option value="de">{{ t('german') }}</option></select><small>{{ t('gameLanguageHint') }}</small></label>
+            <label><span>{{ t('gameLanguage') }}</span><select v-model="gameLanguage"><option v-for="code in SUPPORTED_LOCALES" :key="code" :value="code">{{ localeLabel(code) }}</option></select><small>{{ t('gameLanguageHint') }}</small></label>
             <label><span>{{ t('seedCode') }}</span><input v-model="seed" :placeholder="t('seedPlaceholder')"><small>{{ t('restoreBySeed') }}</small></label>
           </div>
           <template v-if="!seed">

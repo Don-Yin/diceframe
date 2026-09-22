@@ -26,6 +26,25 @@ export function normalizeLocale(value: unknown): Locale {
   return text === 'en' || text.startsWith('en-') ? 'en' : 'zh-CN'
 }
 
+/** Every locale the app ships, in picker order. Render language menus from this
+ * list rather than hardcoding options: de and ja were previously missing from
+ * most pickers because each one carried its own copy. */
+export const SUPPORTED_LOCALES = Object.keys(messages) as Locale[]
+
+/** A locale's own name. Used by UI-language switchers, where a reader looks for
+ * their language written the way they write it. */
+const LOCALE_ENDONYMS: Record<Locale, string> = {
+  'zh-CN': '简体中文',
+  en: 'English',
+  ja: '日本語',
+  de: 'Deutsch',
+  ru: 'Русский',
+}
+
+export function localeEndonym(locale: Locale): string {
+  return LOCALE_ENDONYMS[locale] || locale
+}
+
 /**
  * Fallback order mirroring the backend `localized_text` chain in
  * src/engine/language.py: the requested locale, then English, then Chinese.
