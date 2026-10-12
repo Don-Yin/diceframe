@@ -19,6 +19,7 @@ from src.webui.services.turns import TurnDependencies, submit_action
 from src.webui.services._common import _parse_game_key
 
 from dnd2024_http_common import GameplayApiShim, quick_character
+from src.engine.modules import ruleset_runtime, table_settings
 
 
 class _EnabledRuntime(Dnd2024Runtime):
@@ -125,7 +126,7 @@ def _bound_instance_with_digest(
     assert instance.bind_adventure(package.binding("greymoor"))
     runtime.gameplay_view(instance, "gm", True)
     instance.adventure_binding["content_digest"] = digest
-    instance.ruleset_state["campaign"]["adventure_binding"][
+    ruleset_runtime.state(instance)["campaign"]["adventure_binding"][
         "content_digest"
     ] = digest
     registry.register(instance)
@@ -136,14 +137,14 @@ def _ready_story_encounter(runtime: _EnabledRuntime, instance: GameInstance) -> 
     instance.world_id = "greymoor"
     package = runtime._adventure_loader.resolve("core:lanterns_of_greymoor", "en")
     assert instance.bind_adventure(package.binding("greymoor"))
-    instance.solo_mode = True
+    table_settings.replace_solo_mode(instance, True)
     for intent_type, fields in (
         ("session_zero.quick_start", {}),
         ("tutorial.choose", {"choice_id": "inspect_cold_ash"}),
         ("tutorial.choose", {"choice_id": "reassure_mira"}),
         ("tutorial.choose", {"choice_id": "follow_small_tracks"}),
     ):
-        version = int(instance.ruleset_state.get("version", 0) or 0)
+        version = int(ruleset_runtime.state(instance).get("version", 0) or 0)
         resolved = runtime.resolve_intent(instance, {
             "intent_id": f"setup-{intent_type}-{version}",
             "type": intent_type,
@@ -258,8 +259,8 @@ async def test_m5_http_forces_server_identity_persists_and_replays(tmp_path) -> 
     recovered_registry = GameRegistry(tmp_path / "saves")
     recovered = await recovered_registry.load(instance.game_key)
     assert recovered is not None
-    assert recovered.ruleset_state["version"] >= encounter["expected_version"] + 1
-    assert len(recovered.event_ledger) >= 5
+    assert ruleset_runtime.state(recovered)["version"] >= encounter["expected_version"] + 1
+    assert len(ruleset_runtime.event_ledger(recovered)) >= 5
     public_entries = [
         entry
         for entry in recovered.log
@@ -309,7 +310,7 @@ async def test_m5_http_rejects_same_intent_id_with_changed_payload(tmp_path) -> 
     assert first.status == 200
     assert changed.status == 422
     assert changed_body["code"] == "INTENT_ID_CONFLICT"
-    assert len(instance.event_ledger) >= 5
+    assert len(ruleset_runtime.event_ledger(instance)) >= 5
 
 
 @pytest.mark.asyncio
@@ -325,7 +326,7 @@ async def test_professional_runtime_rejects_free_text_only_during_combat(tmp_pat
         "character_name": "Guardian", "character_sheet": character,
     }
     assert instance.bind_ruleset_runtime(character["rule_binding"])
-    instance.ruleset_state["combat"] = {"status": "active"}
+    ruleset_runtime.state(instance)["combat"] = {"status": "active"}
     registry.register(instance)
     api = _M5Api(registry, runtime)
 

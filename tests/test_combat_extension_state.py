@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from src.engine.game_instance import GameInstance
+from src.engine.modules import combat_extension_state
 
 
 def _payload_with_extension() -> dict:
@@ -22,9 +23,9 @@ def _payload_with_extension() -> dict:
 
 def test_combat_extension_round_trips_through_save() -> None:
     instance = GameInstance(game_key=("web", "wuxia", "bot"), gm_uid="gm")
-    instance.combat_extension = _payload_with_extension()
+    combat_extension_state.replace_current(instance, _payload_with_extension())
     recovered = GameInstance.from_dict(instance.to_dict())
-    assert recovered.combat_extension == _payload_with_extension()
+    assert combat_extension_state.current(recovered) == _payload_with_extension()
 
 
 def test_legacy_save_without_field_defaults_to_empty() -> None:
@@ -33,24 +34,24 @@ def test_legacy_save_without_field_defaults_to_empty() -> None:
     payload["modules"].pop("combat_extension")
     payload.pop("combat_extension", None)
     recovered = GameInstance.from_dict(payload)
-    assert recovered.combat_extension == {}
+    assert combat_extension_state.current(recovered) == {}
 
 
 def test_invalid_payload_shapes_fail_closed_to_empty() -> None:
     payload = GameInstance(game_key=("web", "wuxia", "bot")).to_dict()
     payload["modules"]["combat_extension"]["current"] = "threshold"
     recovered = GameInstance.from_dict(payload)
-    assert recovered.combat_extension == {}
+    assert combat_extension_state.current(recovered) == {}
 
 
 def test_default_instances_start_disabled() -> None:
     instance = GameInstance(game_key=("web", "wuxia", "bot"))
-    assert instance.combat_extension == {}
+    assert combat_extension_state.current(instance) == {}
 
 
 def test_malformed_snapshot_envelope_does_not_replace_live_state() -> None:
     instance = GameInstance(game_key=("web", "wuxia", "bot"))
-    instance.combat_extension = _payload_with_extension()
+    combat_extension_state.replace_current(instance, _payload_with_extension())
 
     restored = instance.restore_combat_extension_snapshot({
         "schema_version": True,
@@ -59,7 +60,7 @@ def test_malformed_snapshot_envelope_does_not_replace_live_state() -> None:
     })
 
     assert restored is False
-    assert instance.combat_extension == _payload_with_extension()
+    assert combat_extension_state.current(instance) == _payload_with_extension()
 
 
 def test_capture_repairs_malformed_entity_tracking_without_crashing() -> None:
@@ -68,20 +69,20 @@ def test_capture_repairs_malformed_entity_tracking_without_crashing() -> None:
         "character_name": "侠客",
         "character_sheet": {"hp": 20, "qi": 30},
     }
-    instance.combat_extension_round_snapshots = {
+    combat_extension_state.replace_round_snapshots(instance, {
         "0": {
             "schema_version": 1,
             "combat_extension": {},
             "entity_fields": {"player:p1": "malformed"},
         },
-    }
+    })
 
     instance.capture_combat_extension_snapshot({
         "player:p1": ("hp", "qi", 7),
         3: ("hp",),
     })
 
-    entry = instance.combat_extension_round_snapshots["0"]["entity_fields"][
+    entry = combat_extension_state.round_snapshots(instance)["0"]["entity_fields"][
         "player:p1"
     ]
     assert entry == {
@@ -96,7 +97,7 @@ def test_restore_malformed_entity_tracking_is_atomic() -> None:
         "character_name": "侠客",
         "character_sheet": {"hp": 20, "qi": 30},
     }
-    instance.combat_extension = _payload_with_extension()
+    combat_extension_state.replace_current(instance, _payload_with_extension())
 
     restored = instance.restore_combat_extension_snapshot({
         "schema_version": 1,
@@ -111,26 +112,26 @@ def test_restore_malformed_entity_tracking_is_atomic() -> None:
     })
 
     assert restored is False
-    assert instance.combat_extension == _payload_with_extension()
+    assert combat_extension_state.current(instance) == _payload_with_extension()
     assert instance.get_character_sheet("p1")["hp"] == 20
 
 
 def test_discard_combat_snapshots_removes_branch_and_malformed_keys() -> None:
     instance = GameInstance(game_key=("web", "wuxia", "bot"))
-    instance.combat_extension_round_snapshots = {
+    combat_extension_state.replace_round_snapshots(instance, {
         "2": {"combat_extension": {}},
         "3": {"combat_extension": {}},
         "future": {"combat_extension": {}},
-    }
+    })
 
     instance.discard_combat_extension_snapshots_from(3)
 
-    assert set(instance.combat_extension_round_snapshots) == {"2"}
+    assert set(combat_extension_state.round_snapshots(instance)) == {"2"}
 
 
 def test_combat_round_snapshot_round_trips_through_save() -> None:
     instance = GameInstance(game_key=("web", "wuxia", "bot"), gm_uid="gm")
-    instance.combat_extension = _payload_with_extension()
+    combat_extension_state.replace_current(instance, _payload_with_extension())
     instance.players["p1"] = {
         "character_name": "侠客",
         "character_sheet": {"hp": 20, "qi": 30, "inventory": []},
@@ -141,21 +142,21 @@ def test_combat_round_snapshot_round_trips_through_save() -> None:
 
     recovered = GameInstance.from_dict(instance.to_dict())
 
-    assert recovered.combat_extension_round_snapshots == (
-        instance.combat_extension_round_snapshots
+    assert combat_extension_state.round_snapshots(recovered) == (
+        combat_extension_state.round_snapshots(instance)
     )
 
 
 @pytest.mark.asyncio
 async def test_reset_clears_combat_extension_and_round_snapshots() -> None:
     instance = GameInstance(game_key=("web", "wuxia", "bot"), gm_uid="gm")
-    instance.combat_extension = _payload_with_extension()
+    combat_extension_state.replace_current(instance, _payload_with_extension())
     instance.capture_combat_extension_snapshot()
 
     await instance.reset()
 
-    assert instance.combat_extension == {}
-    assert instance.combat_extension_round_snapshots == {}
+    assert combat_extension_state.current(instance) == {}
+    assert combat_extension_state.round_snapshots(instance) == {}
 
 
 @pytest.mark.asyncio
@@ -169,7 +170,7 @@ async def test_finished_round_records_combat_snapshots_for_rollback_and_swipe() 
     instance.capture_combat_extension_snapshot({
         "player:p1": ("hp", "qi", "inventory"),
     })
-    instance.combat_extension = _payload_with_extension()
+    combat_extension_state.replace_current(instance, _payload_with_extension())
     instance.get_character_sheet("p1")["qi"] = 22
     pre_swipe = instance.current_combat_extension_snapshot()
 
@@ -185,10 +186,10 @@ async def test_finished_round_records_combat_snapshots_for_rollback_and_swipe() 
     ]["qi"] == 30
     assert entry["pre_combat_extension_snapshot"] == pre_swipe
 
-    instance.combat_extension = {}
+    combat_extension_state.replace_current(instance, {})
     instance.get_character_sheet("p1")["qi"] = 1
     assert instance.restore_combat_extension_snapshot(
         entry["pre_combat_extension_snapshot"],
     )
-    assert instance.combat_extension == _payload_with_extension()
+    assert combat_extension_state.current(instance) == _payload_with_extension()
     assert instance.get_character_sheet("p1")["qi"] == 22

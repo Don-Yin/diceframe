@@ -11,10 +11,13 @@ from aiohttp.test_utils import TestClient, TestServer
 import pytest
 
 from src.engine.game_instance import GameInstance, GameRegistry
+from src.engine.game_state import GameState
+from src.engine.modules import seat_activity
 from src.rules.rule_system import RuleSystem
 from src.rulesets.builtin import build_default_ruleset_registry
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.rulesets.dnd2024 import advancement_access
+from src.webui.character_sheet_authority import ADOPT_REQUIRES_GM
 from src.webui.routes.character_cards import register_character_cards
 from src.webui.routes.games import register_games
 from src.webui.services import (
@@ -25,6 +28,7 @@ from src.webui.services import (
     ruleset_rest,
 )
 from src.webui.services._common import _parse_game_key
+from src.engine.modules import ruleset_runtime
 
 
 class _Api:
@@ -179,10 +183,11 @@ class _Api:
         )
 
     async def adopt_ruleset_character_card(
-        self, game_key: str, user_id: str, card_id: str,
+        self, game_key: str, user_id: str, card_id: str, *, gm_authority: bool,
     ):
         return await ruleset_characters.adopt_character_card(
             self._ruleset_character_dependencies, game_key, user_id, card_id,
+            gm_authority=gm_authority,
         )
 
     def preview_character_card_advancement(self, card_id: str, body):
@@ -512,7 +517,7 @@ async def test_live_advancement_is_rejected_during_swipe(professional_context) -
     api, instance, _character = professional_context
     advancement_access.grant(instance, "gm", source="gm")
     before_sheet = deepcopy(instance.get_character_sheet("gm"))
-    before_state = deepcopy(instance.ruleset_state)
+    before_state = deepcopy(ruleset_runtime.state(instance))
     entered, release = asyncio.Event(), asyncio.Event()
 
     async def hold_rewrite() -> None:
@@ -538,7 +543,7 @@ async def test_live_advancement_is_rejected_during_swipe(professional_context) -
     )
     assert result["code"] == "REWRITE_IN_PROGRESS"
     assert instance.get_character_sheet("gm") == before_sheet
-    assert instance.ruleset_state == before_state
+    assert ruleset_runtime.state(instance) == before_state
     release.set()
     await asyncio.wait_for(rewrite, 1)
 
@@ -728,6 +733,7 @@ async def test_live_character_adopts_server_owned_professional_blueprint(
     result = await ruleset_characters.adopt_character_card(
         api._ruleset_character_dependencies,
         "web|character-lifecycle|web_bot", "gm", saved["id"],
+        gm_authority=True,
     )
 
     assert result["ok"] is True
@@ -735,6 +741,47 @@ async def test_live_character_adopts_server_owned_professional_blueprint(
     assert instance.players["gm"]["character_name"] == "Replacement Hero"
     assert sheet["character_name"] == "Replacement Hero"
     assert sheet["hp"] == sheet["ruleset_character"]["resources"]["hp"]
+
+
+@pytest.mark.asyncio
+async def test_player_side_adoption_is_gm_only_once_the_seat_acted(
+    professional_context,
+) -> None:
+    """Adoption resets HP / resources / equipment: after acting it is a re-roll."""
+    api, instance, _character = professional_context
+    replacement = _professional_character(api._runtime)
+    replacement["ruleset_character"]["identity"]["name"] = "Refill Hero"
+    replacement["character_name"] = "Refill Hero"
+    saved = character_cards.save_character_card(
+        api._character_card_dependencies, replacement,
+    )["card"]
+    game_key = "web|character-lifecycle|web_bot"
+    instance.state = GameState.ACTIVE_ACTION  # a running game, as on the web
+    original = deepcopy(instance.players["gm"])
+
+    fresh_seat = await ruleset_characters.adopt_character_card(
+        api._ruleset_character_dependencies, game_key, "gm", saved["id"],
+        gm_authority=False,
+    )
+    assert fresh_seat["ok"] is True
+    assert instance.players["gm"]["character_name"] == "Refill Hero"
+
+    instance.players["gm"] = deepcopy(original)
+    seat_activity.mark_acted(instance, "gm")
+    before = deepcopy(instance.players["gm"])
+    rejected = await api.adopt_ruleset_character_card(
+        game_key, "gm", saved["id"], gm_authority=False,
+    )
+    assert rejected["ok"] is False
+    assert rejected["error_code"] == ADOPT_REQUIRES_GM
+    assert instance.players["gm"] == before
+
+    by_gm = await ruleset_characters.adopt_character_card(
+        api._ruleset_character_dependencies, game_key, "gm", saved["id"],
+        gm_authority=True,
+    )
+    assert by_gm["ok"] is True
+    assert instance.players["gm"]["character_name"] == "Refill Hero"
 
 
 def _http_app(api: _Api) -> web.Application:

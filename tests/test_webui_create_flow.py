@@ -11,12 +11,16 @@ import pytest
 from src.commands.game_handler import GameHandler
 from src.engine.game_instance import GameRegistry
 from src.engine.health import record_health_event
+from src.engine.modules import economy_state, room_access
+from src.engine.modules import room_access
 from src.llm.client import LLMResponse
 from src.lorebook.matcher import KeywordMatcher
 from src.lorebook.store import LorebookStore
 from src.webui.api import WebAPI, can_modify_character
 from src.webui.game_lifecycle_context import CreationTransaction
 from src.webui.session import SessionManager
+from src.engine.modules import ruleset_runtime
+from src.engine.modules import round_presentation
 
 
 class FakeLLMClient:
@@ -275,7 +279,7 @@ async def test_professional_character_is_rederived_bound_and_saved_without_field
     assert sheet["attributes"]["str"] == canonical["abilities"]["str"] != 99
     assert isinstance(sheet["equipment"], list)
     assert isinstance(canonical["equipment"], dict)
-    assert instance.ruleset_runtime["id"] == "core:dnd2024"
+    assert ruleset_runtime.binding(instance)["id"] == "core:dnd2024"
     cards = api.list_character_cards()["cards"]
     assert cards[-1]["ruleset_character"]["rule_binding"]["content_version"] == (
         "srd-5.2.1+r5"
@@ -333,7 +337,7 @@ async def test_professional_seed_restart_keeps_rule_and_prevalidates_before_muta
     assert restarted["ok"] is True
     instance = registry.get(api._parse_key(restarted["game_key"]))
     assert instance.rule_id == "dnd2024_srd"
-    assert instance.ruleset_runtime["id"] == "core:dnd2024"
+    assert ruleset_runtime.binding(instance)["id"] == "core:dnd2024"
     assert instance.get_character_sheet("seed_gm")["hp"] != 999
 
 
@@ -537,7 +541,7 @@ async def test_coc_hp_has_rule_suggestion_but_can_be_manually_edited(web_api):
     assert cs["hp"] == 9
     assert cs["max_hp"] == 9
 
-    result = await api.update_character(created["game_key"], uid, {"hp": 99, "max_hp": 99})
+    result = await api.update_character(created["game_key"], uid, {"hp": 99, "max_hp": 99}, gm_authority=True)
 
     assert result["ok"] is True
     cs = inst.get_character_sheet(uid)
@@ -609,7 +613,7 @@ async def test_opening_conditional_reward_queues_gm_proposal(web_api, monkeypatc
     instance = registry.get(api._parse_key(result["game_key"]))
     assert instance is not None
     pending = [
-        item for item in instance.economy["proposals"]
+        item for item in economy_state.state(instance)["proposals"]
         if item["status"] == "pending"
     ]
     assert len(pending) == 1
@@ -1254,7 +1258,7 @@ async def test_player_join_rejects_new_seat_when_game_is_full(web_api):
         players=[{"character_name": "艾琳", "attributes": {"str": 10}}],
     )
     inst = registry.get(api._parse_key(created["game_key"]))
-    inst.max_players = 1
+    room_access.replace_max_players(inst, 1)
 
     rejected = await api.create_player(created["game_key"], {"name": "洛恩"})
     restored = await api.create_player(created["game_key"], {
@@ -1307,7 +1311,7 @@ async def test_character_wizard_update_changes_display_name_and_sheet(web_api):
         "class": "游侠",
         "attributes": {"str": 12},
         "portrait": {"kind": "builtin", "id": "freeform_fantasy:3"},
-    })
+    }, gm_authority=True)
 
     inst = registry.get(api._parse_key(created["game_key"]))
     assert updated["ok"] is True
@@ -1386,7 +1390,7 @@ async def test_update_character_allows_values_outside_template_suggestion(web_ap
         "attributes": {"str": 999},
         "hp": 77,
         "max_hp": 88,
-    })
+    }, gm_authority=True)
     assert result["ok"] is True
     inst2 = registry.get(api._parse_key(created["game_key"]))
     sheet = inst2.players[uid]["character_sheet"]
@@ -1450,7 +1454,7 @@ async def test_game_detail_exposes_multiplayer_status(web_api):
     inst = registry.get(api._parse_key(created["game_key"]))
     first_uid = created["players"][0]["user_id"]
     await inst.add_action(first_uid, "我观察门口")
-    inst.last_token_budget_bump = {"kind": "narrative", "from": 2048, "to": 4096}
+    round_presentation.replace_last_token_budget_bump(inst, {"kind": "narrative", "from": 2048, "to": 4096})
 
     detail = api.game_detail(created["game_key"])
     status = api.multiplayer_status(created["game_key"])
@@ -1634,10 +1638,12 @@ async def test_switch_world_accepts_lorebook_only_world(web_api):
 
     assert result["ok"] is True
     assert result["world_id"] == "custom_book_only"
-    assert result["world_name"] == "只在世界书库里的世界"
+    assert result["world_display_name"] == "只在世界书库里的世界"
     inst = registry.get(api._parse_key(created["game_key"]))
     assert inst.world_id == "custom_book_only"
-    assert inst.world_name == "只在世界书库里的世界"
+    # world_name is the game title; switching the world book keeps it.
+    assert inst.world_name == "模板世界"
+    assert result["world_name"] == "模板世界"
 
 
 def test_can_modify_character_allows_owner():
@@ -1815,27 +1821,28 @@ async def test_create_game_room_password_tristate(web_api):
     assert r["ok"] is True
     assert r.get("generated_password"), "多人局未声明应生成随机密码"
     inst = registry.get(api._parse_key(r["game_key"]))
-    assert inst.room_password == r["generated_password"]
+    assert room_access.verify_room_password(inst, r["generated_password"])
+    assert r["generated_password"] not in json.dumps(inst.to_dict(), ensure_ascii=False)
 
     # 2) 显式空串 → 开放房，不回显
     r2 = await api.create_game("template_world", "开放房", players=list(players), solo=False, room_password="")
     assert r2["ok"] is True
     assert r2.get("generated_password") is None
     inst2 = registry.get(api._parse_key(r2["game_key"]))
-    assert inst2.room_password == ""
+    assert room_access.has_room_password(inst2) is False
 
     # 3) 单人局未声明 → 不生成（solo 自玩无需密码）
     r3 = await api.create_game("template_world", "单人局", players=list(players), solo=True, room_password=None)
     assert r3["ok"] is True
     assert r3.get("generated_password") is None
     inst3 = registry.get(api._parse_key(r3["game_key"]))
-    assert inst3.room_password == ""
+    assert room_access.has_room_password(inst3) is False
 
     # 4) 太短 → 拒绝
     keys_before_rejection = {instance.game_key for instance in registry.list_all()}
-    r4 = await api.create_game("template_world", "弱密码", players=list(players), solo=False, room_password="ab")
+    r4 = await api.create_game("template_world", "弱密码", players=list(players), solo=False, room_password="abcde")
     assert r4.get("ok") is False
-    assert "至少 4 位" in r4.get("error", "")
+    assert "至少 6 位" in r4.get("error", "")
     assert {instance.game_key for instance in registry.list_all()} == keys_before_rejection
 
 

@@ -112,6 +112,18 @@ class RulesetRuntime(Protocol):
 
 
 @runtime_checkable
+class VersionedStateRuntime(Protocol):
+    """Required when capabilities.versioned_state is true.
+
+    Return the character rule_binding shape: rule_id, runtime_id,
+    runtime_version, content_version, and state_schema_version. New games bind
+    this identity before any ruleset state is written.
+    """
+
+    def game_binding(self, rule: Any, locale: str) -> dict[str, Any]: ...
+
+
+@runtime_checkable
 class AuthoritativeIntentHooks(Protocol):
     """Runtime-owned request and projection hooks for authoritative intents."""
 
@@ -174,6 +186,19 @@ class GameDetailProjectionRuntime(Protocol):
     """Optional read-only fields contributed to the generic game detail view."""
 
     def game_detail_projection(self, instance: Any) -> dict[str, Any]: ...
+
+
+@runtime_checkable
+class IntentResultProjectionRuntime(Protocol):
+    """Optional viewer projection of an authoritative intent/automation payload.
+
+    Raw ``apply_event_batch`` results may carry GM-only state (for example full
+    stat blocks); the runtime decides what a non-GM viewer may receive.
+    """
+
+    def project_intent_result(
+        self, instance: Any, result: dict[str, Any], viewer_id: str, viewer_is_gm: bool,
+    ) -> dict[str, Any]: ...
 
 
 @runtime_checkable

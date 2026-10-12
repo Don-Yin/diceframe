@@ -11,6 +11,7 @@ import logging
 import time
 import uuid
 
+from src.engine import progression
 from src.engine.character_utils import get_resource
 from src.engine.game_instance import GameInstance
 from src.rules.rule_system import RuleSystem
@@ -53,7 +54,7 @@ def check_resource_triggers(instance: GameInstance, uid: str, rule: RuleSystem |
                 "id": uuid.uuid4().hex,
                 "text": message,
                 "created_at": time.time(),
-                "target_round": int(instance.round_number or 0) + 1,
+                "target_round": progression.current_round(instance) + 1,
             })
             messages.append(message)
             logger.info("资源触发器命中: %s %s %s", instance.game_key, uid, message)

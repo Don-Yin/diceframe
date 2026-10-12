@@ -24,6 +24,7 @@ import { ruleSceneUrl } from '@/composables/useBackgroundImages'
 import { resolveSceneImageUrl, revokeSceneImageUrl, sceneImageStyle, uploadSceneImage } from '@/api/sceneImages'
 import { mapBackgroundSelection, uploadMapBackground } from '@/api/mapBackgrounds'
 import { isLlmConfigReady } from '@/utils/modelConfiguration'
+import { roomPasswordProblem, roomPasswordProblemMessage } from '@/utils/roomPassword'
 import { moduleApi, type ModuleSummary } from '@/api/modules'
 import {
   cardControlAt,
@@ -546,6 +547,11 @@ async function create() {
   busy.value = true; error.value = ''
   try {
     requireApiConfiguration()
+    const passwordProblem = !seed.value.trim() && !openRoom.value ? roomPasswordProblem(roomPassword.value) : null
+    if (passwordProblem) {
+      const [key, params] = roomPasswordProblemMessage(passwordProblem)
+      throw new Error(t(key, params))
+    }
     const players = characters.value.map((c, i) => {
       const card = cloneCharacter(c)
       // 每张卡在「角色」步骤都有明确的控制方式，创建 payload 直接带上它；
@@ -564,7 +570,7 @@ async function create() {
     const selectedMapBackground = mapBackgroundFile.value
       ? await uploadMapBackground(mapBackgroundFile.value)
       : mapBackgroundSelection(mapBackgroundChoice.value)
-    const payload: Record<string, unknown> = { solo: solo.value, difficulty: difficulty.value, rule_id: activeRule.value, play_mode: showAdventurePackages.value ? playMode.value : 'free', adventure_id: showAdventurePackages.value && playMode.value === 'adventure' ? adventureId.value : '', adventure_source_kind: showAdventurePackages.value && playMode.value === 'adventure' && moduleId.value ? 'plugin' : '', adventure_source_id: showAdventurePackages.value && playMode.value === 'adventure' ? moduleId.value : '', description: description.value, room_password: openRoom.value ? '' : (roomPassword.value.trim() || null), players, language: gameLanguage.value, scene_image: selectedSceneImage, map_background: selectedMapBackground, narrative_perspective: narrativePerspective.value, gm_style_override: gmStyleFollowWorld.value ? null : { ...gmStyle.value }, advancement_mode: supportsAdvancementPolicy.value ? advancementMode.value : 'milestone', advancement_authority: supportsAdvancementPolicy.value ? advancementAuthority.value : 'ai_gm' }
+    const payload: Record<string, unknown> = { solo: solo.value, difficulty: difficulty.value, rule_id: activeRule.value, play_mode: showAdventurePackages.value ? playMode.value : 'free', adventure_id: showAdventurePackages.value && playMode.value === 'adventure' ? adventureId.value : '', adventure_source_kind: showAdventurePackages.value && playMode.value === 'adventure' && moduleId.value ? 'plugin' : '', adventure_source_id: showAdventurePackages.value && playMode.value === 'adventure' ? moduleId.value : '', description: description.value, room_password: openRoom.value ? '' : (roomPassword.value || null), players, language: gameLanguage.value, scene_image: selectedSceneImage, map_background: selectedMapBackground, narrative_perspective: narrativePerspective.value, gm_style_override: gmStyleFollowWorld.value ? null : { ...gmStyle.value }, advancement_mode: supportsAdvancementPolicy.value ? advancementMode.value : 'milestone', advancement_authority: supportsAdvancementPolicy.value ? advancementAuthority.value : 'ai_gm' }
     let worldId = ''
     if (mode.value === 'template') {
       worldId = world.value; payload.world_id = worldId
@@ -585,10 +591,13 @@ async function create() {
     else if (loreChoice.value === '__blank__') {
       payload.source_world_id = worldId; payload.world_id = worldId + '_blank_' + Date.now()
       payload.game_name = String(payload.game_name || '') + gameDefault(BLANK_LOREBOOK_SUFFIX_ZH, ' (Blank Lorebook)', BLANK_LOREBOOK_SUFFIX_DE); payload.create_lorebook = true; payload.blank_lorebook = true
+      payload.world_ref = { source_kind: 'world', source_id: String(payload.world_id), kind: 'world', id: String(payload.world_id), digest: '' }
     } else if (loreChoice.value.startsWith('copy:')) {
       const src = loreChoice.value.slice(5)
       payload.source_world_id = worldId; payload.world_id = worldId + '_copy_' + Date.now()
       payload.game_name = String(payload.game_name || '') + gameDefault(COPIED_LOREBOOK_SUFFIX_ZH, ' (Copied Lorebook)', COPIED_LOREBOOK_SUFFIX_DE); payload.create_lorebook = true; payload.lorebook_world_id = src
+      payload.world_ref = { source_kind: 'world', source_id: String(payload.world_id), kind: 'world', id: String(payload.world_id), digest: '' }
+      payload.book_bindings = [{ ref: { source_kind: 'world', source_id: src, kind: 'lorebook', id: `world:${src}`, digest: '' }, role: 'runtime', order: 110 }]
     }
     const r = await api<GameMutationResponse>('/games/create', { method: 'POST', body: JSON.stringify(payload) })
     if (!r.ok && r.error) throw new Error(r.error)

@@ -37,8 +37,8 @@ import {
 
 const props = defineProps<{
   gameKey: string
-  /** 单个玩家的接管链接带 user；整局邀请不带 */
-  user?: string
+  /** 单个席位的接管链接带该席位的凭证（GM 刚签发）；整局邀请不带 */
+  seatToken?: string
   title: string
   hint?: string
 }>()
@@ -97,7 +97,7 @@ const link = computed(() => {
   return buildJoinLink(
     props.gameKey,
     selectedBase.value || undefined,
-    props.user,
+    props.seatToken,
     server || undefined,
   )
 })

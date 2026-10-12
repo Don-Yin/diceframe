@@ -30,6 +30,7 @@ from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.rulesets.legacy_adapter import LegacyRulesetAdapter
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.webui.services import ruleset_gameplay
+from src.engine.modules import legacy_combat, narrative_notes, ruleset_runtime, table_settings
 
 _RULE = RuleSystem({
     "rule_id": "test_dnd2024",
@@ -113,7 +114,7 @@ def _runtime_instance(
         package = runtime._adventure_loader.resolve("core:lanterns_of_greymoor", "en")
         assert instance.bind_adventure(package.binding("greymoor"))
     if walk_to_combat:
-        instance.solo_mode = True
+        table_settings.replace_solo_mode(instance, True)
         # quick_start 已直接进入教学第一步；只需连续推进到绑定遭遇的节点。
         _submit(runtime, instance, "session_zero.quick_start")
         for choice in ("inspect_cold_ash", "reassure_mira", "follow_small_tracks"):
@@ -125,7 +126,7 @@ def _submit(
     runtime: Dnd2024Runtime, instance: GameInstance, intent_type: str,
     submitted_by: str = "gm", **fields,
 ) -> dict:
-    version = int(instance.ruleset_state.get("version", 0) or 0)
+    version = int(ruleset_runtime.state(instance).get("version", 0) or 0)
     intent = {
         "intent_id": f"intent-{intent_type}-{version}",
         "type": intent_type,
@@ -162,10 +163,10 @@ def _dependencies(
 
 def _state_fingerprint(instance: GameInstance) -> tuple:
     return (
-        copy.deepcopy(instance.ruleset_state),
-        copy.deepcopy(instance.event_ledger),
-        instance.combat_active,
-        instance.combat_state,
+        copy.deepcopy(ruleset_runtime.state(instance)),
+        copy.deepcopy(ruleset_runtime.event_ledger(instance)),
+        legacy_combat.combat_active(instance),
+        legacy_combat.combat_state(instance),
         instance.round_number,
     )
 
@@ -224,7 +225,8 @@ def test_balance_rejects_legal_but_deadly_attack_values() -> None:
 @pytest.mark.asyncio
 async def test_plan_requires_tool_call_and_validates_output() -> None:
     instance = SimpleNamespace(
-        players={"p1": {}}, scene="矿井深处", language="en", log=[],
+        players={"p1": {}}, language="en", log=[],
+        modules={"narrative_notes": {**narrative_notes.fresh(), "scene": "矿井深处"}},
         record_llm_usage=lambda tokens: None,
     )
     proposal = await plan_temporary_encounter(
@@ -280,7 +282,7 @@ async def test_generation_context_reads_dnd2024_canonical_party_fields() -> None
 @pytest.mark.asyncio
 async def test_gm_can_plan_and_generation_has_no_side_effects() -> None:
     runtime, instance = _runtime_instance(adventure=True)
-    instance.solo_mode = True
+    table_settings.replace_solo_mode(instance, True)
     _submit(runtime, instance, "session_zero.quick_start")
     apply_ruleset_combat_signal(instance, {"combat_command": "start"}, runtime)
     registry = _SaveRegistry()
@@ -342,7 +344,7 @@ async def test_existing_legal_preset_rejects_without_calling_llm() -> None:
     runtime, instance = _runtime_instance()
     apply_ruleset_combat_signal(instance, {"combat_command": "start"}, runtime)
     preset_id = runtime._combat_engine(instance).encounter_presets()[0]["id"]
-    instance.ruleset_state["encounter_request"]["encounter_preset_id"] = preset_id
+    ruleset_runtime.state(instance)["encounter_request"]["encounter_preset_id"] = preset_id
     registry = _SaveRegistry()
     registry.items[tuple(instance.game_key)] = instance
     llm = _FakeLLM(arguments=copy.deepcopy(_WOLF_RAW))
@@ -360,7 +362,7 @@ async def test_existing_legal_preset_rejects_without_calling_llm() -> None:
 @pytest.mark.asyncio
 async def test_story_encounter_cannot_be_overridden() -> None:
     runtime, instance = _runtime_instance(adventure=True, walk_to_combat=True)
-    instance.ruleset_state["encounter_request"] = {
+    ruleset_runtime.state(instance)["encounter_request"] = {
         "status": "pending", "encounter_preset_id": "first_skirmish",
     }
     registry = _SaveRegistry()
@@ -407,7 +409,7 @@ async def test_illegal_ai_output_and_llm_failure_are_side_effect_free() -> None:
     assert unconfigured["ok"] is False and unconfigured["code"] == "LLM_NOT_CONFIGURED"
 
     assert _state_fingerprint(instance) == fingerprint_before
-    assert instance.ruleset_state.get("combat", {}).get("status") != "active"
+    assert ruleset_runtime.state(instance).get("combat", {}).get("status") != "active"
 
 
 # ---- GM 确认：现有 combat.start（mode=sandbox） ----
@@ -432,7 +434,7 @@ def test_tampered_preview_enemies_are_rejected_by_authority() -> None:
     apply_ruleset_combat_signal(instance, {"combat_command": "start"}, runtime)
     enemies = normalize_temporary_encounter(copy.deepcopy(_WOLF_RAW))["enemies"]
     enemies[0]["hp"] = 999999999
-    version = int(instance.ruleset_state.get("version", 0) or 0)
+    version = int(ruleset_runtime.state(instance).get("version", 0) or 0)
 
     resolved = runtime.resolve_intent(instance, {
         "intent_id": "tampered", "type": "combat.start",
@@ -441,7 +443,7 @@ def test_tampered_preview_enemies_are_rejected_by_authority() -> None:
     }, random.Random(7))
 
     assert resolved["ok"] is False
-    assert instance.ruleset_state.get("combat", {}).get("status") != "active"
+    assert ruleset_runtime.state(instance).get("combat", {}).get("status") != "active"
 
 
 def test_adventure_binding_survives_temporary_combat() -> None:
@@ -479,7 +481,7 @@ def _resolve_temporary_start(
     *,
     submitted_by: str = "gm",
 ) -> dict:
-    version = int(instance.ruleset_state.get("version", 0) or 0)
+    version = int(ruleset_runtime.state(instance).get("version", 0) or 0)
     return runtime.resolve_intent(instance, {
         "intent_id": f"temporary-edit-{submitted_by}-{version}",
         "type": "combat.start", "expected_version": version,
@@ -523,7 +525,7 @@ def test_edited_payload_over_party_limit_is_rejected() -> None:
 
     assert resolved["ok"] is False
     assert "普通难度上限" in str(resolved.get("error") or "")
-    assert instance.ruleset_state.get("combat", {}).get("status") != "active"
+    assert ruleset_runtime.state(instance).get("combat", {}).get("status") != "active"
 
 
 def test_edited_payload_exceeding_temporary_bounds_is_rejected() -> None:
@@ -538,7 +540,7 @@ def test_edited_payload_exceeding_temporary_bounds_is_rejected() -> None:
 
     assert resolved["ok"] is False
     assert "临时遭遇允许范围" in str(resolved.get("error") or "")
-    assert instance.ruleset_state.get("combat", {}).get("status") != "active"
+    assert ruleset_runtime.state(instance).get("combat", {}).get("status") != "active"
 
 
 def test_edited_payload_with_illegal_damage_formula_is_rejected() -> None:
@@ -551,7 +553,7 @@ def test_edited_payload_with_illegal_damage_formula_is_rejected() -> None:
 
     assert resolved["ok"] is False
     assert "attack" in str(resolved.get("error") or "")
-    assert instance.ruleset_state.get("combat", {}).get("status") != "active"
+    assert ruleset_runtime.state(instance).get("combat", {}).get("status") != "active"
 
 
 def test_non_gm_cannot_confirm_edited_temporary_encounter() -> None:
@@ -564,4 +566,4 @@ def test_non_gm_cannot_confirm_edited_temporary_encounter() -> None:
     )
 
     assert resolved["ok"] is False
-    assert instance.ruleset_state.get("combat", {}).get("status") != "active"
+    assert ruleset_runtime.state(instance).get("combat", {}).get("status") != "active"

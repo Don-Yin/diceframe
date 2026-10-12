@@ -38,7 +38,9 @@ from src.webui.access_password import (
 )
 from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.routes.pairing import PAIRING_SERVICE_KEY
+from src.webui.routes.auth import ACCESS_PASSWORD_CONFIGURED_KEY
 from src.webui.runtime_config import ConfigStore
+from src.webui.server_identity import SERVER_IDENTITY_UNAVAILABLE, server_instance_id
 
 
 @dataclass(frozen=True)
@@ -65,8 +67,22 @@ class ConfigController:
         self.dependencies = dependencies
         self.logger = logger or logging.getLogger("trpg")
 
-    async def get(self, _request: web.Request) -> web.Response:
-        return web.json_response(self.dependencies.public_config())
+    async def get(self, request: web.Request) -> web.Response:
+        public = self.dependencies.public_config()
+        # The instance id keys a client's content-sync mapping. Only the owner
+        # syncs with the library, so anonymous probes do not get a stable
+        # identifier for the server.
+        if request.get("owner_authenticated", False) or (
+            request.get(ACCESS_PASSWORD_CONFIGURED_KEY) is False
+        ):
+            instance_id = server_instance_id(request.app)
+            if instance_id:
+                public["server_instance_id"] = instance_id
+            else:
+                # Explicit, so a sync client can tell "unavailable" from an
+                # older server that never sent the field.
+                public["server_identity_error"] = SERVER_IDENTITY_UNAVAILABLE
+        return web.json_response(public)
 
     async def post(self, request: web.Request) -> web.Response:
         denied = _require_confirmed_request(request)

@@ -25,6 +25,7 @@ import pytest
 from src.engine.game_instance import GameInstance, GameState
 from src.rules.rule_system import RuleSystem
 from src.webui.services import combat_extension as svc
+from src.engine.modules import combat_extension_state
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixtures" / "rules" / "atb_cultivation.json"
@@ -164,7 +165,7 @@ def test_spell_damage_comes_from_the_caster_attribute_formula(
     assert damage["amount"] == 12 and damage["applied"] == 12
     assert damage["damage_type"] == "fire"
     assert instance.get_character_sheet("p1")["ling_li"] == 30
-    assert instance.combat_extension["pools"]["player:p1"]["ling_li"]["current"] == 30
+    assert combat_extension_state.current(instance)["pools"]["player:p1"]["ling_li"]["current"] == 30
     assert instance.npcs["old_monk"]["hp"] == 18
 
 
@@ -195,8 +196,8 @@ def test_action_consumes_the_action_gauge_turn(rule: RuleSystem) -> None:
 
     first = cast(instance, rule, "p1", "spell:fireball", target_ids=["npc:old_monk"])
     assert first["ok"] is True
-    assert instance.combat_extension["scheduler"]["gauges"]["player:p1"] == 0
-    assert instance.combat_extension["scheduler"]["ready"] == []
+    assert combat_extension_state.current(instance)["scheduler"]["gauges"]["player:p1"] == 0
+    assert combat_extension_state.current(instance)["scheduler"]["ready"] == []
 
     again = cast(instance, rule, "p1", "spell:fireball", target_ids=["npc:old_monk"])
 
@@ -212,7 +213,7 @@ def test_speed_technique_lands_in_the_action_gauge(rule: RuleSystem) -> None:
 
     assert buffed["ok"] is True
     assert instance.get_character_sheet("p1")["ling_li"] == 35
-    buffs = instance.combat_extension["buffs"]
+    buffs = combat_extension_state.current(instance)["buffs"]
     assert buffs == [{"entity_id": "player:p1", "stat": "action_speed",
                       "delta": 40, "remaining": 2}]
 
@@ -221,7 +222,7 @@ def test_speed_technique_lands_in_the_action_gauge(rule: RuleSystem) -> None:
 
     assert ticked["gauges"]["player:p1"] == 140
     assert "player:p1" in ticked["ready"]
-    assert instance.combat_extension["buffs"][0]["remaining"] == 1
+    assert combat_extension_state.current(instance)["buffs"][0]["remaining"] == 1
 
 
 def test_combat_state_survives_save_reload_round_trip(rule: RuleSystem) -> None:
@@ -232,7 +233,7 @@ def test_combat_state_survives_save_reload_round_trip(rule: RuleSystem) -> None:
 
     recovered = GameInstance.from_dict(instance.to_dict())
 
-    assert recovered.combat_extension == instance.combat_extension
+    assert combat_extension_state.current(recovered) == combat_extension_state.current(instance)
     assert recovered.get_character_sheet("p1")["ling_li"] == 30
     assert recovered.npcs["old_monk"]["hp"] == 18
     projection = svc.combat_extension_projection(
@@ -266,4 +267,4 @@ def test_rule_without_combat_declaration_keeps_the_legacy_turn_flow() -> None:
         actor_uid="p1", viewer_is_gm=False,
     )
     assert result["code"] == "COMBAT_EXTENSION_NOT_CONFIGURED"
-    assert "combat_extension" not in instance.to_dict()["modules"] or not instance.combat_extension
+    assert "combat_extension" not in instance.to_dict()["modules"] or not combat_extension_state.current(instance)

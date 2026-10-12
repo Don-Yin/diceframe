@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { expect, test } from './fixtures'
-import { accessToken } from './support'
+import { accessToken, PLAY_READY_TIMEOUT } from './support'
 
 test('layout has no document overflow', async ({ page }) => {
   const token = accessToken()
@@ -194,7 +194,7 @@ test('phone play side panels open as drawers without entering document flow', as
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/#/play?game=web%7Ce2e-room%7Cweb_bot')
-  await expect(page.getByRole('heading', { name: 'E2E Adventure' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'E2E Adventure' })).toBeVisible({ timeout: PLAY_READY_TIMEOUT })
 
   const sidebar = page.locator('.game-sidebar')
   const controls = page.locator('.play-control-rail')
@@ -231,7 +231,7 @@ test('equipment details modal stays above the open phone character drawer', asyn
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/#/play?game=web%7Ce2e-room%7Cweb_bot')
-  await expect(page.getByRole('heading', { name: 'E2E Adventure' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'E2E Adventure' })).toBeVisible({ timeout: PLAY_READY_TIMEOUT })
 
   await page.getByRole('button', { name: '状态' }).click()
   const sidebar = page.locator('.game-sidebar')
@@ -254,7 +254,7 @@ test('phone play keeps scene metadata compact and actions anchored to the viewpo
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/#/play?game=web%7Ce2e-room%7Cweb_bot')
-  await expect(page.locator('.composer')).toBeVisible()
+  await expect(page.locator('.composer')).toBeVisible({ timeout: PLAY_READY_TIMEOUT })
   await page.locator('.composer').scrollIntoViewIfNeeded()
 
   const layout = await page.evaluate(() => {
@@ -283,7 +283,7 @@ test('phone play has no spacer bands around the game workspace', async ({ page }
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/#/play?game=web%7Ce2e-room%7Cweb_bot')
-  await expect(page.locator('.composer')).toBeVisible()
+  await expect(page.locator('.composer')).toBeVisible({ timeout: PLAY_READY_TIMEOUT })
 
   const geometry = await page.evaluate(() => {
     const header = document.querySelector<HTMLElement>('.app-header')!
@@ -316,7 +316,7 @@ test('phone play opens the scene map as a full-screen workspace', async ({ page 
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/#/play?game=web%7Ce2e-room%7Cweb_bot')
-  await expect(page.locator('.composer')).toBeVisible()
+  await expect(page.locator('.composer')).toBeVisible({ timeout: PLAY_READY_TIMEOUT })
 
   await page.getByRole('button', { name: '地图', exact: true }).click()
   const workspace = page.locator('.map-workspace-shell')

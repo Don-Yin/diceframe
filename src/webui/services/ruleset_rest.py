@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from datetime import datetime, timezone
 
-from src.engine.modules import ruleset_runtime
+from src.engine.modules import legacy_combat, ruleset_runtime
 from src.webui.ruleset_draft_validation import validate_draft_shape
 from src.webui.ruleset_rest_projection import public_rest_session, saved_rest_session
 
@@ -69,10 +69,10 @@ def _failure(code: str, message: str, **extra: Any) -> dict[str, Any]:
 
 def _set_rest_session(instance: Any, session: dict[str, Any]) -> None:
     ruleset_runtime.require_writable(instance)
-    state = getattr(instance, "ruleset_state", None)
+    state = ruleset_runtime.state(instance)
     if not isinstance(state, dict):
         state = {}
-        instance.ruleset_state = state
+        ruleset_runtime.replace_state(instance, state)
     state["rest_session"] = session
 
 
@@ -259,6 +259,10 @@ async def _resolve_live_authority(
         "revision": revision + 1,
     })
     updated["ruleset_operation_log"] = operation_log[-32:]
+    try:
+        ruleset_runtime.require_binding(instance, runtime.runtime_id)
+    except ruleset_runtime.RulesetBindingError as exc:
+        return _failure(exc.code, str(exc))
     before_player = deepcopy(instance.players[user_id])
     instance.set_character_sheet(user_id, updated)
     try:
@@ -322,7 +326,7 @@ async def _resolve_live_party_authority(
     method = getattr(runtime, "complete_rest", None)
     if not callable(method):
         return _failure("RULESET_REST_UNAVAILABLE", "该规则尚未提供专业休息结算")
-    if instance.combat_active or instance.combat_state == "active":
+    if legacy_combat.combat_active(instance) or legacy_combat.combat_state(instance) == "active":
         return _failure("REST_NOT_AVAILABLE", "战斗进行中不能休息；请先结束战斗")
 
     async with instance._lock:
@@ -363,6 +367,10 @@ async def _resolve_live_party_authority(
         if user_id not in required:
             return _failure("REST_NOT_AVAILABLE", "当前角色不在本次队伍休息范围内")
         ruleset_runtime.require_writable(instance)
+        try:
+            ruleset_runtime.require_binding(instance, runtime.runtime_id)
+        except ruleset_runtime.RulesetBindingError as exc:
+            return _failure(exc.code, str(exc))
         session["required_uids"] = sorted(required)
         participants = session.setdefault("participants", {})
         if not isinstance(participants, dict):

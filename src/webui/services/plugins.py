@@ -11,6 +11,9 @@ from typing import Any, Callable
 
 from src.content.contracts import canonical_id
 from src.content.rule_locale import materialize_rule
+from src.content_modules.adapters import LegacyContentPackAdapter
+from src.content_modules.refs import CONTENT_KIND_REGISTRY, ContentRefError
+from src.content_modules.receipts import ImportReceiptStore
 from src.engine.language import normalize_language
 from src.plugin_host.content import safe_id_part
 from src.rules.loader import RuleBundleLoader
@@ -37,6 +40,9 @@ class PluginContentStoreDependencies:
     save_character_card: Callable[[dict[str, Any]], dict[str, Any]]
     delete_character_card: Callable[[str], dict[str, Any]]
     save_entry: Callable[[dict[str, Any]], dict[str, Any]]
+    # Canonical Book-scoped writer.  ``None`` is an explicit compatibility
+    # boundary for integrations that still expose only the world adapter.
+    save_book_entry: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +84,64 @@ class PluginExportDependencies:
     rules_dir: Path
     list_character_cards: Callable[[], dict[str, Any]]
     media: PluginExportMediaDependencies
+
+
+#: Receipts of plugin-delivered content are keyed under the plugin source kind.
+PLUGIN_RECEIPT_SOURCE_KIND = "plugin"
+
+
+def _import_receipts(dependencies: PluginContentDependencies) -> ImportReceiptStore | None:
+    """Resolve the host-scoped receipt store without creating another authority."""
+
+    root = getattr(dependencies.plugin_host, "data_dir", None)
+    return ImportReceiptStore(root) if root else None
+
+
+# Bookkeeping columns that change without anyone editing the entry content.
+_ENTRY_FINGERPRINT_IGNORED = frozenset({
+    "id", "world_id", "book_id", "source_plugin", "created_at", "updated_at",
+})
+
+
+def _entry_fingerprint(entry: dict[str, Any] | None) -> str:
+    """Digest of an entry's user-editable content, as the canonical store returns it."""
+    if not entry:
+        return ""
+    content = {k: v for k, v in entry.items() if k not in _ENTRY_FINGERPRINT_IGNORED}
+    text = json.dumps(content, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _record_import_receipt(
+    dependencies: PluginContentDependencies,
+    plugin_id: str,
+    object_type: str,
+    object_id: str,
+    *,
+    updated: bool = False,
+) -> None:
+    receipts = _import_receipts(dependencies)
+    if receipts is None or not str(object_id or ""):
+        return
+    fingerprint = ""
+    lorebook = dependencies.store.lorebook
+    if object_type == "lorebook_entry" and lorebook is not None:
+        fingerprint = _entry_fingerprint(lorebook.get_entry(str(object_id)))
+    runtime = getattr(dependencies.plugin_host, "plugins", {}).get(str(plugin_id or ""))
+    manifest = getattr(runtime, "manifest", {}) if runtime is not None else {}
+    try:
+        receipts.record(
+            str(plugin_id),
+            source_kind=PLUGIN_RECEIPT_SOURCE_KIND,
+            source_version=str(manifest.get("version") or ""),
+            source_digest=str(manifest.get("source_digest") or ""),
+            object_type=object_type,
+            object_id=str(object_id),
+            updated=updated,
+            fingerprint=fingerprint,
+        )
+    except OSError:
+        logger.warning("记录插件导入 receipt 失败: %s", plugin_id, exc_info=True)
 
 
 def list_plugins(dependencies: PluginHostDependencies) -> dict[str, Any]:
@@ -151,12 +215,50 @@ def cleanup_plugin_lorebook(
     保留用户自建内容。插件创建的世界：无对局在用且删完插件条目后世界已空才删，
     否则（仍有用户内容）保留。
     """
-    result: dict[str, Any] = {"ok": True, "removed": 0, "cards_removed": 0, "worlds_removed": 0, "worlds_kept": []}
+    result: dict[str, Any] = {
+        "ok": True, "removed": 0, "cards_removed": 0, "worlds_removed": 0, "worlds_kept": [],
+        "entries_kept": [],
+    }
+    receipts: ImportReceiptStore | None = None
+    receipt = None
     lorebook = dependencies.store.lorebook
     if dependencies.plugin_host and lorebook:
-        # 1. 先记下插件创建的世界（删条目前），再删该插件来源的全部条目
+        receipts = _import_receipts(dependencies)
+        receipt = (
+            receipts.load(plugin_id, source_kind=PLUGIN_RECEIPT_SOURCE_KIND)
+            if receipts is not None else None
+        )
+        detached = {
+            (str(item.get("type") or ""), str(item.get("id") or ""))
+            for item in (receipt.user_detached_objects if receipt else [])
+        }
+        # 1. 先记下插件创建的世界（删条目前）。有 receipt 时只删除 receipt
+        # 明确拥有且未 detach 的对象；没有 receipt 的旧包继续走兼容清理。
         plugin_worlds = [str(w.get("id") or w.get("world_id") or "") for w in lorebook.list_plugin_worlds(plugin_id)]
-        result["removed"] = lorebook.delete_entries_by_plugin(plugin_id)
+        if receipt is None:
+            result["removed"] = lorebook.delete_entries_by_plugin(plugin_id)
+        else:
+            entry_ids = {
+                str(item.get("id") or "")
+                for item in receipt.created_objects
+                if str(item.get("type") or "") == "lorebook_entry"
+                and ("lorebook_entry", str(item.get("id") or "")) not in detached
+            }
+            for entry_id in sorted(entry_ids):
+                entry = lorebook.get_entry(entry_id)
+                if entry is None or str(entry.get("source_plugin") or "") != str(plugin_id):
+                    continue
+                # A user edit after import detaches the entry from the package:
+                # it now holds user content, so uninstall keeps it.
+                imported = receipt.fingerprint("lorebook_entry", entry_id)
+                if imported and imported != _entry_fingerprint(entry):
+                    receipt.detach("lorebook_entry", entry_id)
+                    result["entries_kept"].append(entry_id)
+                    continue
+                # LorebookStore.delete_entry() returns None; count what is really gone.
+                lorebook.delete_entry(entry_id)
+                if lorebook.get_entry(entry_id) is None:
+                    result["removed"] += 1
         # 2. 插件创建的世界：无对局引用且删完条目后已空才删
         for wid in plugin_worlds:
             if not wid:
@@ -171,12 +273,22 @@ def cleanup_plugin_lorebook(
     try:
         listed = dependencies.store.list_character_cards()
         cards = list(listed.get("cards", [])) if isinstance(listed, dict) else []
+        receipt_card_ids = {
+            str(item.get("id") or "")
+            for item in (receipt.created_objects if receipt else [])
+            if str(item.get("type") or "") == "character_card"
+            and ("character_card", str(item.get("id") or "")) not in detached
+        }
         for card in cards:
-            if str(card.get("source_plugin") or "") == plugin_id:
+            if str(card.get("source_plugin") or "") == plugin_id and (
+                receipt is None or str(card.get("id") or "") in receipt_card_ids
+            ):
                 dependencies.store.delete_character_card(str(card["id"]))
                 result["cards_removed"] += 1
     except Exception:
         logger.warning("插件卡库清理失败，已跳过: %s", plugin_id, exc_info=True)
+    if receipts is not None and receipt is not None:
+        receipts.discard(plugin_id, source_kind=PLUGIN_RECEIPT_SOURCE_KIND)
     return result
 
 def _autoimport_plugin_content(
@@ -203,12 +315,22 @@ def _autoimport_plugin_content(
                 continue
             try:
                 resource = _materialize_content_portrait(dependencies.portraits, resource)
-                if kind == "character_template":
-                    dependencies.store.save_character_card(_content_to_character_card(resource))
+                import_target = CONTENT_KIND_REGISTRY.spec(kind).import_target
+                if import_target == "character_card":
+                    card = _content_to_character_card(resource)
+                    result = dependencies.store.save_character_card(card)
+                    if result.get("ok"):
+                        _record_import_receipt(
+                            dependencies, plugin_id, "character_card", str(card.get("id") or ""),
+                        )
                 elif target_world and dependencies.store.lorebook and dependencies.store.lorebook.get_world(target_world):
                     entry = _content_to_lore_entry(resource, kind, target_world)
                     if not dependencies.store.lorebook.get_entry(entry["id"]):
-                        dependencies.store.save_entry(entry)
+                        result = dependencies.store.save_entry(entry)
+                        if result.get("ok"):
+                            _record_import_receipt(
+                                dependencies, plugin_id, "lorebook_entry", entry["id"],
+                            )
             except Exception:
                 logger.warning("自动灌注插件 %s 内容失败（%s）", plugin_id, kind, exc_info=True)
 
@@ -246,8 +368,12 @@ def _maybe_autoimport_after_install(
     if not _legacy_autoimport_allowed(host, plugin_id):
         return
     try:
-        sync_plugin_lorebooks(dependencies.content)
-        _autoimport_plugin_content(dependencies.content, plugin_id)
+        LegacyContentPackAdapter(
+            sync_lorebooks=lambda: sync_plugin_lorebooks(dependencies.content),
+            import_content=lambda value: _autoimport_plugin_content(
+                dependencies.content, value,
+            ),
+        ).materialize(plugin_id)
     except Exception:
         logger.warning("安装后自动灌入插件内容失败，已跳过: %s", plugin_id, exc_info=True)
 
@@ -263,8 +389,12 @@ async def update_plugin_config(
     # update_config 失败会抛异常，能走到这行即成功；public_detail 不含 ok，故不再判断 result.get("ok")。
     # 启用内容包/主题时立即同步世界书 + 自动灌注全部内容资源，避免用户还得手动一键导入。
     if changes.get("enabled") is True and _legacy_autoimport_allowed(host, plugin_id):
-        sync_plugin_lorebooks(dependencies.content)
-        _autoimport_plugin_content(dependencies.content, plugin_id)
+        LegacyContentPackAdapter(
+            sync_lorebooks=lambda: sync_plugin_lorebooks(dependencies.content),
+            import_content=lambda value: _autoimport_plugin_content(
+                dependencies.content, value,
+            ),
+        ).materialize(plugin_id)
     return {"ok": True, **result}
 
 async def control_plugin(
@@ -280,7 +410,12 @@ async def control_plugin(
     if not method: return {"ok": False, "error": "插件操作无效"}
     await method(plugin_id, **start_kwargs)
     if action in ("start", "restart") and _legacy_autoimport_allowed(host, plugin_id):
-        sync_plugin_lorebooks(dependencies.content)
+        LegacyContentPackAdapter(
+            sync_lorebooks=lambda: sync_plugin_lorebooks(dependencies.content),
+            import_content=lambda value: _autoimport_plugin_content(
+                dependencies.content, value,
+            ),
+        ).sync()
     return {"ok": True, **host.public_detail(plugin_id)}
 
 async def install_plugin(
@@ -508,6 +643,8 @@ def import_plugin_content(
     plugin_id: str = "",
     target_world_id: str = "",
     overwrite: bool = False,
+    *,
+    target_book_id: str = "",
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
@@ -516,31 +653,74 @@ def import_plugin_content(
     resource_id = (resource_id or "").strip()
     plugin_id = (plugin_id or "").strip()
     target_world_id = (target_world_id or "").strip()
+    target_book_id = (target_book_id or "").strip()
     resource = host.get_content_resource(kind, resource_id, plugin_id=plugin_id)
     if not resource:
         return {"ok": False, "error": "插件内容不存在或未启用"}
+    try:
+        import_target = CONTENT_KIND_REGISTRY.spec(kind).import_target
+    except ContentRefError:
+        return {
+            "ok": False,
+            "error": "该内容类型不支持导入",
+            "error_code": "content_kind_not_importable",
+        }
     resource = _materialize_content_portrait(dependencies.portraits, resource)
-    if kind == "character_template":
+    if import_target == "character_card":
         card = _content_to_character_card(resource)
         result = dependencies.store.save_character_card(card)
         if result.get("ok"):
             result["imported_as"] = "character_card"
             result["source_plugin_id"] = resource.get("plugin_id", "")
+            _record_import_receipt(
+                dependencies,
+                str(resource.get("plugin_id") or plugin_id),
+                "character_card",
+                str(card.get("id") or ""),
+            )
         return result
 
-    if not target_world_id:
-        return {"ok": False, "error": "请选择要导入到的世界书"}
+    if import_target != "lorebook_entry":
+        return {
+            "ok": False,
+            "error": "该内容类型仅支持目录引用，不能复制到世界书",
+            "error_code": "content_kind_catalog_only",
+        }
+
     lorebook = dependencies.store.lorebook
+    if target_book_id:
+        if not lorebook or not lorebook.get_lorebook(target_book_id):
+            return {"ok": False, "error": "目标世界书不存在", "error_code": "book_not_found"}
+        world_projection = getattr(lorebook, "bound_world_projection_for_book", None)
+        target_world_id = (
+            str(world_projection(target_book_id) or "")
+            if callable(world_projection) else ""
+        )
+    elif not target_world_id:
+        return {"ok": False, "error": "请选择要导入到的世界书"}
     if not lorebook or not lorebook.get_world(target_world_id):
-        return {"ok": False, "error": "目标世界书不存在"}
-    entry = _content_to_lore_entry(resource, kind, target_world_id)
-    if lorebook.get_entry(entry["id"]) and not overwrite:
+        # A standalone canonical Book intentionally has no world projection.
+        if not target_book_id:
+            return {"ok": False, "error": "目标世界书不存在"}
+    entry = _content_to_lore_entry(
+        resource, kind, target_world_id, book_id=target_book_id,
+    )
+    if lorebook is not None and lorebook.get_entry(entry["id"]) and not overwrite:
         entry["id"] = f"{entry['id']}_{int(time.time() * 1000)}"
-    result = dependencies.store.save_entry(entry)
+    result = (
+        _save_plugin_book_entry(dependencies, target_book_id, entry)
+        if target_book_id else dependencies.store.save_entry(entry)
+    )
     if result.get("ok"):
         result["imported_as"] = "lorebook_entry"
         result["entry"] = entry
         result["source_plugin_id"] = resource.get("plugin_id", "")
+        _record_import_receipt(
+            dependencies,
+            str(resource.get("plugin_id") or plugin_id),
+            "lorebook_entry",
+            entry["id"],
+        )
     return result
 
 
@@ -548,6 +728,8 @@ def import_all_plugin_content(
     dependencies: PluginContentDependencies,
     plugin_id: str,
     target_world_id: str = "",
+    *,
+    target_book_id: str = "",
 ) -> dict[str, Any]:
     """一键导入插件全部内容：角色卡→卡库，NPC/道具/魔法/职业→指定世界书。"""
     host = dependencies.plugin_host
@@ -555,6 +737,16 @@ def import_all_plugin_content(
         return {"ok": False, "error": "插件宿主未启用"}
     plugin_id = (plugin_id or "").strip()
     target_world_id = (target_world_id or "").strip()
+    target_book_id = (target_book_id or "").strip()
+    lorebook = dependencies.store.lorebook
+    if target_book_id:
+        if not lorebook or not lorebook.get_lorebook(target_book_id):
+            return {"ok": False, "error": "目标世界书不存在", "error_code": "book_not_found"}
+        world_projection = getattr(lorebook, "bound_world_projection_for_book", None)
+        target_world_id = (
+            str(world_projection(target_book_id) or "")
+            if callable(world_projection) else ""
+        )
     resources = host.list_content_resources()
     kinds = ("character_template", "npc", "item", "spell", "class")
     imported: list[dict[str, Any]] = []
@@ -566,31 +758,61 @@ def import_all_plugin_content(
                 continue
             try:
                 resource = _materialize_content_portrait(dependencies.portraits, resource)
-                if kind == "character_template":
+                import_target = CONTENT_KIND_REGISTRY.spec(kind).import_target
+                if import_target == "character_card":
                     card = _content_to_character_card(resource)
                     result = dependencies.store.save_character_card(card)
                     if result.get("ok"):
                         imported.append({"kind": kind, "name": _content_name(resource), "as": "character_card"})
+                        _record_import_receipt(
+                            dependencies, plugin_id, "character_card", str(card.get("id") or ""),
+                        )
                     else:
                         errors.append({"kind": kind, "name": _content_name(resource), "error": result.get("error", "")})
-                else:
-                    if not target_world_id:
+                elif import_target == "lorebook_entry":
+                    if not target_book_id and not target_world_id:
                         skipped.append({"kind": kind, "name": _content_name(resource), "reason": "未选择世界书"})
                         continue
                     lorebook = dependencies.store.lorebook
-                    if not lorebook or not lorebook.get_world(target_world_id):
+                    if not target_book_id and (not lorebook or not lorebook.get_world(target_world_id)):
                         return {"ok": False, "error": "目标世界书不存在"}
-                    entry = _content_to_lore_entry(resource, kind, target_world_id)
-                    if lorebook.get_entry(entry["id"]):
+                    if lorebook is None:
+                        return {"ok": False, "error": "目标世界书不存在"}
+                    entry = _content_to_lore_entry(
+                        resource, kind, target_world_id, book_id=target_book_id,
+                    )
+                    existed = bool(lorebook and lorebook.get_entry(entry["id"]))
+                    if existed:
                         # 幂等：已存在则更新，不创建时间戳副本（避免重复导入产生重复条目）
-                        lorebook.update_entry(entry["id"], entry)
-                        result = {"ok": True}
+                        if target_book_id:
+                            result = _save_plugin_book_entry(
+                                dependencies, target_book_id, entry,
+                            )
+                        else:
+                            lorebook.update_entry(entry["id"], entry)
+                            result = {"ok": True}
                     else:
-                        result = dependencies.store.save_entry(entry)
+                        result = (
+                            _save_plugin_book_entry(dependencies, target_book_id, entry)
+                            if target_book_id else dependencies.store.save_entry(entry)
+                        )
                     if result.get("ok"):
                         imported.append({"kind": kind, "name": _content_name(resource), "as": "lorebook_entry"})
+                        _record_import_receipt(
+                            dependencies,
+                            plugin_id,
+                            "lorebook_entry",
+                            entry["id"],
+                            updated=existed,
+                        )
                     else:
                         errors.append({"kind": kind, "name": _content_name(resource), "error": result.get("error", "")})
+                else:
+                    skipped.append({
+                        "kind": kind,
+                        "name": _content_name(resource),
+                        "reason": "目录资源不支持复制导入",
+                    })
             except Exception as exc:
                 errors.append({"kind": kind, "name": _content_name(resource), "error": str(exc)})
     return {
@@ -1228,7 +1450,33 @@ def _package_portrait(
     return {"kind": "asset", "path": relative_path}
 
 
-def _content_to_lore_entry(resource: dict[str, Any], kind: str, world_id: str) -> dict[str, Any]:
+def _save_plugin_book_entry(
+    dependencies: PluginContentDependencies,
+    book_id: str,
+    entry: dict[str, Any],
+) -> dict[str, Any]:
+    """Write plugin content through the canonical Book boundary."""
+
+    writer = dependencies.store.save_book_entry
+    if callable(writer):
+        return writer(str(book_id), entry)
+    lorebook = dependencies.store.lorebook
+    if lorebook is None:
+        return {"ok": False, "error": "世界书存储不可用"}
+    add_book_entry = getattr(lorebook, "add_book_entry", None)
+    if callable(add_book_entry):
+        add_book_entry(str(book_id), entry)
+        return {"ok": True}
+    return {"ok": False, "error": "目标世界书不支持规范导入", "error_code": "book_writer_unavailable"}
+
+
+def _content_to_lore_entry(
+    resource: dict[str, Any],
+    kind: str,
+    world_id: str,
+    *,
+    book_id: str = "",
+) -> dict[str, Any]:
     name = _content_name(resource)
     plugin_id = str(resource.get("plugin_id") or "plugin")
     resource_id = str(resource.get("id") or name)
@@ -1244,8 +1492,9 @@ def _content_to_lore_entry(resource: dict[str, Any], kind: str, world_id: str) -
     clean_keywords = [str(item).strip() for item in keywords if str(item).strip()]
     if name and name not in clean_keywords:
         clean_keywords.insert(0, name)
+    owner_id = str(book_id or world_id)
     entry = {
-        "id": f"{world_id}_plugin_{safe_id_part(kind)}_{safe_id_part(plugin_id)}_{safe_id_part(resource_id)}",
+        "id": f"{owner_id}_plugin_{safe_id_part(kind)}_{safe_id_part(plugin_id)}_{safe_id_part(resource_id)}",
         "world_id": world_id,
         "name": name,
         "type": kind if kind in ("npc", "item", "spell", "class") else "other",
@@ -1258,6 +1507,8 @@ def _content_to_lore_entry(resource: dict[str, Any], kind: str, world_id: str) -
         "group": "插件内容包",
         "source_plugin": plugin_id,
     }
+    if book_id:
+        entry["book_id"] = str(book_id)
     portrait = resource.get("portrait")
     if isinstance(portrait, dict) and portrait.get("kind") in {"builtin", "upload", "generated"}:
         entry["portrait"] = dict(portrait)

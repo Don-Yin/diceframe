@@ -10,7 +10,10 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
+from types import SimpleNamespace
+
 import web_server
+from src.engine.modules import room_access
 from src.webui.access_password import hash_access_password
 from src.webui.sse_ticket import SseTicketStore
 
@@ -178,11 +181,28 @@ def _make_app(api: FakeAPI) -> web.Application:
     return app
 
 
+SHARE_GAME_KEY = "web|room|bot"
+
+
 def _make_sse_auth_app() -> web.Application:
+    """A real auth middleware in front of one game whose seat player-1 holds a token."""
     app = web.Application(middlewares=[web_server.auth_middleware])
     app["sse_tickets"] = SseTicketStore()
+    instance = SimpleNamespace(
+        # Fresh room_access state: no room password, player access open.
+        modules={}, gm_uid="gm", players={"player-1": {}},
+    )
+    app["seat_token"] = room_access.issue_seat_token(instance, "player-1")
+    app["api"] = SimpleNamespace(_parse_key=lambda key: tuple(key.split("|")))
+    app["subsystems"] = SimpleNamespace(registry=SimpleNamespace(
+        get=lambda key: instance if "|".join(key) == SHARE_GAME_KEY else None,
+    ))
     app.router.add_get("/api/games/{game_key}/sse", _identity)
     return app
+
+
+def _seat(app: web.Application) -> dict[str, str]:
+    return {"X-Seat-Token": app["seat_token"]}
 
 
 @pytest.fixture
@@ -346,7 +366,9 @@ async def test_share_link_player_can_post_sse_ticket(monkeypatch):
     app = _make_sse_auth_app()
     app.router.add_post("/api/games/{game_key}/sse-ticket", _identity)
     async with TestClient(TestServer(app)) as client:
-        r = await client.post("/api/games/web%7Croom%7Cbot/sse-ticket?user=player-1&share=1")
+        r = await client.post(
+            "/api/games/web%7Croom%7Cbot/sse-ticket?share=1", headers=_seat(app),
+        )
         assert r.status == 200
         assert (await r.json())["user_id"] == "player-1"
 
@@ -362,13 +384,13 @@ async def test_share_link_player_can_use_ruleset_gameplay_endpoints(monkeypatch)
     async with TestClient(TestServer(app)) as client:
         query = {"user": "player-1", "share": "1"}
         available = await client.get(
-            "/api/games/web%7Croom%7Cbot/available-actions", params=query,
+            "/api/games/web%7Croom%7Cbot/available-actions", params=query, headers=_seat(app),
         )
         intent = await client.post(
-            "/api/games/web%7Croom%7Cbot/intents", params=query,
+            "/api/games/web%7Croom%7Cbot/intents", params=query, headers=_seat(app),
         )
         decision = await client.post(
-            "/api/games/web%7Croom%7Cbot/decisions/check-1", params=query,
+            "/api/games/web%7Croom%7Cbot/decisions/check-1", params=query, headers=_seat(app),
         )
         responses = (available, intent, decision)
         bodies = [await response.json() for response in responses]
@@ -387,10 +409,10 @@ async def test_share_link_player_can_use_table_talk_endpoints(monkeypatch):
     async with TestClient(TestServer(app)) as client:
         query = {"user": "player-1", "share": "1", "delegate": "1"}
         feed = await client.get(
-            "/api/games/web%7Croom%7Cbot/table-talk", params=query,
+            "/api/games/web%7Croom%7Cbot/table-talk", params=query, headers=_seat(app),
         )
         question = await client.post(
-            "/api/games/web%7Croom%7Cbot/kp-question", params=query,
+            "/api/games/web%7Croom%7Cbot/kp-question", params=query, headers=_seat(app),
         )
         bodies = [await feed.json(), await question.json()]
 
@@ -406,7 +428,25 @@ async def test_share_link_player_can_resolve_own_luck_decision(monkeypatch):
     app.router.add_post("/api/games/{game_key}/checks/{check_id}/luck", _identity)
     async with TestClient(TestServer(app)) as client:
         response = await client.post(
-            "/api/games/web%7Croom%7Cbot/checks/check-1/luck?user=player-1&share=1&delegate=1"
+            "/api/games/web%7Croom%7Cbot/checks/check-1/luck?share=1&delegate=1",
+            headers=_seat(app),
+        )
+        body = await response.json()
+
+    assert response.status == 200
+    assert body["user_id"] == "player-1"
+
+
+@pytest.mark.asyncio
+async def test_share_link_player_can_reveal_own_check(monkeypatch):
+    """点击揭示骰子是玩家端点：分享链接不应被 owner 密码门拦截。"""
+    monkeypatch.setitem(web_server.STATE, "access_token", hash_access_password("owner-secret"))
+    app = _make_sse_auth_app()
+    app.router.add_post("/api/games/{game_key}/checks/{check_id}/reveal", _identity)
+    async with TestClient(TestServer(app)) as client:
+        response = await client.post(
+            "/api/games/web%7Croom%7Cbot/checks/check-1/reveal?share=1",
+            headers=_seat(app),
         )
         body = await response.json()
 
@@ -422,8 +462,12 @@ async def test_share_link_player_can_upload_and_read_game_avatar(monkeypatch):
     app.router.add_post("/api/games/{game_key}/avatars", _identity)
     app.router.add_get("/api/games/{game_key}/avatars/{asset_id}", _identity)
     async with TestClient(TestServer(app)) as client:
-        uploaded = await client.post("/api/games/web%7Croom%7Cbot/avatars?user=player-1&share=1")
-        loaded = await client.get("/api/games/web%7Croom%7Cbot/avatars/abc?user=player-1&share=1")
+        uploaded = await client.post(
+            "/api/games/web%7Croom%7Cbot/avatars?share=1", headers=_seat(app),
+        )
+        loaded = await client.get(
+            "/api/games/web%7Croom%7Cbot/avatars/abc?share=1", headers=_seat(app),
+        )
         uploaded_body = await uploaded.json()
         loaded_body = await loaded.json()
 
@@ -431,3 +475,32 @@ async def test_share_link_player_can_upload_and_read_game_avatar(monkeypatch):
     assert loaded.status == 200
     assert uploaded_body["user_id"] == "player-1"
     assert loaded_body["user_id"] == "player-1"
+
+
+@pytest.mark.asyncio
+async def test_share_link_user_param_alone_no_longer_identifies_a_seat(monkeypatch):
+    """The public uid in ?user= is not proof of a seat: no token, no identity."""
+    monkeypatch.setitem(web_server.STATE, "access_token", hash_access_password("owner-secret"))
+    app = _make_sse_auth_app()
+    app.router.add_post("/api/games/{game_key}/sse-ticket", _identity)
+    app.router.add_get("/api/games/{game_key}/table-talk", _identity)
+    async with TestClient(TestServer(app)) as client:
+        ticket = await client.post("/api/games/web%7Croom%7Cbot/sse-ticket?user=player-1&share=1")
+        feed = await client.get("/api/games/web%7Croom%7Cbot/table-talk?user=player-1&share=1")
+        bodies = [await ticket.json(), await feed.json()]
+
+    assert [ticket.status, feed.status] == [401, 401]
+    assert all(body["error_code"] == "SEAT_TOKEN_REQUIRED" for body in bodies)
+
+
+@pytest.mark.asyncio
+async def test_sse_stream_does_not_accept_user_param_for_share_players(monkeypatch):
+    """Share players subscribe only through a ticket bound to their token's seat."""
+    monkeypatch.setitem(web_server.STATE, "access_token", hash_access_password("owner-secret"))
+    app = _make_sse_auth_app()
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get("/api/games/web%7Croom%7Cbot/sse?user=player-1&share=1")
+        body = await response.json()
+
+    assert response.status == 401
+    assert body["error_code"] == "SEAT_TOKEN_REQUIRED"

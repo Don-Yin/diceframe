@@ -8,22 +8,27 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
+import hashlib
 import logging
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from src.compat.dnd2024_adventure_bindings import apply_unreleased_adventure_binding_migration
+from src.content_modules.refs import ContentRefError, parse_content_ref
 from src.engine.currency.migration import scale_game_state_payload_for_base_unit_change
 from src.engine.module_state import ModuleStateError
+from src.engine.modules import room_access, seat_activity
 from src.engine.modules.lorebook_runtime import fresh as fresh_lorebook_runtime, normalize_timers
 from src.engine.player_control import CONTROL_KEY, normalize_control
 from src.engine.player_control import normalize_away_control_policy
 from src.engine.world_state import fresh_world_state
+from src.password_hashing import hash_password
 
 
 logger = logging.getLogger("trpg")
 
-CURRENT_INSTANCE_SCHEMA_VERSION = 34
+CURRENT_INSTANCE_SCHEMA_VERSION = 43
 
 # 内置 freeform_coc 在 Currency Model V2 中把 base_unit 从「美元」升级为
 # 「美分」（1 amount = 1 美分），存量 CoC 存档的所有 canonical 金额必须 ×100
@@ -591,6 +596,7 @@ def _migrate_v27_to_v28(payload: dict[str, Any]) -> dict[str, Any]:
             "entry_point": values["entry_point"] if isinstance(values["entry_point"], str) else defaults["entry_point"],
             "luck_timeout_seconds": timeout,
             "economy_reward_policy": values["economy_reward_policy"] if isinstance(values["economy_reward_policy"], dict) else {},
+            "dice_reveal_mode": "click",
         }
     payload["modules"] = modules
     payload["instance_schema_version"] = 28
@@ -724,6 +730,296 @@ def _migrate_v33_to_v34(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v34_to_v35(payload: dict[str, Any]) -> dict[str, Any]:
+    """Materialize the check_reveals presentation slot; no data to move.
+
+    The reveal markers are a new presentation-only capability, so old saves
+    simply get an empty slot. Existing slots are never overwritten.
+    """
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    if not isinstance(modules.get("check_reveals"), dict):
+        modules["check_reveals"] = {"schema_version": 1, "records": {}}
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 35
+    return payload
+
+
+def _migrate_v35_to_v36(payload: dict[str, Any]) -> dict[str, Any]:
+    """Materialize content_binding from world_id without overwriting a slot.
+
+    Only the World ref is derivable from a save.  Book bindings stay empty:
+    the Lorebook database binding rows are their authority, and Adventure
+    identity stays in ``adventure_binding``.
+    """
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    if not isinstance(modules.get("content_binding"), dict):
+        world_id = str(payload.get("world_id") or "")
+        world_ref: dict[str, Any] = {}
+        if world_id:
+            try:
+                world_ref = parse_content_ref({
+                    "source_kind": "world", "source_id": world_id,
+                    "kind": "world", "id": world_id, "digest": "",
+                }, default_source=f"world:{world_id}").to_portable_dict()
+            except ContentRefError:
+                world_ref = {}
+        modules["content_binding"] = {
+            "schema_version": 1,
+            "world_ref": world_ref,
+            "book_refs": [],
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 36
+    return payload
+
+
+def _migrate_v36_to_v37(payload: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade room_access to v2 with empty per-seat share credentials.
+
+    Old saves get no credentials (none are invented); existing values are
+    kept verbatim and a slot of any other schema is never touched.
+    """
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    slot = modules.get("room_access")
+    if isinstance(slot, dict):
+        if slot.get("schema_version") == 1:
+            modules["room_access"] = {**slot, "schema_version": 2, "seat_credentials": {}}
+    else:
+        modules["room_access"] = {
+            "schema_version": 2,
+            "max_players": 6,
+            "player_access_open": True,
+            "bot_bind_token": "",
+            "room_password": "",
+            "room_token": "",
+            "seat_credentials": {},
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 37
+    return payload
+
+
+# A v2 room_access slot whose password is truthy but not a string could never
+# be entered (comparing it raised). It stays locked: present, never matching.
+_UNVERIFIABLE_ROOM_PASSWORD_HASH = "!unverifiable-legacy-room-password"
+# Plaintext room tokens issued before v38 had no expiry; they get the default
+# room token lifetime counted from the upgrade.
+_LEGACY_ROOM_TOKEN_TTL = timedelta(days=30)
+
+
+def _migrate_v37_to_v38(payload: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade room_access to v3: hash the room password and room token.
+
+    The plaintext password becomes a PBKDF2 hash, so the same password keeps
+    working; the old shared room token becomes one hashed token record that
+    expires after the default lifetime, so players already inside stay in.
+    A slot of any other schema is never touched.
+    """
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    slot = modules.get("room_access")
+    if isinstance(slot, dict):
+        if slot.get("schema_version") == 2:
+            upgraded = {
+                key: value for key, value in slot.items()
+                if key not in {"room_password", "room_token"}
+            }
+            password = slot.get("room_password")
+            if isinstance(password, str) and password:
+                password_hash = hash_password(password)
+            elif password:
+                password_hash = _UNVERIFIABLE_ROOM_PASSWORD_HASH
+            else:
+                password_hash = ""
+            tokens: list[dict[str, Any]] = []
+            token = slot.get("room_token")
+            if password_hash and isinstance(token, str) and token:
+                issued = datetime.now(timezone.utc)
+                tokens.append({
+                    "hash": hashlib.sha256(token.encode("utf-8")).hexdigest(),
+                    "issued_at": issued.isoformat(),
+                    "expires_at": (issued + _LEGACY_ROOM_TOKEN_TTL).isoformat(),
+                })
+            upgraded.update({
+                "schema_version": 3,
+                "room_password_hash": password_hash,
+                "room_tokens": tokens,
+            })
+            modules["room_access"] = upgraded
+    else:
+        modules["room_access"] = {
+            "schema_version": 3,
+            "max_players": 6,
+            "player_access_open": True,
+            "bot_bind_token": "",
+            "room_password_hash": "",
+            "room_tokens": [],
+            "seat_credentials": {},
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 38
+    return payload
+
+
+def _migrate_v38_to_v39(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move Adventure progress and play mode into the adventure_runtime slot.
+
+    Progress that is not a dict becomes empty (never guessed). The play mode
+    keeps a known value verbatim and is otherwise derived from the Adventure
+    binding, the same rule the decoder applied to the top-level key. An
+    existing slot is never overwritten.
+    """
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    progress = payload.pop("adventure_progress", {})
+    play_mode = payload.pop("play_mode", "")
+    if not isinstance(modules.get("adventure_runtime"), dict):
+        text = str(play_mode or "")
+        if text.casefold() not in {"free", "adventure"}:
+            binding = payload.get("adventure_binding")
+            text = "adventure" if isinstance(binding, dict) and binding.get("adventure_id") else "free"
+        modules["adventure_runtime"] = {
+            "schema_version": 1,
+            "progress": progress if isinstance(progress, dict) else {},
+            "play_mode": text,
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 39
+    return payload
+
+
+def _migrate_v39_to_v40(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move the scene label into narrative_notes, upgrading that slot to v2.
+
+    The scene is kept verbatim (the top-level field was never type-checked).
+    A v1 slot gains it; a missing slot is created; any other slot schema is
+    left untouched.
+    """
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    scene = payload.pop("scene", "")
+    slot = modules.get("narrative_notes")
+    if isinstance(slot, dict):
+        if slot.get("schema_version") == 1:
+            modules["narrative_notes"] = {**slot, "schema_version": 2, "scene": scene}
+    else:
+        modules["narrative_notes"] = {
+            "schema_version": 2,
+            "summary": {},
+            "key_facts": [],
+            "confirmed_items": [],
+            "game_time": "",
+            "scene": scene,
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 40
+    return payload
+
+
+def _logged_action_actors(log: Any) -> set[str]:
+    actors: set[str] = set()
+    for entry in log if isinstance(log, list) else []:
+        actions = entry.get("actions") if isinstance(entry, dict) else None
+        for action in actions if isinstance(actions, list) else []:
+            uid = action.get("user_id") if isinstance(action, dict) else None
+            if isinstance(uid, str) and uid:
+                actors.add(uid)
+    return actors
+
+
+def _migrate_v40_to_v41(payload: dict[str, Any]) -> dict[str, Any]:
+    """Create the seat_activity slot, seeding it for runs already in play.
+
+    Without seeding, every seat of an ongoing campaign would read as "never
+    acted" right after the upgrade and could re-roll itself from a card.  A
+    run counts as in play when session_stats has ``started_at`` or the log is
+    non-empty; then every current seat played for its player
+    (``plays_for_its_player``) and every seat that appears as an action actor
+    in the persisted log is marked.  A fresh lobby stays empty.  An existing
+    slot (any schema) is left untouched.
+    """
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    if not isinstance(modules.get(seat_activity.MODULE_NAME), dict):
+        stats = modules.get("session_stats")
+        started_at = stats.get("started_at") if isinstance(stats, dict) else ""
+        log = payload.get("log")
+        acted: list[str] = []
+        if (isinstance(started_at, str) and started_at) or (isinstance(log, list) and log):
+            players = payload.get("players")
+            players = players if isinstance(players, dict) else {}
+            logged = _logged_action_actors(log)
+            for uid, player in players.items():
+                if not isinstance(uid, str) or not uid:
+                    continue
+                control = normalize_control(
+                    player.get(CONTROL_KEY) if isinstance(player, dict) else None
+                )
+                if seat_activity.plays_for_its_player(control) or uid in logged:
+                    acted.append(uid)
+        modules[seat_activity.MODULE_NAME] = {
+            "schema_version": seat_activity.SCHEMA_VERSION,
+            "acted_seats": acted,
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 41
+    return payload
+
+
+def _migrate_v41_to_v42(payload: dict[str, Any]) -> dict[str, Any]:
+    """Drop the stored combat turn copies from the legacy_combat slot (v1 -> v2).
+
+    ``combat_state`` / ``combat_active`` / ``initiative_order`` /
+    ``initiative_current`` became a read-only view derived from the bound
+    ruleset's own authority (D&D 2024: ``ruleset_state["combat"]``), so the
+    stored copies are discarded, never reinterpreted. ``combat_enemies`` is
+    kept as-is (coerced to a list). A missing or malformed slot is created
+    empty; a slot of any other schema is left untouched.
+    """
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    slot = modules.get("legacy_combat")
+    if isinstance(slot, dict):
+        if slot.get("schema_version") == 1:
+            enemies = slot.get("combat_enemies")
+            modules["legacy_combat"] = {
+                "schema_version": 2,
+                "combat_enemies": enemies if isinstance(enemies, list) else [],
+            }
+    else:
+        modules["legacy_combat"] = {"schema_version": 2, "combat_enemies": []}
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 42
+    return payload
+
+
+def _migrate_v42_to_v43(payload: dict[str, Any]) -> dict[str, Any]:
+    """Retire the legacy_combat slot and its generic ``combat_enemies``.
+
+    No production path ever populated ``combat_enemies``; the combat turn
+    fields are a view derived from ruleset authority. The slot is dropped
+    whatever its schema or contents. Enemies are never guessed into NPCs.
+    """
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    modules.pop("legacy_combat", None)
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 43
+    return payload
+
+
 def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Apply sequential, idempotent migrations to one persisted save payload."""
 
@@ -830,6 +1126,33 @@ def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     if version == 33:
         payload = _migrate_v33_to_v34(payload)
         version = 34
+    if version == 34:
+        payload = _migrate_v34_to_v35(payload)
+        version = 35
+    if version == 35:
+        payload = _migrate_v35_to_v36(payload)
+        version = 36
+    if version == 36:
+        payload = _migrate_v36_to_v37(payload)
+        version = 37
+    if version == 37:
+        payload = _migrate_v37_to_v38(payload)
+        version = 38
+    if version == 38:
+        payload = _migrate_v38_to_v39(payload)
+        version = 39
+    if version == 39:
+        payload = _migrate_v39_to_v40(payload)
+        version = 40
+    if version == 40:
+        payload = _migrate_v40_to_v41(payload)
+        version = 41
+    if version == 41:
+        payload = _migrate_v41_to_v42(payload)
+        version = 42
+    if version == 42:
+        payload = _migrate_v42_to_v43(payload)
+        version = 43
     payload["instance_schema_version"] = version
     return payload
 
@@ -852,6 +1175,10 @@ def rebind_imported_game_state_payload(
     payload["run_id"] = run_id
     payload["memory_namespace"] = f"{game_key!s}::run:{run_id}"
     modules = payload.get("modules")
+    # Fail closed: an imported game never trusts credentials minted
+    # elsewhere (room password, room/seat tokens, bot binding). A save that
+    # was password protected arrives with its player entrance closed.
+    room_access.scrub_access_credentials(payload)
     slot = modules.get("economy") if isinstance(modules, dict) else None
     if isinstance(slot, dict) and slot.get("schema_version") != 1:
         # Identity rebinding cannot safely interpret an unknown slot. Plain

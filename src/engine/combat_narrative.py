@@ -13,6 +13,7 @@ from copy import deepcopy
 from typing import Any
 
 from src.engine.language import localized_text
+from src.engine.modules import combat_extension_state
 
 _PENDING_KEY = "pending_narrative_events"
 _MAX_PENDING = 50
@@ -61,7 +62,7 @@ def enqueue_pending_event(
 def pending_events(instance: Any) -> list[dict[str, Any]]:
     """Return validated copies of events waiting for the next GM turn."""
 
-    payload = getattr(instance, "combat_extension", None)
+    payload = combat_extension_state.current(instance)
     raw = payload.get(_PENDING_KEY) if isinstance(payload, Mapping) else None
     if not isinstance(raw, list):
         return []
@@ -103,7 +104,7 @@ def consume_pending_events(instance: Any, intent_ids: Sequence[str]) -> None:
     wanted = {str(intent_id).strip() for intent_id in intent_ids if str(intent_id).strip()}
     if not wanted:
         return
-    payload = getattr(instance, "combat_extension", None)
+    payload = combat_extension_state.current(instance)
     if not isinstance(payload, dict):
         return
     raw = payload.get(_PENDING_KEY)

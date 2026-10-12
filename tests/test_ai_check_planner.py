@@ -7,9 +7,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.commands.check_planner import _planner_context, normalize_check_specs, plan_round_checks
 from src.engine.checks import resolve_check_request
 from src.engine.game_instance import GameInstance
+from src.engine.modules import economy_state
+from tests.test_legacy_combat_module import bind_dnd_combat
 from src.rules.rule_system import RuleSystem
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -520,7 +523,7 @@ async def test_economy_offers_queue_payer_confirmed_proposals_idempotently() -> 
         reason="矮人摊主报价", source="table_offer", source_ref=source_ref,
     )
     assert first["id"] == second["id"]
-    assert [p["status"] for p in instance.economy["proposals"]] == ["pending"]
+    assert [p["status"] for p in economy_state.state(instance)["proposals"]] == ["pending"]
     assert first["approval_policy"] == "payer"
     assert first["source"] == "table_offer"
     assert [reward["name"] for reward in first["rewards"]] == ["长剑"]
@@ -1044,9 +1047,8 @@ def test_planner_npc_context_requires_an_explicit_resolved_npc(target, action, e
         "keeper": {"name": "老汤姆", "relation": "friendly", "hp": 20, "description": "长篇背景"},
         "professor": {"character_name": "考古学系主任"},
     }
-    instance.scene = "老汤姆和考古学系主任所在的旅店"
-    instance.combat_state = "active"
-    instance.combat_enemies = [{"name": "强盗", "hp": 10}]
+    narrative_notes.replace_scene(instance, "老汤姆和考古学系主任所在的旅店")
+    bind_dnd_combat(instance, {"status": "active", "initiative": [], "turn_index": 0})
     instance.action_queue[0].update(text=action, target_text=target)
     before = deepcopy(instance.npcs)
     player = json.loads(_planner_context(instance, None))["players"][0]
@@ -1132,8 +1134,9 @@ def test_planner_npc_mentions_respect_latin_boundaries(name, action, expected) -
 ])
 def test_planner_npc_inference_rejects_player_and_enemy_ambiguity(action, target, expected) -> None:
     instance = make_instance()
-    instance.npcs = {"keeper": {"name": "老汤姆", "relation": "friendly"}}
-    instance.combat_enemies = [{"name": "守卫", "hp": 10}]
+    # A second named NPC makes "守卫 ... 老汤姆" ambiguous the way a named
+    # enemy used to; the retired combat_enemies list no longer exists.
+    instance.npcs = {"keeper": {"name": "老汤姆", "relation": "friendly"}, "guard": {"name": "守卫"}}
     instance.action_queue[0].update(text=action, target_text=target)
     player = json.loads(_planner_context(instance, None))["players"][0]
     assert ("npc_context" in player) is expected

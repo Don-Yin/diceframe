@@ -23,6 +23,7 @@ from src.rulesets.dnd2024.combat.catalog import (
 )
 from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
+from src.engine.modules import ruleset_runtime
 
 
 @dataclass
@@ -146,7 +147,7 @@ def _start(
     }, SequenceRng([20, 1]))
     assert resolved["ok"] is True
     assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
-    assert instance.ruleset_state["combat"]["initiative"][0] == "player:gm"
+    assert ruleset_runtime.state(instance)["combat"]["initiative"][0] == "player:gm"
 
 
 def _attack_intent(engine: Dnd2024CombatEngine, instance: GameInstance) -> dict:
@@ -229,17 +230,17 @@ def test_unarmed_strike_resolves_through_the_authoritative_chain() -> None:
     assert check["modifier"] == 4 and check["success"] is True
     assert damage["amount"] == 5 and damage["damage_type"] == "bludgeoning"
     assert damage["rolls"] == [3]
-    assert instance.ruleset_state["combat"]["enemies"]["goblin-1"]["hp"] == 13
+    assert ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"] == 13
     # 徒手打击是天然能力：不写入 inventory / equipment。
     assert canonical["equipment"]["item_refs"] == []
     assert replayed["duplicate"] is True
-    assert instance.ruleset_state["combat"]["enemies"]["goblin-1"]["hp"] == 13
+    assert ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"] == 13
 
 
 def test_unarmed_strike_shares_the_attack_action_economy() -> None:
     engine, instance, _character = _monk_instance()
     _start(engine, instance)
-    version = instance.ruleset_state["version"]
+    version = ruleset_runtime.state(instance)["version"]
 
     first = engine.resolve_intent(instance, {
         "intent_id": "unarmed-1", "type": "attack", "expected_version": version,
@@ -247,7 +248,7 @@ def test_unarmed_strike_shares_the_attack_action_economy() -> None:
         "weapon_ref": "unarmed_strike",
     }, SequenceRng([15, 3]))
     engine.apply_batch(instance, first["event_batch"])
-    economy = instance.ruleset_state["combat"]["economy"]
+    economy = ruleset_runtime.state(instance)["combat"]["economy"]
 
     assert economy["action"] == 0 and economy["attacks_remaining"] == 0
     assert not any(
@@ -255,7 +256,7 @@ def test_unarmed_strike_shares_the_attack_action_economy() -> None:
     )
     second = engine.validate_intent(instance, {
         "intent_id": "unarmed-2", "type": "attack",
-        "expected_version": instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": "gm", "actor_id": "player:gm", "target_id": "enemy:goblin-1",
         "weapon_ref": "unarmed_strike",
     })
@@ -341,10 +342,10 @@ def _weaponless_companion() -> dict:
 
 def test_weaponless_companion_attacks_with_unarmed_strike() -> None:
     engine, instance, _character = _monk_instance()
-    party = instance.ruleset_state.setdefault("party", {"companions": {}})
+    party = ruleset_runtime.state(instance).setdefault("party", {"companions": {}})
     party.setdefault("companions", {})["mira"] = _weaponless_companion()
     _start(engine, instance)
-    combat = instance.ruleset_state["combat"]
+    combat = ruleset_runtime.state(instance)["combat"]
     combat["turn_index"] = combat["initiative"].index("companion:mira")
     combat["economy"] = engine._fresh_economy(
         engine._actor_view(instance, combat, "companion:mira"),
@@ -357,7 +358,7 @@ def test_weaponless_companion_attacks_with_unarmed_strike() -> None:
     resolved = engine.resolve_intent(instance, intent, SequenceRng([15, 4]))
     assert resolved["ok"] is True
     assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
-    assert instance.ruleset_state["combat"]["enemies"]["goblin-1"]["hp"] < 18
+    assert ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"] < 18
 
 
 def test_bonus_action_entries_only_exist_for_real_capabilities() -> None:
@@ -367,7 +368,7 @@ def test_bonus_action_entries_only_exist_for_real_capabilities() -> None:
     actions = fighter.available_intents(fighter_instance, "gm")
 
     assert _bonus_action_consumers(actions) == []
-    assert fighter_instance.ruleset_state["combat"]["economy"]["bonus_action"] == 1
+    assert ruleset_runtime.state(fighter_instance)["combat"]["economy"]["bonus_action"] == 1
     assert not any(item["type"] == "bonus_action" for item in actions)
 
     # 有真实 bonus-action 法术：暴露并被权威结算（施法消耗 bonus_action，不消耗 action）。
@@ -384,7 +385,7 @@ def test_bonus_action_entries_only_exist_for_real_capabilities() -> None:
 
     resolved = cleric.resolve_intent(cleric_instance, {
         "intent_id": "bonus-1", "type": "cast_spell",
-        "expected_version": cleric_instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(cleric_instance)["version"],
         "submitted_by": "gm", "actor_id": "player:gm",
         "spell_ref": "spell:shield_of_faith", "slot_level": 1,
         "target_ids": ["player:gm"],
@@ -392,7 +393,7 @@ def test_bonus_action_entries_only_exist_for_real_capabilities() -> None:
     assert resolved["ok"] is True
     assert cleric.apply_batch(cleric_instance, resolved["event_batch"])["applied"] is True
 
-    economy = cleric_instance.ruleset_state["combat"]["economy"]
+    economy = ruleset_runtime.state(cleric_instance)["combat"]["economy"]
     assert economy["bonus_action"] == 0 and economy["action"] == 1
     spent = next(
         event for event in resolved["event_batch"]["events"]
@@ -402,7 +403,7 @@ def test_bonus_action_entries_only_exist_for_real_capabilities() -> None:
 
     second = cleric.validate_intent(cleric_instance, {
         "intent_id": "bonus-2", "type": "cast_spell",
-        "expected_version": cleric_instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(cleric_instance)["version"],
         "submitted_by": "gm", "actor_id": "player:gm",
         "spell_ref": "spell:shield_of_faith", "slot_level": 1,
         "target_ids": ["player:gm"],

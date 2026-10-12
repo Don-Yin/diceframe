@@ -61,6 +61,12 @@ async def test_cors_preflight_and_credentials_cookie(tmp_path):
         assert preflight.status == 204
         assert preflight.headers["Access-Control-Allow-Origin"] == "https://play.example.com"
         assert preflight.headers["Access-Control-Allow-Credentials"] == "true"
+        # A standalone frontend's share players send their seat credential as a header.
+        allowed = {
+            part.strip().lower()
+            for part in preflight.headers["Access-Control-Allow-Headers"].split(",")
+        }
+        assert "x-seat-token" in allowed
 
         response = await client.get("/api/config", headers={"Origin": "https://play.example.com"})
         assert response.status == 200

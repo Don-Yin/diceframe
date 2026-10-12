@@ -10,6 +10,7 @@ from src.commands.round_effects import apply_revive_commands
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
+from src.engine.modules import ruleset_runtime
 
 
 @dataclass
@@ -70,7 +71,7 @@ def _start(engine: Dnd2024CombatEngine, instance: GameInstance, *, position: int
     assert resolved["ok"] is True
     applied = engine.apply_batch(instance, resolved["event_batch"])
     assert applied["applied"] is True
-    assert instance.ruleset_state["combat"]["initiative"][0] == "player:gm"
+    assert ruleset_runtime.state(instance)["combat"]["initiative"][0] == "player:gm"
     return resolved["event_batch"]
 
 
@@ -85,14 +86,14 @@ def test_weapon_attack_is_server_rolled_atomic_and_idempotent() -> None:
 
     resolved = engine.resolve_intent(instance, intent, SequenceRng([15, 4, 5]))
     applied = engine.apply_batch(instance, resolved["event_batch"])
-    hp_after = instance.ruleset_state["combat"]["enemies"]["goblin-1"]["hp"]
+    hp_after = ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"]
     replayed = engine.apply_batch(instance, resolved["event_batch"])
 
     assert applied["state_version"] == 2
     assert hp_after == 6
     assert replayed["duplicate"] is True
-    assert instance.ruleset_state["combat"]["enemies"]["goblin-1"]["hp"] == hp_after
-    assert instance.ruleset_state["combat"]["economy"]["action"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"] == hp_after
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["action"] == 0
 
 
 def test_catalog_preset_replaces_client_enemy_payload() -> None:
@@ -123,7 +124,7 @@ def test_player_joining_active_combat_is_added_to_next_turn() -> None:
     }
 
     runtime.on_player_join(instance, "late")
-    combat = instance.ruleset_state["combat"]
+    combat = ruleset_runtime.state(instance)["combat"]
     assert combat["initiative"][combat["turn_index"] + 1] == "player:late"
     assert combat["reactions"]["player:late"] == 1
     assert combat["positions"]["player:late"] == 0
@@ -132,7 +133,7 @@ def test_player_joining_active_combat_is_added_to_next_turn() -> None:
         {
             "intent_id": "end-gm-after-join",
             "type": "end_turn",
-            "expected_version": instance.ruleset_state["version"],
+            "expected_version": ruleset_runtime.state(instance)["version"],
             "submitted_by": "gm",
             "actor_id": "player:gm",
         },
@@ -210,7 +211,7 @@ def test_prepared_spell_consumes_slot_and_cannot_trust_client_damage() -> None:
 
     canonical = instance.get_character_sheet("gm")["ruleset_character"]
     assert canonical["spellcasting"]["class"]["slots_current"] == {"1": 1}
-    assert instance.ruleset_state["combat"]["enemies"]["goblin-1"]["hp"] == 9
+    assert ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"] == 9
     assert any(
         event["type"] == "dnd2024.spell.cast"
         for event in resolved["event_batch"]["events"]
@@ -229,8 +230,8 @@ def test_move_out_of_reach_creates_a_pending_reaction_decision() -> None:
     engine.apply_batch(instance, resolved["event_batch"])
 
     assert resolved["pending_decision"]["kind"] == "opportunity_attack"
-    assert instance.ruleset_state["combat"]["positions"]["player:gm"] == 0
-    assert instance.ruleset_state["combat"]["pending_decisions"][0]["movement"]["distance"] == -10
+    assert ruleset_runtime.state(instance)["combat"]["positions"]["player:gm"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["pending_decisions"][0]["movement"]["distance"] == -10
 
     decision_intent = {
         "intent_id": "decision-1", "type": "decision.resolve", "expected_version": 2,
@@ -239,9 +240,9 @@ def test_move_out_of_reach_creates_a_pending_reaction_decision() -> None:
     decided = engine.resolve_intent(instance, decision_intent, SequenceRng([15, 4]))
     engine.apply_batch(instance, decided["event_batch"])
 
-    assert instance.ruleset_state["combat"]["positions"]["player:gm"] == -10
-    assert instance.ruleset_state["combat"]["pending_decisions"] == []
-    assert instance.ruleset_state["combat"]["reactions"]["enemy:goblin-1"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["positions"]["player:gm"] == -10
+    assert ruleset_runtime.state(instance)["combat"]["pending_decisions"] == []
+    assert ruleset_runtime.state(instance)["combat"]["reactions"]["enemy:goblin-1"] == 0
     assert instance.get_character_sheet("gm")["ruleset_character"]["resources"]["hp"] < 12
 
 
@@ -293,7 +294,7 @@ def test_revival_clears_canonical_death_save_state_and_invalidates_combat_action
     assert updated["ruleset_character"]["resources"]["hp"] == updated["hp"]
     assert updated["ruleset_character"]["conditions"] == {}
     assert updated["deceased"] is False
-    assert instance.ruleset_state["version"] == 2
+    assert ruleset_runtime.state(instance)["version"] == 2
     actions = engine.available_intents(instance, "gm")
     assert "death_save" not in [item["type"] for item in actions]
     assert any(item["type"] == "attack" for item in actions)
@@ -331,8 +332,8 @@ def test_failed_save_applies_condition_but_successful_save_does_not() -> None:
     }, SequenceRng([20]))
     success_engine.apply_batch(success_instance, succeeded["event_batch"])
 
-    assert "incapacitated" in failed_instance.ruleset_state["combat"]["enemies"]["goblin-1"]["conditions"]
-    assert "incapacitated" not in success_instance.ruleset_state["combat"]["enemies"]["goblin-1"]["conditions"]
+    assert "incapacitated" in ruleset_runtime.state(failed_instance)["combat"]["enemies"]["goblin-1"]["conditions"]
+    assert "incapacitated" not in ruleset_runtime.state(success_instance)["combat"]["enemies"]["goblin-1"]["conditions"]
 
 
 def test_failed_concentration_save_removes_owned_conditions() -> None:
@@ -399,7 +400,7 @@ def test_normal_healing_cannot_revive_a_dead_character() -> None:
         "submitted_by": "gm", "enemies": [_goblin(position=30)],
     }, SequenceRng([1, 20, 1]))
     engine.apply_batch(instance, started["event_batch"])
-    assert instance.ruleset_state["combat"]["initiative"][0] == "player:gm"
+    assert ruleset_runtime.state(instance)["combat"]["initiative"][0] == "player:gm"
 
     result = engine.validate_intent(instance, {
         "intent_id": "healing-dead-1", "type": "cast_spell", "expected_version": 1,
@@ -429,14 +430,14 @@ def test_cantrip_scales_at_level_five_and_spell_can_end_combat() -> None:
 
     victory_engine, victory_instance = _instance(wizard=True)
     _start(victory_engine, victory_instance, position=30)
-    victory_instance.ruleset_state["combat"]["enemies"]["goblin-1"]["hp"] = 3
+    ruleset_runtime.state(victory_instance)["combat"]["enemies"]["goblin-1"]["hp"] = 3
     missile = victory_engine.resolve_intent(victory_instance, {
         "intent_id": "missile-win", "type": "cast_spell", "expected_version": 1,
         "submitted_by": "gm", "actor_id": "player:gm", "target_id": "enemy:goblin-1",
         "spell_ref": "spell:magic_missile", "slot_level": 1,
     }, SequenceRng([1, 1, 1]))
     victory_engine.apply_batch(victory_instance, missile["event_batch"])
-    assert victory_instance.ruleset_state["combat"]["status"] == "ended"
+    assert ruleset_runtime.state(victory_instance)["combat"]["status"] == "ended"
 
 
 def test_stable_actor_remains_unconscious_and_skips_death_save() -> None:
@@ -477,8 +478,8 @@ def test_last_stable_player_ends_combat_instead_of_looping_enemy_turns() -> None
     }
 
     engine.apply_batch(instance, ended["event_batch"])
-    assert instance.ruleset_state["combat"]["status"] == "ended"
-    assert instance.ruleset_state["combat"]["outcome"] == "party_incapacitated"
+    assert ruleset_runtime.state(instance)["combat"]["status"] == "ended"
+    assert ruleset_runtime.state(instance)["combat"]["outcome"] == "party_incapacitated"
     assert engine.next_automatic_intent(instance) is None
 
 
@@ -528,8 +529,8 @@ def test_enemy_turn_is_declared_by_server_and_returns_control_to_player() -> Non
     assert finish is not None and finish["type"] == "end_turn"
     resolved_finish = engine.resolve_intent(instance, finish, SequenceRng([]))
     engine.apply_batch(instance, resolved_finish["event_batch"])
-    assert instance.ruleset_state["combat"]["initiative"][
-        instance.ruleset_state["combat"]["turn_index"]
+    assert ruleset_runtime.state(instance)["combat"]["initiative"][
+        ruleset_runtime.state(instance)["combat"]["turn_index"]
     ] == "player:gm"
 
 
@@ -581,12 +582,12 @@ def _companion(
 
 
 def _seed_companion(instance: GameInstance, companion: dict) -> None:
-    party = instance.ruleset_state.setdefault("party", {"companions": {}})
+    party = ruleset_runtime.state(instance).setdefault("party", {"companions": {}})
     party.setdefault("companions", {})[companion["id"]] = companion
 
 
 def _set_turn(engine: Dnd2024CombatEngine, instance: GameInstance, actor_id: str) -> None:
-    combat = instance.ruleset_state["combat"]
+    combat = ruleset_runtime.state(instance)["combat"]
     combat["turn_index"] = combat["initiative"].index(actor_id)
     actor = engine._actor_view(instance, combat, actor_id)
     combat["economy"] = engine._fresh_economy(actor)
@@ -619,7 +620,7 @@ def test_companion_joins_initiative_with_party_side() -> None:
     engine, instance = _instance()
     _seed_companion(instance, _companion("mira", "Mira"))
     batch = _start(engine, instance)
-    combat = instance.ruleset_state["combat"]
+    combat = ruleset_runtime.state(instance)["combat"]
 
     assert "player:gm" in combat["initiative"]
     assert "companion:mira" in combat["initiative"]
@@ -638,7 +639,7 @@ def test_companion_cannot_attack_party_members() -> None:
     _seed_companion(instance, _companion("mira", "Mira"))
     _start(engine, instance)
     _set_turn(engine, instance, "companion:mira")
-    version = instance.ruleset_state["version"]
+    version = ruleset_runtime.state(instance)["version"]
 
     friendly = engine.validate_intent(instance, {
         "intent_id": "c-attack-ally", "type": "attack", "expected_version": version,
@@ -669,7 +670,7 @@ def test_enemy_can_attack_companion_and_hp_syncs() -> None:
     resolved = engine.resolve_intent(instance, intent, SequenceRng([20, 1]))
     applied = engine.apply_batch(instance, resolved["event_batch"])
     assert applied["applied"] is True
-    mira = instance.ruleset_state["party"]["companions"]["mira"]["ruleset_character"]
+    mira = ruleset_runtime.state(instance)["party"]["companions"]["mira"]["ruleset_character"]
     assert mira["resources"]["hp"] < 10
 
 
@@ -709,7 +710,7 @@ def test_player_can_heal_companion() -> None:
     }, SequenceRng([3, 4]))
     applied = engine.apply_batch(instance, resolved["event_batch"])
     assert applied["applied"] is True
-    mira = instance.ruleset_state["party"]["companions"]["mira"]["ruleset_character"]
+    mira = ruleset_runtime.state(instance)["party"]["companions"]["mira"]["ruleset_character"]
     assert mira["resources"]["hp"] > 6
     assert mira["resources"]["hp"] <= mira["resources"]["max_hp"]
 
@@ -721,10 +722,10 @@ def test_companion_spell_slot_consumed() -> None:
     ))
     _start(engine, instance)
     _set_turn(engine, instance, "companion:mira")
-    version = instance.ruleset_state["version"]
+    version = ruleset_runtime.state(instance)["version"]
 
     slots_before = (
-        instance.ruleset_state["party"]["companions"]["mira"]["ruleset_character"]
+        ruleset_runtime.state(instance)["party"]["companions"]["mira"]["ruleset_character"]
         ["spellcasting"]["class"]["slots_current"]["1"]
     )
     resolved = engine.resolve_intent(instance, {
@@ -736,7 +737,7 @@ def test_companion_spell_slot_consumed() -> None:
     applied = engine.apply_batch(instance, resolved["event_batch"])
     assert applied["applied"] is True
     slots_after = (
-        instance.ruleset_state["party"]["companions"]["mira"]["ruleset_character"]
+        ruleset_runtime.state(instance)["party"]["companions"]["mira"]["ruleset_character"]
         ["spellcasting"]["class"]["slots_current"]["1"]
     )
     assert slots_after == slots_before - 1

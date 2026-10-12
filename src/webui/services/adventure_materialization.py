@@ -31,6 +31,7 @@ from typing import Any
 
 from src.adventures.bundle import LoadedAdventureBundle
 from src.adventures.materialization import MAX_OPS_PER_BATCH, world_seed_ops
+from src.engine import progression
 from src.engine.world.read import (
     world_entities,
     world_facts,
@@ -47,7 +48,7 @@ def _source_round(instance: Any, explicit: int | None) -> int:
         except (TypeError, ValueError):
             return 0
     try:
-        return int(getattr(instance, "round_number", 0) or 0)
+        return progression.current_round(instance)
     except (TypeError, ValueError):
         return 0
 

@@ -38,6 +38,7 @@ from src.engine.player_control import set_control
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
+from src.engine.modules import ruleset_runtime
 
 
 @dataclass
@@ -101,7 +102,7 @@ def _companion(
 
 
 def _seed_companion(instance: GameInstance, companion: dict) -> None:
-    party = instance.ruleset_state.setdefault("party", {"companions": {}})
+    party = ruleset_runtime.state(instance).setdefault("party", {"companions": {}})
     party.setdefault("companions", {})[companion["id"]] = companion
 
 
@@ -154,7 +155,7 @@ def _start(
 
 
 def _set_turn(engine: Dnd2024CombatEngine, instance: GameInstance, actor_id: str) -> None:
-    combat = instance.ruleset_state["combat"]
+    combat = ruleset_runtime.state(instance)["combat"]
     combat["turn_index"] = combat["initiative"].index(actor_id)
     combat["economy"] = engine._fresh_economy(engine._actor_view(instance, combat, actor_id))
 
@@ -199,7 +200,7 @@ def test_ai_hosted_pc_takes_its_turn_through_the_authoritative_chain() -> None:
     runtime, engine, instance = _setup()
     _start(engine, instance, rolls=[20, 1, 3])
     _set_turn(engine, instance, "player:ai1")
-    version = instance.ruleset_state["version"]
+    version = ruleset_runtime.state(instance)["version"]
 
     intent = engine.next_automatic_intent(instance)
 
@@ -214,12 +215,12 @@ def test_ai_hosted_pc_takes_its_turn_through_the_authoritative_chain() -> None:
     # runtime 组合根走的是同一个实现（不是第二条路径）。
     assert runtime.next_automatic_intent(instance) == intent
 
-    before = instance.ruleset_state["combat"]["enemies"]["goblin-1"]["hp"]
+    before = ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"]
     applied = _apply(engine, instance, intent, [15, 4, 5])
 
     assert applied["state_version"] == version + 1
-    assert instance.ruleset_state["combat"]["enemies"]["goblin-1"]["hp"] < before
-    assert instance.ruleset_state["combat"]["economy"]["action"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"] < before
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["action"] == 0
 
 
 # ---- 2. 真人 / 未认领席位没有自动意图 ----------------------------------------
@@ -228,7 +229,7 @@ def test_ai_hosted_pc_takes_its_turn_through_the_authoritative_chain() -> None:
 def test_human_and_unclaimed_seats_never_get_an_automatic_intent() -> None:
     _runtime, engine, instance = _setup(with_unclaimed=True)
     _start(engine, instance, rolls=[20, 1, 2, 3])
-    assert instance.ruleset_state["combat"]["initiative"] == [
+    assert ruleset_runtime.state(instance)["combat"]["initiative"] == [
         "player:ai1", "player:gm", "player:u1", "enemy:goblin-1",
     ]
 
@@ -247,7 +248,7 @@ def test_a_human_cannot_submit_for_an_ai_hosted_seat() -> None:
     _runtime, engine, instance = _setup(with_unclaimed=True)
     _start(engine, instance, rolls=[20, 1, 2, 3])
     _set_turn(engine, instance, "player:ai1")
-    version = instance.ruleset_state["version"]
+    version = ruleset_runtime.state(instance)["version"]
 
     for submitter in ("u1", "gm_other", "ai1"):
         rejected = engine.validate_intent(instance, {
@@ -288,7 +289,7 @@ def test_a_human_still_cannot_submit_for_another_humans_seat() -> None:
 
     rejected = engine.validate_intent(instance, {
         "intent_id": "cross-submit", "type": "attack",
-        "expected_version": instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": "u1", "actor_id": "player:gm",
         "target_id": "enemy:goblin-1", "weapon_ref": "item:dagger",
     })
@@ -299,7 +300,7 @@ def test_a_human_still_cannot_submit_for_another_humans_seat() -> None:
     _set_turn(engine, instance, "player:u1")
     gm_for_human = engine.validate_intent(instance, {
         "intent_id": "gm-for-human", "type": "end_turn",
-        "expected_version": instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": "gm", "actor_id": "player:u1",
     })
     assert gm_for_human["ok"] is False
@@ -320,12 +321,12 @@ def test_ai_hosted_pc_cannot_exceed_the_action_economy() -> None:
     first = engine.next_automatic_intent(instance)
     assert first is not None and first["type"] == "attack"
     _apply(engine, instance, first, [15, 4, 5])
-    assert instance.ruleset_state["combat"]["economy"]["attacks_remaining"] == 1
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["attacks_remaining"] == 1
 
     second = engine.next_automatic_intent(instance)
     assert second is not None and second["type"] == "attack"
     _apply(engine, instance, second, [15, 4, 5])
-    economy = instance.ruleset_state["combat"]["economy"]
+    economy = ruleset_runtime.state(instance)["combat"]["economy"]
     assert economy["action"] == 0 and economy["attacks_remaining"] == 0
 
     # 两次攻击用尽后自动阶梯不再攻击，而是收尾。
@@ -334,7 +335,7 @@ def test_ai_hosted_pc_cannot_exceed_the_action_economy() -> None:
 
     overreach = engine.validate_intent(instance, {
         "intent_id": "third-attack", "type": "attack",
-        "expected_version": instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": "gm", "actor_id": "player:ai1",
         "target_id": "enemy:goblin-1", "weapon_ref": "item:greatsword",
     })
@@ -354,12 +355,12 @@ def test_ai_hosted_pc_movement_is_capped_by_remaining_speed() -> None:
     assert intent["distance"] == 30
     assert engine.validate_intent(instance, intent) == {"ok": True}
     _apply(engine, instance, intent, [])
-    assert instance.ruleset_state["combat"]["positions"]["player:ai1"] == 30
-    assert instance.ruleset_state["combat"]["economy"]["movement"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["positions"]["player:ai1"] == 30
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["movement"] == 0
 
     overreach = engine.validate_intent(instance, {
         "intent_id": "extra-move", "type": "move",
-        "expected_version": instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": "gm", "actor_id": "player:ai1", "distance": 30,
     })
     assert overreach["ok"] is False
@@ -376,7 +377,7 @@ def test_ai_hosted_pc_at_zero_hp_makes_a_death_save() -> None:
     canonical["resources"]["hp"] = 0
     canonical.setdefault("conditions", {})["unconscious"] = {"source": "zero_hp"}
     _set_turn(engine, instance, "player:ai1")
-    version = instance.ruleset_state["version"]
+    version = ruleset_runtime.state(instance)["version"]
 
     intent = engine.next_automatic_intent(instance)
 
@@ -407,7 +408,7 @@ def test_a_companion_at_zero_hp_still_never_makes_a_death_save() -> None:
     _seed_companion(instance, _companion("mira", "Mira", hp=0))
     _start(engine, instance, rolls=[20, 1, 10, 3])
     _set_turn(engine, instance, "companion:mira")
-    version = instance.ruleset_state["version"]
+    version = ruleset_runtime.state(instance)["version"]
 
     intent = engine.next_automatic_intent(instance)
 
@@ -435,7 +436,7 @@ def test_a_companion_at_zero_hp_still_never_makes_a_death_save() -> None:
 def test_ai_hosted_pc_turn_always_terminates_when_nothing_useful_is_left() -> None:
     _runtime, engine, instance = _setup()
     _start(engine, instance, rolls=[20, 1, 3], enemy_position=400, enemy_hp=200)
-    assert instance.ruleset_state["combat"]["initiative"] == [
+    assert ruleset_runtime.state(instance)["combat"]["initiative"] == [
         "player:ai1", "player:gm", "enemy:goblin-1",
     ]
     _set_turn(engine, instance, "player:ai1")
@@ -445,7 +446,7 @@ def test_ai_hosted_pc_turn_always_terminates_when_nothing_useful_is_left() -> No
     # 够不到敌人也没有别的可用招：移动 → Dodge → End Turn，然后交还给真人。
     assert [intent["type"] for intent in intents] == ["move", "dodge", "end_turn"]
     assert all(intent["actor_id"] == "player:ai1" for intent in intents)
-    combat = instance.ruleset_state["combat"]
+    combat = ruleset_runtime.state(instance)["combat"]
     assert combat["initiative"][combat["turn_index"]] == "player:gm"
     assert engine.next_automatic_intent(instance) is None
 
@@ -453,7 +454,7 @@ def test_ai_hosted_pc_turn_always_terminates_when_nothing_useful_is_left() -> No
 def test_ai_hosted_pc_with_no_live_hostile_ends_its_turn() -> None:
     _runtime, engine, instance = _setup()
     _start(engine, instance, rolls=[20, 1, 3])
-    instance.ruleset_state["combat"]["enemies"]["goblin-1"]["hp"] = 0
+    ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"] = 0
     _set_turn(engine, instance, "player:ai1")
 
     # 没有活着的敌对目标：先按既有阶梯 Dodge，再用合法的 End Turn 收尾，
@@ -466,8 +467,8 @@ def test_ai_hosted_pc_with_no_live_hostile_ends_its_turn() -> None:
     assert end is not None and end["type"] == "end_turn"
     _apply(engine, instance, end, [])
 
-    assert instance.ruleset_state["combat"]["status"] == "ended"
-    assert instance.ruleset_state["combat"]["outcome"] == "victory"
+    assert ruleset_runtime.state(instance)["combat"]["status"] == "ended"
+    assert ruleset_runtime.state(instance)["combat"]["outcome"] == "victory"
     assert engine.next_automatic_intent(instance) is None
 
 
@@ -541,7 +542,7 @@ def test_companion_automatic_intent_is_unchanged() -> None:
     }
     assert engine.validate_intent(instance, intent) == {"ok": True}
     _apply(engine, instance, intent, [15, 4, 5])
-    assert instance.ruleset_state["combat"]["economy"]["action"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["action"] == 0
 
 
 def test_companion_healing_ladder_is_unchanged() -> None:
@@ -624,10 +625,10 @@ def test_automatic_intent_is_deterministic_and_read_only() -> None:
     _runtime, engine, instance = _setup()
     _start(engine, instance, rolls=[20, 1, 3])
     _set_turn(engine, instance, "player:ai1")
-    before = deepcopy(instance.ruleset_state)
+    before = deepcopy(ruleset_runtime.state(instance))
 
     first = engine.next_automatic_intent(instance)
     second = engine.next_automatic_intent(instance)
 
     assert first is not None and first == second
-    assert instance.ruleset_state == before
+    assert ruleset_runtime.state(instance) == before

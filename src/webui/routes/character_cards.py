@@ -5,6 +5,30 @@ from __future__ import annotations
 from aiohttp import web
 
 from src.webui.routes._common import _get_api, _require_confirmed_request
+from src.webui.access_control import PAIRED_DEVICE_ID_KEY
+from src.webui.routes.auth import ACCESS_PASSWORD_CONFIGURED_KEY
+
+
+def sees_full_card_library(request: web.Request) -> bool:
+    """The server-wide card library belongs to the owner.
+
+    - The owner sees it all.
+    - Bot and plugin API tokens act for a seated actor at one table, so they
+      are table participants: plugin cards only (explicit decision; the
+      library is server-wide, not part of any one game).
+    - Without an access password there is no authentication boundary, so the
+      library stays as it was there.
+    - Fail closed: if it is unknown whether a password is configured, the
+      caller is treated as a table participant.
+    """
+    if request.get("owner_authenticated", False):
+        return True
+    if request.get("bot_authenticated", False):
+        return False
+    configured = request.get(ACCESS_PASSWORD_CONFIGURED_KEY)
+    if configured is None:
+        return False
+    return not configured
 
 
 async def api_character_cards(request: web.Request) -> web.Response:
@@ -15,7 +39,11 @@ async def api_game_character_cards(request: web.Request) -> web.Response:
     api = _get_api(request)
     if not api.game_detail(request.match_info["game_key"]):
         return web.json_response({"error": "游戏不存在"}, status=404)
-    return web.json_response(api.list_character_cards())
+    if sees_full_card_library(request):
+        return web.json_response(api.list_character_cards())
+    # Players and visitors only get cards meant for any table (plugin
+    # content); characters saved from other games stay with the owner.
+    return web.json_response(api.list_shareable_character_cards())
 
 
 async def api_character_card_save(request: web.Request) -> web.Response:
@@ -92,8 +120,33 @@ def _as_bool(value: object, default: bool = True) -> bool:
     return str(value).strip().lower() not in {"", "0", "false", "no", "off"}
 
 
+_PLAN_CONFLICT_CODES = frozenset({
+    "PLAN_STALE", "CARD_IDENTITY_CONFLICT", "LOREBOOK_IDENTITY_CONFLICT",
+})
+
+
+async def api_character_card_import_preview(request: web.Request) -> web.Response:
+    body = await request.json()
+    if not isinstance(body, dict):
+        return web.json_response({"ok": False, "error": "request must be an object"}, status=400)
+    result = _get_api(request).preview_character_card_import(body)
+    return web.json_response(result, status=200 if result.get("ok") else 400)
+
+
+async def _api_character_card_plan_commit(request: web.Request, body: dict) -> web.Response:
+    result = _get_api(request).commit_character_card_plan(
+        body, pushed_by_device=str(request.get(PAIRED_DEVICE_ID_KEY, "") or ""),
+    )
+    if result.get("ok"):
+        return web.json_response(result)
+    status = 409 if result.get("error_code") in _PLAN_CONFLICT_CODES else 400
+    return web.json_response(result, status=status)
+
+
 async def api_character_card_import(request: web.Request) -> web.Response:
     body = await request.json()
+    if isinstance(body, dict) and "plan_digest" in body:
+        return await _api_character_card_plan_commit(request, body)
     result = await _get_api(request).import_character_card(
         file_data=body.get("file_data", ""),
         file_name=body.get("file_name", "card.json"),
@@ -136,4 +189,5 @@ def register_character_cards(app: web.Application) -> None:
     )
     app.router.add_route("DELETE", "/api/character-cards/{card_id}", api_character_card_delete)
     app.router.add_post("/api/character-cards/import", api_character_card_import)
+    app.router.add_post("/api/character-cards/import/preview", api_character_card_import_preview)
     app.router.add_post("/api/character-cards/export", api_character_card_export)

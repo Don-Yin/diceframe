@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, errorMessage } from '@/api/client'
+import { api, errorMessage, retryOnRateLimit } from '@/api/client'
 import type { CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterPortrait, CharacterSheet, CharacterSkill, GameDetail, PlayerCreateResponse, RuleAttribute, RuleMeta, RulesetRuntimeMeta } from '@/api/types'
 import { rememberCurrentGame } from '@/stores/gameContext'
 import { isStoredPlayerMember } from '@/utils/joinIdentity'
+import { ROOM_TOKEN_REJECTED_EVENT, SEAT_TOKEN_HEADER, readRoomToken, readSeatToken, storeRoomToken, storeSeatToken } from '@/utils/seatToken'
 import { attrDisplayName, suggestedAttributes, skillPointCost } from '@/utils/ruleSchema'
 import { useLocale, type Locale } from '@/composables/useLocale'
 import { useConfirm } from '@/composables/useConfirm'
@@ -35,7 +36,9 @@ const route = useRoute(), router = useRouter()
 const { locale, setLocale, t } = useLocale()
 const { confirm } = useConfirm()
 const gameKey = computed(() => String(route.query.game || ''))
-const linkUser = computed(() => route.query.user ? String(route.query.user) : '')
+// A pre-token takeover link named the seat by its public uid; it no longer
+// proves anything, so it only tells the player to ask for a new link.
+const legacyLinkUser = computed(() => route.query.user ? String(route.query.user) : '')
 const detail = ref<Partial<GameDetail>>({})
 const attrs = ref<RuleAttribute[]>([])
 const attrTotal = ref(0)
@@ -58,6 +61,7 @@ const error = ref(''), busy = ref(false)
 const displayError = computed(() => friendlyPeerDetail(error.value, t))
 const sheetReady = ref(false)
 const needRoomPassword = ref(false), roomPasswordInput = ref('')
+// Set while rejoining a seat through its token (takeover link).
 const resumeUser = ref('')
 const backgroundLimit = 8000
 const usesProfessionalBuilder = computed(() => (
@@ -110,7 +114,38 @@ function skillToForm(skill: string | CharacterSkill): JoinSkill {
   return row
 }
 
+/**
+ * A takeover link carries the seat token in the hash route. Store it for this
+ * game and drop it from the address bar right away, so it never lingers in
+ * history, bookmarks or screenshots.
+ */
+function consumeSeatLink(): boolean {
+  const seat = route.query.seat ? String(route.query.seat) : ''
+  if (!seat || !gameKey.value) return false
+  storeSeatToken(gameKey.value, seat)
+  const query = { ...route.query }
+  delete query.seat
+  delete query.user
+  router.replace({ name: 'join', query })
+  return true
+}
+
+/** Whether this visit came from a takeover link (its seat token was just stored). */
+let pendingSeatLink = false
+
+/** The room token was refused mid-join (expired / password changed): ask again. */
+function onRoomTokenRejected(event: Event) {
+  const rejected = (event as CustomEvent<{ gameKey?: string }>).detail?.gameKey
+  if (rejected !== gameKey.value) return
+  roomPasswordInput.value = ''
+  error.value = t('roomAccessExpired')
+  needRoomPassword.value = true
+}
+window.addEventListener(ROOM_TOKEN_REJECTED_EVENT, onRoomTokenRejected)
+onBeforeUnmount(() => window.removeEventListener(ROOM_TOKEN_REJECTED_EVENT, onRoomTokenRejected))
+
 onMounted(async () => {
+  const seatLink = consumeSeatLink()
   // P2P 直连局：刷新后先恢复 peer 会话（不落服务器 /games 接口）。
   if (route.query.peer === '1' && !activePeerGameClient()) {
     const peerSession = usePeerSessionStore()
@@ -135,28 +170,24 @@ onMounted(async () => {
       return
     }
   }
-  const stored = localStorage.getItem('trpg_play_user_' + gameKey.value)
+  pendingSeatLink = seatLink
   try {
     const d = await api<GameDetail>(`/games/${encodeURIComponent(gameKey.value)}`)
     detail.value = d
-    if (stored) {
-      // 校验本地身份是否仍是成员：被踢后缓存过期，不能再盲跳游玩界面。
-      if (isStoredPlayerMember(d, stored)) {
-        rememberCurrentGame(gameKey.value)
-        router.replace({ name: 'play', query: { game: gameKey.value, user: stored, share: '1' } })
-        return
-      }
-      // 被踢/身份过期：清掉本地缓存，走正常重新加入（尊重房间密码等门槛）。
-      localStorage.removeItem('trpg_play_user_' + gameKey.value)
-    }
-    if (linkUser.value) resumeUser.value = linkUser.value
-    if (d.has_room_password && !localStorage.getItem('trpg_play_room_' + gameKey.value)) {
+    // Behind a room password nothing else is decided until this browser holds
+    // a room token: a returning member would only be bounced back from the
+    // play page, and a newcomer cannot load the join data without one.
+    if (d.has_room_password && !readRoomToken(gameKey.value)) {
+      // The client sends a player here with notice=room when the token it
+      // held was rejected (expired, or the GM changed the password).
+      if (route.query.notice === 'room') error.value = t('roomAccessExpired')
       needRoomPassword.value = true
       return
     }
-    await afterGate()
+    await continueJoin(d)
   } catch (e: unknown) {
     // 详情获取失败：若本地有身份，按旧行为放行进游玩，避免成员被临时故障锁住。
+    const stored = localStorage.getItem('trpg_play_user_' + gameKey.value)
     if (stored) {
       rememberCurrentGame(gameKey.value)
       router.replace({ name: 'play', query: { game: gameKey.value, user: stored, share: '1' } })
@@ -166,17 +197,52 @@ onMounted(async () => {
   }
 })
 
+async function continueJoin(d: Partial<GameDetail>) {
+  const seatLink = pendingSeatLink
+  const stored = localStorage.getItem('trpg_play_user_' + gameKey.value)
+  if (stored && !seatLink) {
+    // 校验本地身份是否仍是成员：被踢后缓存过期，不能再盲跳游玩界面。
+    if (isStoredPlayerMember(d, stored)) {
+      rememberCurrentGame(gameKey.value)
+      router.replace({ name: 'play', query: { game: gameKey.value, user: stored, share: '1' } })
+      return
+    }
+    // 被踢/身份过期：清掉本地缓存，走正常重新加入（尊重房间密码等门槛）。
+    localStorage.removeItem('trpg_play_user_' + gameKey.value)
+  }
+  if (seatLink) resumeUser.value = 'seat'
+  else if (legacyLinkUser.value) error.value = t('seatLinkExpired')
+  else if (route.query.notice === 'seat') error.value = t('seatTokenMissing')
+  await afterGate()
+}
+
 async function afterGate() {
-  if (resumeUser.value) { await resumeIdentity(resumeUser.value); return }
+  if (resumeUser.value) { await resumeSeat(); return }
   await loadGameData()
 }
 
-async function resumeIdentity(uid: string) {
+/** Rejoin the seat a takeover link's token belongs to (this device's session is rebound). */
+async function resumeSeat() {
+  const seatToken = readSeatToken(gameKey.value)
+  if (!seatToken) {
+    // Without the seat's token this would silently become a brand-new seat.
+    error.value = t('seatTokenMissing')
+    resumeUser.value = ''
+    await loadGameData()
+    return
+  }
   busy.value = true; error.value = ''
   try {
-    const r = await api<PlayerCreateResponse>(`/games/${encodeURIComponent(gameKey.value)}/players`, { method: 'POST', body: JSON.stringify({ user_id: uid, join_as_new: false }) })
+    // Rejoining an existing seat is idempotent, so a transient rate limit is retried once.
+    const r = await retryOnRateLimit(() => api<PlayerCreateResponse>(`/games/${encodeURIComponent(gameKey.value)}/players`, {
+      method: 'POST',
+      // Sent explicitly so it also applies when the GM opens the link while logged in.
+      headers: { [SEAT_TOKEN_HEADER]: seatToken },
+      body: JSON.stringify({ join_as_new: false }),
+    }))
     if (r.error) throw new Error(r.error)
     localStorage.setItem('trpg_play_user_' + gameKey.value, r.user_id)
+    storeSeatToken(gameKey.value, r.seat_token)
     rememberCurrentGame(gameKey.value, detail.value?.world_name || '')
     router.replace({ name: 'play', query: { game: gameKey.value, user: r.user_id, share: '1' } })
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
@@ -228,6 +294,7 @@ async function createProfessional(character: CharacterSheet) {
       method: 'POST', body: JSON.stringify({ ...character, join_as_new: true }),
     })
     localStorage.setItem('trpg_play_user_' + gameKey.value, r.user_id)
+    storeSeatToken(gameKey.value, r.seat_token)
     rememberCurrentGame(gameKey.value, detail.value?.world_name || '')
     router.replace({ name: 'play', query: { game: gameKey.value, user: r.user_id, share: '1' } })
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
@@ -241,9 +308,17 @@ async function verifyRoomPassword() {
   busy.value = true; error.value = ''
   try {
     const r = await api<{ room_token: string }>(`/games/${encodeURIComponent(gameKey.value)}/verify-room-password`, { method: 'POST', body: JSON.stringify({ password: roomPasswordInput.value }) })
-    localStorage.setItem('trpg_play_room_' + gameKey.value, r.room_token)
+    storeRoomToken(gameKey.value, r.room_token)
     needRoomPassword.value = false
-    await afterGate()
+    // Behind a room password the lobby hides the scene (and the seat list a
+    // returning player is matched against) until the room token is held;
+    // fetch it again now that it is.
+    try {
+      detail.value = await api<GameDetail>(`/games/${encodeURIComponent(gameKey.value)}`)
+    } catch {
+      // Keep the lobby we have; the scene is only decoration here.
+    }
+    await continueJoin(detail.value)
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
 }
 
@@ -287,6 +362,7 @@ async function create() {
     }
     const r = await api<PlayerCreateResponse>(`/games/${encodeURIComponent(gameKey.value)}/players`, { method: 'POST', body: JSON.stringify(payload) })
     localStorage.setItem('trpg_play_user_' + gameKey.value, r.user_id)
+    storeSeatToken(gameKey.value, r.seat_token)
     rememberCurrentGame(gameKey.value, detail.value?.world_name || '')
     router.replace({ name: 'play', query: { game: gameKey.value, user: r.user_id, share: '1' } })
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
@@ -324,7 +400,7 @@ async function create() {
       </div>
       <label class="sheet-field">{{ t('roomPassword') }}<input type="password" v-model="roomPasswordInput" @keyup.enter="verifyRoomPassword" :placeholder="t('roomPassword')"></label>
       <p v-if="error" class="error-banner">{{ displayError }}</p>
-      <button class="primary submit" :disabled="busy || !roomPasswordInput.trim()" @click="verifyRoomPassword">{{ busy ? t('validating') : t('verifyAndContinue') }}</button>
+      <button class="primary submit" :disabled="busy || !roomPasswordInput" @click="verifyRoomPassword">{{ busy ? t('validating') : t('verifyAndContinue') }}</button>
     </section>
 
     <section v-else-if="resumeUser" class="join-form resume-block">

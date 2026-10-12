@@ -1,5 +1,6 @@
 import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ApiError } from '../src/api/client'
 import LorebookView from '../src/features/lorebook/LorebookView.vue'
 import { i18n } from '../src/i18n'
 
@@ -21,6 +22,12 @@ vi.mock('../src/composables/useToast', () => ({
 vi.mock('../src/composables/useConfirm', () => ({
   useConfirm: () => ({ confirm: vi.fn().mockResolvedValue(true) }),
 }))
+
+// These fixtures model an older server that only exposes the legacy adapter:
+// aiohttp answers an unknown canonical route with a bare 404 (no JSON body).
+function oldServerRouteMissing(path: string): void {
+  if (path.startsWith('/lorebooks/')) throw new ApiError('HTTP 404', 404)
+}
 
 const worlds = {
   worlds: [{ id: 'w1', name: '测试世界', language: 'zh-CN', entry_count: 3 }],
@@ -84,6 +91,7 @@ describe('LorebookView perspective inspector', () => {
       if (p.includes('/games')) return games
       if (p.includes('/lorebook/')) return lorebook
       if (p.includes('/worlds')) return worlds
+      oldServerRouteMissing(p)
       throw new Error(`unexpected path ${p}`)
     })
   })
@@ -391,6 +399,7 @@ describe('LorebookView perspective inspector', () => {
       if (p.includes('/games')) return games
       if (p.includes('/lorebook/')) return historical
       if (p.includes('/worlds')) return worlds
+      oldServerRouteMissing(p)
       throw new Error(`unexpected path ${p}`)
     })
 
@@ -440,6 +449,7 @@ describe('LorebookView product trigger mode', () => {
       if (p.includes('/games')) return games
       if (p.includes('/lorebook/')) return lorebook
       if (p.includes('/worlds')) return worlds
+      oldServerRouteMissing(p)
       throw new Error(`unexpected path ${p}`)
     })
   })
@@ -552,6 +562,7 @@ describe('LorebookView product trigger mode', () => {
       if (p.includes('/games')) return games
       if (p.includes('/lorebook/')) return fixtures
       if (p.includes('/worlds')) return worlds
+      oldServerRouteMissing(p)
       throw new Error(`unexpected path ${p}`)
     })
 
@@ -592,6 +603,7 @@ describe('LorebookView product trigger mode', () => {
       if (p.includes('/games')) return games
       if (p.includes('/lorebook/')) return { entries: stored ? [{ id: 'new', world_id: 'w1', ...stored }] : [] }
       if (p.includes('/worlds')) return worlds
+      oldServerRouteMissing(p)
       throw new Error(`unexpected path ${p}`)
     })
 
@@ -618,5 +630,36 @@ describe('LorebookView product trigger mode', () => {
     expect(vectorSelect().value).toBe('off')
     expect(constantCheckbox().checked).toBe(false)
     wrapper.unmount()
+  })
+
+  describe('legacy adapter fallback', () => {
+    function mockCanonicalFailure(error: unknown) {
+      mocks.api.mockImplementation(async (path: string) => {
+        const p = String(path)
+        if (p.startsWith('/lorebooks/')) throw error
+        if (p.includes('/preview')) return previewFor(p)
+        if (p.includes('/characters')) return characters
+        if (p.includes('/games')) return games
+        if (p.includes('/lorebook/')) return lorebook
+        if (p.includes('/worlds')) return worlds
+        throw new Error(`unexpected path ${p}`)
+      })
+    }
+    function legacyCalls() {
+      // Entry reads/writes only; the preview endpoint is a separate legacy read.
+      return mocks.api.mock.calls.filter(call => /^\/lorebook(\/[^/?]+)?$/.test(String(call[0])))
+    }
+
+    it.each([
+      ['server write failure', new ApiError('写入失败', 500)],
+      ['permission error', new ApiError('forbidden', 403, 'FORBIDDEN')],
+      ['resource 404 with a JSON body', new ApiError('book not found', 404)],
+      ['network failure', new TypeError('Failed to fetch')],
+    ])('does not fall back to the legacy adapter on %s', async (_label, error) => {
+      mockCanonicalFailure(error)
+      mount(LorebookView, { global: { plugins: [i18n] } })
+      await flushPromises()
+      expect(legacyCalls().map(call => String(call[0]))).toEqual([])
+    })
   })
 })

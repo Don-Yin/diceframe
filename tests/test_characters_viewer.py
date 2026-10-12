@@ -6,6 +6,7 @@ import json
 from aiohttp.test_utils import TestClient, TestServer
 import pytest
 
+from src.engine.modules import room_access
 from src.webui.services import characters
 from test_viewer_routes import (
     _owner_password,  # noqa: F401
@@ -78,12 +79,14 @@ def test_service_projects_npc_roster_without_changing_other_fields(characters_en
     ids=["shared-player", "owner-preview", "owner-delegate"],
 )
 async def test_l7_non_gm_characters_withholds_npc_roster(characters_env, suffix, use_owner):
-    app, key, _, headers, _ = characters_env
+    app, key, instance, headers, _ = characters_env
+    # A share-link player is seated through its seat token.
+    player_headers = {"X-Seat-Token": room_access.issue_seat_token(instance, "p1")}
 
     async with TestClient(TestServer(app)) as client:
         response = await client.get(
             f"/api/games/{key}/characters{suffix}",
-            headers=headers if use_owner else {},
+            headers=headers if use_owner else player_headers,
         )
         body = await response.json()
 

@@ -5,17 +5,23 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.engine import economy
 from src.engine.game_instance import GameInstance, _snapshot_players, restore_players
 from src.engine.game_state import GameState
 from src.engine.module_state import ModuleStateError
 from src.engine.modules import economy_state
+from src.engine.modules import combat_extension_state
 from src.migrations.instance import (
     CURRENT_INSTANCE_SCHEMA_VERSION,
     _migrate_v18_to_v19,
     migrate_game_state_payload,
     rebind_imported_game_state_payload,
 )
+from src.engine.modules import checks
+from src.engine.modules import player_control_state
+from src.engine.modules import round_safety
+from src.engine.player_control import set_away_control_policy
 
 
 def _ledger(run_id="run_source"):
@@ -67,7 +73,7 @@ def test_missing_or_corrupt_legacy_ledger_has_safe_defaults(legacy, modules):
     migrated = migrate_game_state_payload(payload)
     assert migrated["modules"]["economy"] == {"schema_version": 1, "state": {}}
     instance = GameInstance.from_dict(migrated)
-    assert instance.economy == economy_state.fresh_economy_state(instance.run_id)
+    assert economy_state.state(instance) == economy_state.fresh_economy_state(instance.run_id)
     assert instance.run_id
 
 
@@ -89,11 +95,11 @@ def test_new_instances_have_independent_ledgers_and_live_property():
     first = GameInstance(game_key=("web", "first", "u"))
     second = GameInstance(game_key=("web", "second", "u"))
     assert first.modules["economy"]["schema_version"] == 1
-    assert first.economy == economy_state.fresh_economy_state(first.run_id)
-    assert first.economy is first.modules["economy"]["state"]
-    first.economy["proposals"].append({"id": "local"})
+    assert economy_state.state(first) == economy_state.fresh_economy_state(first.run_id)
+    assert economy_state.state(first) is first.modules["economy"]["state"]
+    economy_state.state(first)["proposals"].append({"id": "local"})
     assert first.modules["economy"]["state"]["proposals"] == [{"id": "local"}]
-    assert second.economy["proposals"] == []
+    assert economy_state.state(second)["proposals"] == []
     assert first.run_id != second.run_id
 
 
@@ -104,13 +110,13 @@ def test_initialization_preserves_explicit_ledger_identity(saved_run_id):
         game_key=("web", "explicit", "u"), run_id="run_current",
         modules={"economy": {"schema_version": 1, "state": raw}},
     )
-    assert instance.economy is raw
-    assert instance.economy["run_id"] == saved_run_id
-    assert instance.economy["next_sequence"] == 9
-    assert instance.economy["proposals"] is None
-    assert instance.economy["extra"] == [1]
-    assert instance.economy["schema_version"] == 2
-    assert GameInstance.from_dict(instance.to_dict()).economy == instance.economy
+    assert economy_state.state(instance) is raw
+    assert economy_state.state(instance)["run_id"] == saved_run_id
+    assert economy_state.state(instance)["next_sequence"] == 9
+    assert economy_state.state(instance)["proposals"] is None
+    assert economy_state.state(instance)["extra"] == [1]
+    assert economy_state.state(instance)["schema_version"] == 2
+    assert economy_state.state(GameInstance.from_dict(instance.to_dict())) == economy_state.state(instance)
 
 
 def test_initialization_defaults_only_missing_run_id_after_instance_identity_exists():
@@ -119,8 +125,8 @@ def test_initialization_defaults_only_missing_run_id_after_instance_identity_exi
         modules={"economy": {"schema_version": 1, "state": {"next_sequence": 7}}},
     )
     assert instance.run_id
-    assert instance.economy["run_id"] == instance.run_id
-    assert instance.economy["next_sequence"] == 7
+    assert economy_state.state(instance)["run_id"] == instance.run_id
+    assert economy_state.state(instance)["next_sequence"] == 7
     repaired = economy_state.ensure(deepcopy(instance.modules["economy"]))
     assert economy_state.ensure(deepcopy(repaired)) == repaired
 
@@ -128,64 +134,64 @@ def test_initialization_defaults_only_missing_run_id_after_instance_identity_exi
 @pytest.mark.parametrize("snapshot", [{}, {"proposals": [{"id": "snapshot"}], "run_id": ""}])
 def test_setter_restores_exact_snapshot_without_normalization(snapshot):
     instance = GameInstance(game_key=("web", "rollback", "u"))
-    instance.economy = snapshot
-    assert instance.economy is snapshot
+    economy_state.replace_state(instance, snapshot)
+    assert economy_state.state(instance) is snapshot
     assert instance.modules["economy"]["state"] is snapshot
     before = deepcopy(snapshot)
-    instance.economy = _ledger(instance.run_id)
-    instance.economy = snapshot
-    assert instance.economy == before
+    economy_state.replace_state(instance, _ledger(instance.run_id))
+    economy_state.replace_state(instance, snapshot)
+    assert economy_state.state(instance) == before
     assert "schema_version" not in snapshot
 
 
 def test_save_load_preserves_complete_ledger_and_inner_schema():
     instance = GameInstance(game_key=("web", "roundtrip", "u"), run_id="run_source")
-    instance.economy = _ledger(instance.run_id)
+    economy_state.replace_state(instance, _ledger(instance.run_id))
     payload = instance.to_dict()
     assert "economy" not in payload
     assert payload["modules"]["economy"]["schema_version"] == 1
     restored = GameInstance.from_dict(payload)
-    assert restored.economy["schema_version"] == 2
-    assert restored.economy == instance.economy
-    restored.economy["proposals"][0]["amount"] = 99
-    assert instance.economy["proposals"][0]["amount"] == 13
+    assert economy_state.state(restored)["schema_version"] == 2
+    assert economy_state.state(restored) == economy_state.state(instance)
+    economy_state.state(restored)["proposals"][0]["amount"] = 99
+    assert economy_state.state(instance)["proposals"][0]["amount"] == 13
 
 
 def test_run_rotation_clears_ledger_without_mutating_old_snapshot_or_other_slots():
     instance = GameInstance(game_key=("web", "rotate", "u"))
-    instance.economy = _ledger(instance.run_id)
-    old_ledger = instance.economy
+    economy_state.replace_state(instance, _ledger(instance.run_id))
+    old_ledger = economy_state.state(instance)
     before = deepcopy(old_ledger)
-    instance.away_control_policy = "ai_takeover"
+    set_away_control_policy(instance, "ai_takeover")
     old, new = instance.rotate_run_identity()
     assert old == before["run_id"]
     assert old != new == instance.run_id
     assert instance.memory_namespace == f"{instance.game_key!s}::run:{new}"
-    assert instance.economy == economy_state.fresh_economy_state(new)
+    assert economy_state.state(instance) == economy_state.fresh_economy_state(new)
     assert old_ledger == before
-    assert instance.economy is not old_ledger
-    assert instance.away_control_policy == "ai_takeover"
+    assert economy_state.state(instance) is not old_ledger
+    assert player_control_state.away_control_policy(instance) == "ai_takeover"
 
 
 @pytest.mark.asyncio
 async def test_reset_rebinds_fresh_economy_to_new_run():
     instance = GameInstance(game_key=("web", "reset", "u"))
-    instance.economy = _ledger(instance.run_id)
+    economy_state.replace_state(instance, _ledger(instance.run_id))
     old = instance.run_id
     await instance.reset()
     assert instance.run_id != old
-    assert instance.economy == economy_state.fresh_economy_state(instance.run_id)
-    assert instance.economy is instance.modules["economy"]["state"]
+    assert economy_state.state(instance) == economy_state.fresh_economy_state(instance.run_id)
+    assert economy_state.state(instance) is instance.modules["economy"]["state"]
 
 
 def test_aggregate_replacement_copies_ledger_without_aliasing():
     instance = GameInstance(game_key=("web", "staged", "u"))
     staged = GameInstance.from_dict(instance.to_dict())
-    staged.economy = _ledger(staged.run_id)
+    economy_state.replace_state(staged, _ledger(staged.run_id))
     instance.replace_persisted_state_from(staged)
-    assert instance.economy == staged.economy
-    staged.economy["proposals"].clear()
-    assert len(instance.economy["proposals"]) == 1
+    assert economy_state.state(instance) == economy_state.state(staged)
+    economy_state.state(staged)["proposals"].clear()
+    assert len(economy_state.state(instance)["proposals"]) == 1
 
 
 @pytest.mark.parametrize("version", [None, 0, 99])
@@ -196,9 +202,9 @@ def test_unknown_module_schema_round_trips_and_runtime_fails_without_mutation(ve
     before = deepcopy(restored.to_dict())
     assert restored.modules["economy"] == slot
     with pytest.raises(ModuleStateError, match="unsupported economy module schema"):
-        _ = restored.economy
+        _ = economy_state.state(restored)
     with pytest.raises(ModuleStateError):
-        restored.economy = {}
+        economy_state.replace_state(restored, {})
     with pytest.raises(ModuleStateError):
         economy.pending_proposals(restored)
     with pytest.raises(ModuleStateError):
@@ -214,22 +220,22 @@ def _unsupported_economy_instance(version):
     instance.round_number = 2
     instance.players = {"p": {"character_sheet": {"hp": 3, "max_hp": 10, "gold": 7}}}
     instance.npcs = {"guard": {"hp": 4}}
-    instance.scene = "gate"
+    narrative_notes.replace_scene(instance, "gate")
     instance.state = GameState.ACTIVE_JUDGMENT
     instance.action_queue = [{"user_id": "p", "text": "open gate"}]
     instance.pending_actions = [{"user_id": "p", "text": "wait"}]
     instance.ready_players = {"p"}
-    instance.round_start_snapshot = {"p": {"hp": 10, "gold": 20}}
+    round_safety.capture_players(instance, {"p": {"hp": 10, "gold": 20}})
     instance.capture_round_entity_snapshot()
-    instance.combat_extension = {"schema_version": 1, "pending_summaries": ["guard hit"]}
-    instance.combat_extension_round_snapshots = {"2": {"schema_version": 1, "phase": "before"}}
+    combat_extension_state.replace_current(instance, {"schema_version": 1, "pending_summaries": ["guard hit"]})
+    combat_extension_state.replace_round_snapshots(instance, {"2": {"schema_version": 1, "phase": "before"}})
     instance.log = [{
         "round": 1, "gm_response": "previous round", "swipes": [],
-        "round_start_snapshot": deepcopy(instance.round_start_snapshot),
+        "round_start_snapshot": deepcopy(round_safety.round_start_snapshot(instance)),
     }]
-    instance.last_checks = [{"id": "check"}]
-    instance.death_save_outcomes = {"2": {"p": {"outcome": "stable"}}}
-    instance.economy = _ledger(instance.run_id)
+    checks.replace_last_checks(instance, [{"id": "check"}])
+    round_safety.replace_death_save_outcomes(instance, {"2": {"p": {"outcome": "stable"}}})
+    economy_state.replace_state(instance, _ledger(instance.run_id))
     payload = instance.to_dict()
     payload["modules"]["economy"]["schema_version"] = version
     return GameInstance.from_dict(payload)
@@ -302,7 +308,7 @@ def test_import_rebinds_nested_records_and_keeps_only_pending_memory_deliveries(
     assert imported["modules"]["economy"]["state"] == expected
     if version == CURRENT_INSTANCE_SCHEMA_VERSION:
         assert imported["modules"]["economy"]["extra"] == "keep"
-    assert GameInstance.from_dict(imported).economy == expected
+    assert economy_state.state(GameInstance.from_dict(imported)) == expected
 
 
 @pytest.mark.parametrize("round_number", [0, 7, -2, None, "12"])
@@ -323,8 +329,8 @@ def test_all_new_economy_records_use_era_key_and_keep_proposal_origin(monkeypatc
     monkeypatch.setattr(economy, "era_key", lambda _: 12)
     result = economy.resolve_proposal(instance, proposal["id"], actor_uid="p", accepted=True)
     assert result["ok"]
-    assert instance.economy["transactions"][0]["round"] == 12
-    outcome = instance.economy["outcomes"][-1]
+    assert economy_state.state(instance)["transactions"][0]["round"] == 12
+    outcome = economy_state.state(instance)["outcomes"][-1]
     assert outcome["round"] == 11
     assert outcome["resolved_round"] == 12
     fallback = economy.record_economy_outcome(instance, {}, status="rejected", actor_uid="p")
@@ -333,10 +339,27 @@ def test_all_new_economy_records_use_era_key_and_keep_proposal_origin(monkeypatc
     economy.reverse_round_economy(instance, 12)
     restore_players(instance, economy.reconcile_rollback_snapshot(instance, snapshot, 12))
     assert proposal["status"] == "pending"
-    assert instance.economy["transactions"][0]["status"] == "reversed"
+    assert economy_state.state(instance)["transactions"][0]["status"] == "reversed"
     assert instance.get_character_sheet("p")["currency"]["amount"] == 30
 
 
 def test_future_instance_schema_is_rejected():
     with pytest.raises(ValueError, match="unsupported game instance schema version"):
         migrate_game_state_payload({"instance_schema_version": CURRENT_INSTANCE_SCHEMA_VERSION + 1})
+
+
+def test_economy_facade_is_removed_from_game_instance():
+    instance = GameInstance(game_key=("web", "no-facade", "u"))
+    assert not hasattr(instance, "economy")
+    assert not hasattr(GameInstance, "economy")
+
+
+def test_adventure_node_rollback_restores_economy_module_slot():
+    from src.webui.services.ruleset_gameplay import _restore_adventure_node_before_image
+
+    instance = GameInstance(game_key=("web", "adventure-rollback", "u"))
+    before = deepcopy(economy_state.state(instance))
+    economy_state.state(instance)["proposals"].append({"id": "after"})
+    _restore_adventure_node_before_image(instance, {"economy": before})
+    assert economy_state.state(instance) == before
+    assert "economy" not in vars(instance)

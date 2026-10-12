@@ -25,6 +25,7 @@ vi.mock('../src/api/client', () => ({
   apiBlob: vi.fn(),
   hasAccessToken: () => false,
   isNotFoundError: (error: unknown) => Boolean((error as { status?: number })?.status === 404),
+  retryOnRateLimit: <T>(request: () => Promise<T>) => request(),
 }))
 vi.mock('../src/api/rulesets', () => ({
   fetchRulesetAvailableActions: mocks.fetchRulesetAvailableActions,

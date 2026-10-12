@@ -83,37 +83,40 @@ def replace_manual_roll_requests(instance: Any, value: list[dict[str, Any]]) -> 
 
 def record(instance: Any, check: CheckResult) -> None:
     require_writable(instance)
-    instance.last_checks.append(check)
-    instance.last_check = check
+    slot = get_module_state(instance, MODULE_NAME)
+    slot["last_checks"].append(check)
+    slot["last_check"] = check
 
 
 def sync_last(instance: Any, check: CheckResult) -> None:
     require_writable(instance)
-    instance.last_check = dict(check)
+    replace_last_check(instance, dict(check))
 
 
 def mark_prepared(instance: Any) -> None:
     require_writable(instance)
-    if instance.last_checks:
-        instance.last_check = instance.last_checks[-1]
-    instance.round_checks_prepared = True
+    slot = get_module_state(instance, MODULE_NAME)
+    if slot["last_checks"]:
+        slot["last_check"] = slot["last_checks"][-1]
+    slot["round_checks_prepared"] = True
 
 
 def clear_round(instance: Any, *, prepared: bool = False) -> None:
     require_writable(instance)
-    instance.last_check = None
-    instance.last_checks.clear()
-    instance.round_checks_prepared = prepared
+    slot = get_module_state(instance, MODULE_NAME)
+    slot["last_check"] = None
+    slot["last_checks"].clear()
+    slot["round_checks_prepared"] = prepared
 
 
 def invalidate_prepared(instance: Any) -> None:
     require_writable(instance)
-    instance.round_checks_prepared = False
+    replace_round_checks_prepared(instance, False)
 
 
 def add_manual_roll_request(instance: Any, req: dict[str, Any]) -> None:
     require_writable(instance)
-    instance.manual_roll_requests.append(req)
+    manual_roll_requests(instance).append(req)
 
 
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)

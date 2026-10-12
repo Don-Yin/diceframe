@@ -9,7 +9,10 @@ import shutil
 import time
 from typing import Any
 
+from src.commands.game_lifecycle import RunInitializationError
 from src.engine.game_instance import GameState
+from src.engine.modules import adventure_runtime_state, content_binding, progression_state, room_access, table_settings
+from src.content_modules.refs import ContentRef, ContentRefError, parse_content_ref
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
 from src.engine.narrative_perspective import validate_narrative_perspective
 from src.content.gm_style import normalize_gm_style_override
@@ -55,6 +58,18 @@ def delete_game(
     world_id = str(getattr(instance, "world_id", "") or "") or _saved_world_id(
         dependencies, parsed_key
     )
+    game_scope = _GAME_KEY_SEP.join(str(part) for part in parsed_key)
+    lorebook = getattr(dependencies, "lorebook", None)
+    if lorebook is None and dependencies.handler is not None:
+        lorebook = getattr(dependencies.handler, "lorebook", None)
+    # Game bindings are owned by the save lifecycle.  Remove only the exact
+    # game scope; world/global bindings remain user content and survive.
+    if lorebook is not None and hasattr(lorebook, "list_bindings"):
+        for binding in list(lorebook.list_bindings(scope_kind="game", scope_id=game_scope)):
+            try:
+                lorebook.delete_binding(str(binding.get("id") or ""))
+            except Exception:
+                logger.warning("删除游戏内容绑定失败: %s", binding.get("id"), exc_info=True)
     try:
         shutil.rmtree(save_dir)
     except Exception as exc:
@@ -99,15 +114,54 @@ async def create_game(
     advancement_mode: str = "milestone",
     advancement_authority: str = "ai_gm",
     unclaimed_control_default: str = "",
+    world_ref: dict[str, Any] | None = None,
+    book_bindings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if not dependencies.handler or not dependencies.registry:
         return {"ok": False, "error": "系统未就绪"}
     if config_error := dependencies.llm_configuration_error(language):
         return config_error
+    parsed_world_ref: ContentRef | None = None
+    if world_ref is not None:
+        try:
+            parsed_world_ref = parse_content_ref(
+                world_ref,
+                default_source=f"world:{world_id}",
+            )
+            if parsed_world_ref.kind != "world":
+                raise ContentRefError("world_ref must reference kind=world")
+            if str(world_id or "") and str(world_id) != parsed_world_ref.id:
+                raise ContentRefError("world_id disagrees with world_ref")
+            world_id = parsed_world_ref.id
+        except ContentRefError as exc:
+            return {"ok": False, "error_code": "INVALID_WORLD_REF", "error": str(exc)}
     if not _is_safe_world_id(world_id):
         return {"ok": False, "error": "非法 world_id"}
     if source_world_id and not _is_safe_world_id(source_world_id):
         return {"ok": False, "error": "非法 source_world_id"}
+    normalized_book_bindings: list[dict[str, Any]] = []
+    if book_bindings is not None:
+        if not isinstance(book_bindings, list):
+            return {"ok": False, "error_code": "INVALID_BOOK_BINDINGS", "error": "book_bindings must be a list"}
+        try:
+            for raw_binding in book_bindings:
+                if not isinstance(raw_binding, dict):
+                    raise ContentRefError("book binding must be an object")
+                raw_ref = raw_binding.get("ref", raw_binding)
+                ref = parse_content_ref(raw_ref, default_source=f"world:{world_id}")
+                if ref.kind != "lorebook":
+                    raise ContentRefError("book binding must reference kind=lorebook")
+                normalized_book_bindings.append({
+                    "ref": ref,
+                    "role": str(raw_binding.get("role") or "runtime"),
+                    "order": int(raw_binding.get("order", 110)),
+                })
+        except (ContentRefError, TypeError, ValueError) as exc:
+            return {"ok": False, "error_code": "INVALID_BOOK_BINDINGS", "error": str(exc)}
+        if normalized_book_bindings and not lorebook_world_id:
+            first_ref = normalized_book_bindings[0]["ref"]
+            if first_ref.source_kind == "world":
+                lorebook_world_id = first_ref.source_id
     if not players:
         return {"ok": False, "error": "请至少创建或选择 1 名队伍角色"}
     try:
@@ -159,8 +213,10 @@ async def create_game(
         room_password = ""
     else:
         room_password = str(room_password)
-        if len(room_password) < 4:
-            return {"ok": False, "error": "房间密码至少 4 位"}
+        try:
+            room_access.validate_new_room_password(room_password)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
 
     # Professional sheets are validated as a complete batch before any game,
     # player, card, or save mutation. create_player repeats normalization at the
@@ -237,6 +293,11 @@ async def create_game(
             "error": "创建游戏失败，未留下半成品存档，请重试。",
         }
     transaction.advance(CreationPhase.INSTANCE_REGISTERED)
+    binding_error = game_creation_phases.bind_ruleset_runtime(
+        transaction, instance, runtime, selected_rule, resolved_language,
+    )
+    if binding_error is not None:
+        return binding_error
     instance.set_difficulty(difficulty)
     if not instance.bind_adventure(adventure_binding):
         transaction.rollback()
@@ -245,7 +306,20 @@ async def create_game(
             "error_code": "INVALID_ADVENTURE_BINDING",
             "error": "冒险包绑定无效，未留下半成品存档。",
         }
-    instance.play_mode = normalized_play_mode
+    content_error = game_creation_phases.bind_content_refs(
+        transaction,
+        instance,
+        parsed_world_ref.to_portable_dict() if parsed_world_ref is not None else {
+            "source_kind": "world",
+            "source_id": world_id,
+            "kind": "world",
+            "id": world_id,
+            "digest": "",
+        },
+    )
+    if content_error is not None:
+        return content_error
+    adventure_runtime_state.replace_play_mode(instance, normalized_play_mode)
     # FIX-04 §6.5/§6.6：v2 冒险在同一创建事务里初始化进度并原子物化世界种子；
     # 失败即整体回滚（不留下 partial save / partial world）。
     if callable(getattr(dependencies, "initialize_adventure_run", None)):
@@ -286,13 +360,74 @@ async def create_game(
             }
     transaction.advance(CreationPhase.INSTANCE_CONFIGURED)
 
-    game_creation_phases.copy_lorebook_entries(
-        dependencies,
-        source_world_id=lorebook_world_id,
-        world_id=world_id,
-        world_name=resolved_world_name,
-        language=resolved_language,
-    )
+    try:
+        lorebook_binding_id = game_creation_phases.copy_lorebook_entries(
+            dependencies,
+            source_world_id=lorebook_world_id if book_bindings is None else "",
+            world_id=world_id,
+            world_name=resolved_world_name,
+            language=resolved_language,
+            game_key=game_key,
+            canonical=book_bindings is not None,
+        )
+        if lorebook_binding_id:
+            transaction.track_binding(lorebook_binding_id)
+            source_book_id = (
+                dependencies.lorebook.primary_world_book_id(lorebook_world_id)
+                if dependencies.lorebook is not None
+                and hasattr(dependencies.lorebook, "primary_world_book_id")
+                else f"world:{lorebook_world_id}"
+            )
+            content_binding.add_book_ref(instance, {
+                "source_kind": "world",
+                "source_id": lorebook_world_id,
+                "kind": "lorebook",
+                "id": source_book_id,
+                "digest": "",
+            })
+        if normalized_book_bindings:
+            store = dependencies.lorebook
+            if store is None or not hasattr(store, "bind_lorebook"):
+                transaction.rollback()
+                return {"ok": False, "error_code": "BOOK_BINDING_UNAVAILABLE", "error": "canonical lorebook store is unavailable"}
+            game_scope = _GAME_KEY_SEP.join(str(part) for part in game_key)
+            for item in normalized_book_bindings:
+                ref = item["ref"]
+                book_id = (
+                    store.primary_world_book_id(ref.source_id)
+                    if ref.source_kind == "world" and hasattr(store, "primary_world_book_id")
+                    else ref.id
+                )
+                if not store.get_lorebook(book_id):
+                    transaction.rollback()
+                    return {"ok": False, "error_code": "BOOK_NOT_FOUND", "error": book_id}
+                binding_id = f"binding:game:{game_scope}:lorebook:{book_id}"
+                store.bind_lorebook({
+                    "id": binding_id,
+                    "book_id": book_id,
+                    "scope_kind": "game",
+                    "scope_id": game_scope,
+                    "role": item["role"],
+                    "order": item["order"],
+                })
+                transaction.track_binding(binding_id)
+                content_binding.add_book_ref(instance, {
+                    "source_kind": ref.source_kind,
+                    "source_id": ref.source_id,
+                    "kind": "lorebook",
+                    "id": book_id,
+                    "digest": ref.digest,
+                })
+    except Exception:
+        # Book bindings live outside the save directory; any failure here must
+        # still compensate them (tracked bindings) and the registered instance.
+        transaction.rollback()
+        logger.exception("创建游戏内容绑定失败，已回滚: %s", game_key)
+        return {
+            "ok": False,
+            "error_code": "BOOK_BINDING_FAILED",
+            "error": "世界书绑定失败，未留下半成品存档。",
+        }
     created_players, player_error = await game_creation_phases.create_players(
         dependencies,
         transaction,
@@ -343,10 +478,19 @@ async def create_game(
         "language": normalize_language(instance.language),
         "narration": narration,
         "players": created_players,
-        "round_number": instance.round_number,
+        "round_number": progression_state.round_value(instance),
         "state": instance.state.value,
-        "seed_code": instance.seed_code,
+        "seed_code": table_settings.seed_code(instance),
         "adventure_binding": dict(instance.adventure_binding),
+    }
+
+
+def _run_init_failure(exc: RunInitializationError) -> dict[str, Any]:
+    label = "冒险" if exc.code == "ADVENTURE_RUNTIME_INIT_FAILED" else "规则运行时"
+    return {
+        "ok": False,
+        "error_code": exc.code,
+        "error": f"{label}初始化失败，原对局保持不变：{exc}",
     }
 
 
@@ -358,13 +502,18 @@ async def reset_game(
         return {"ok": False, "error": "游戏不存在"}
     if not dependencies.handler:
         return {"ok": False, "error": "系统未就绪"}
-    inst = await dependencies.handler.reset_game(inst)
+    try:
+        inst = await dependencies.handler.reset_game(inst)
+    except RunInitializationError as exc:
+        # Raised before the registry swap: the previous run stays current.
+        logger.warning("新 run 初始化失败，已保留原对局: %s", exc, exc_info=True)
+        return _run_init_failure(exc)
     return {
         "ok": True,
         "narration": dependencies.clean_public_narration(
             inst.log[-1].get("gm_response", "") if inst.log else ""
         ),
-        "seed_code": inst.seed_code,
+        "seed_code": table_settings.seed_code(inst),
     }
 
 
@@ -382,13 +531,18 @@ async def restart_game(
             "ok": False,
             "error": "当前游戏没有角色，无法重开；请先创建角色或重新开局",
         }
-    inst = await dependencies.handler.restart_game(inst)
+    try:
+        inst = await dependencies.handler.restart_game(inst)
+    except RunInitializationError as exc:
+        # Raised before the registry swap: the previous run stays current.
+        logger.warning("新 run 初始化失败，已保留原对局: %s", exc, exc_info=True)
+        return _run_init_failure(exc)
     return {
         "ok": True,
         "narration": dependencies.clean_public_narration(
             inst.log[-1].get("gm_response", "") if inst.log else ""
         ),
-        "seed_code": inst.seed_code,
+        "seed_code": table_settings.seed_code(inst),
     }
 
 

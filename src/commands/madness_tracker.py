@@ -6,6 +6,7 @@ import logging
 import random
 
 from src.engine.game_instance import GameInstance
+from src.engine.modules import progression_state
 
 logger = logging.getLogger("trpg")
 
@@ -19,9 +20,9 @@ class MadnessTracker:
         if sanity <= 0 and not character_sheet.get("deceased"):
             character_sheet["deceased"] = True
             character_sheet["death_cause"] = "永久疯狂"
-            character_sheet["death_round"] = instance.round_number
+            character_sheet["death_round"] = progression_state.round_value(instance)
             name = instance.players[uid].get("character_name", uid)
-            logger.info("%s 因永久疯狂而不可操作 (round=%d)", name, instance.round_number)
+            logger.info("%s 因永久疯狂而不可操作 (round=%d)", name, progression_state.round_value(instance))
             return
         if loss >= 5:
             name = instance.players[uid].get("character_name", uid)
@@ -32,7 +33,7 @@ class MadnessTracker:
                     "symptom": "持续行为异常",
                 }
                 logger.info("%s 进入长期疯狂 (round=%d, rounds=%d)",
-                            name, instance.round_number, character_sheet["madness"]["remaining_rounds"])
+                            name, progression_state.round_value(instance), character_sheet["madness"]["remaining_rounds"])
             else:
                 character_sheet["madness"] = {
                     "type": "temporary",
@@ -40,7 +41,7 @@ class MadnessTracker:
                     "symptom": "临时行为异常",
                 }
                 logger.info("%s 进入临时疯狂 (round=%d, rounds=%d)",
-                            name, instance.round_number, character_sheet["madness"]["remaining_rounds"])
+                            name, progression_state.round_value(instance), character_sheet["madness"]["remaining_rounds"])
 
     def tick_madness(self, instance: GameInstance) -> None:
         """每轮结束时减少疯狂状态回合数。"""

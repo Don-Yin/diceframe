@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from src.commands.prompt_composer import PromptComposer
 from src.commands.round_effects import apply_growth_rewards
 from src.engine.game_instance import GameInstance
+from src.engine.modules import ruleset_runtime
 
 
 class _AdvancementRuntime:
@@ -36,7 +37,7 @@ class _ProgressionMustNotRun:
 
 def _instance() -> GameInstance:
     instance = GameInstance(game_key=("web", "advancement-boundary", "web_bot"))
-    instance.ruleset_runtime = {"id": "example:advancement", "version": 2}
+    ruleset_runtime.replace_binding(instance, {"id": "example:advancement", "version": 2})
     return instance
 
 

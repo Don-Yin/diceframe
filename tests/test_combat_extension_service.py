@@ -12,6 +12,7 @@ from webapi_harness import web_api  # noqa: F401
 from src.engine.game_instance import GameInstance, GameState
 from src.engine import combat_narrative
 from src.webui.services import combat_extension as svc
+from src.engine.modules import combat_extension_state
 
 
 class _FakeRule:
@@ -172,7 +173,7 @@ def test_player_action_costs_qi_and_damages_npc() -> None:
     assert result["ok"] is True
     # 内力 50 - 8 = 42，并写回角色卡（单一权威）。
     assert instance.get_character_sheet("p1")["qi"] == 42
-    pools = instance.combat_extension["pools"]
+    pools = combat_extension_state.current(instance)["pools"]
     assert pools["player:p1"]["qi"]["current"] == 42
     # 老僧无护盾：str(5)*2=10 伤害直接进 HP（14 -> 4），并落进战斗扩展池。
     assert pools["npc:old_monk"]["hp"]["current"] == 4
@@ -265,14 +266,14 @@ def test_unknown_action_and_target_fail_closed() -> None:
 def test_insufficient_qi_rejects_without_state_change() -> None:
     instance = _instance()
     instance.get_character_sheet("p1")["qi"] = 3
-    before_pools = instance.combat_extension
+    before_pools = combat_extension_state.current(instance)
     result = svc.resolve_combat_action(
         instance, _rule(),
         {"intent_id": "i-8", "action_id": "ability:qi_palm", "target_ids": ["npc:old_monk"]},
         actor_uid="p1", viewer_is_gm=False,
     )
     assert result["code"] == "ACTION_REJECTED"
-    assert instance.combat_extension == before_pools
+    assert combat_extension_state.current(instance) == before_pools
     assert instance.get_character_sheet("p1")["qi"] == 3
 
 
@@ -298,7 +299,7 @@ def test_state_survives_round_trip() -> None:
         actor_uid="p1", viewer_is_gm=False,
     )
     recovered = GI.from_dict(instance.to_dict())
-    assert recovered.combat_extension == instance.combat_extension
+    assert combat_extension_state.current(recovered) == combat_extension_state.current(instance)
     assert recovered.get_character_sheet("p1")["qi"] == 42
 
 
@@ -326,7 +327,7 @@ def test_resolved_action_is_queued_for_narration_until_consumed() -> None:
 
     combat_narrative.consume_pending_events(instance, ["i-narrative"])
     assert combat_narrative.pending_events(instance) == []
-    assert "pending_narrative_events" not in instance.combat_extension
+    assert "pending_narrative_events" not in combat_extension_state.current(instance)
 
 
 @pytest.mark.parametrize("intent", [
@@ -372,19 +373,19 @@ def test_scheduler_advance_accumulates_and_buff_speeds_next_tick() -> None:
         actor_uid="p1", viewer_is_gm=False,
     )
     assert result["ok"] is True
-    assert instance.combat_extension["buffs"][0]["delta"] == 50
+    assert combat_extension_state.current(instance)["buffs"][0]["delta"] == 50
     result = svc.scheduler_advance(instance, _rule())
     assert "player:p1" in result["ready"]
     # 时长 1 的 buff 在推进后到期移除。
     assert not any(b["entity_id"] == "player:p1"
-                   for b in instance.combat_extension["buffs"])
+                   for b in combat_extension_state.current(instance)["buffs"])
 
 
 def test_scheduler_noop_does_not_tick_buffs_when_ready_queue_is_nonempty() -> None:
     instance = _instance()
     first = svc.scheduler_advance(instance, _rule())
     assert first["ok"] is True
-    instance.combat_extension["buffs"] = [{
+    combat_extension_state.current(instance)["buffs"] = [{
         "entity_id": "player:p1",
         "stat": "action_speed",
         "delta": 10,
@@ -394,14 +395,14 @@ def test_scheduler_noop_does_not_tick_buffs_when_ready_queue_is_nonempty() -> No
     second = svc.scheduler_advance(instance, _rule())
 
     assert second["ok"] is True
-    assert instance.combat_extension["buffs"][0]["remaining"] == 2
+    assert combat_extension_state.current(instance)["buffs"][0]["remaining"] == 2
 
 
 def test_scheduler_gates_actions_before_ready() -> None:
     """调度器激活后，未就绪实体不能行动（ATB 纪律）。"""
     instance = _instance()
     svc.scheduler_advance(instance, _rule())
-    ready = instance.combat_extension["scheduler"]["ready"]
+    ready = combat_extension_state.current(instance)["scheduler"]["ready"]
     other = next(entity for entity in ("player:p1", "player:p2", "npc:old_monk")
                  if entity not in ready)
     actor_uid = other.removeprefix("player:") or "gm"
@@ -418,7 +419,7 @@ def test_scheduler_gates_actions_before_ready() -> None:
 def test_ready_actor_action_consumes_turn() -> None:
     instance = _instance()
     svc.scheduler_advance(instance, _rule())
-    ready = list(instance.combat_extension["scheduler"]["ready"])
+    ready = list(combat_extension_state.current(instance)["scheduler"]["ready"])
     actor = ready[0]
     uid = actor.removeprefix("player:") if actor.startswith("player:") else actor
     if actor.startswith("player:"):
@@ -431,7 +432,7 @@ def test_ready_actor_action_consumes_turn() -> None:
         actor_uid=uid, viewer_is_gm=True,
     )
     assert result["ok"] is True
-    assert actor not in instance.combat_extension["scheduler"]["ready"]
+    assert actor not in combat_extension_state.current(instance)["scheduler"]["ready"]
 
 
 def test_rapid_action_submissions_never_double_charge() -> None:
@@ -450,7 +451,7 @@ def test_rapid_action_submissions_never_double_charge() -> None:
     ]
     assert all(r["ok"] for r in results)
     assert instance.get_character_sheet("p1")["qi"] == 10
-    assert instance.combat_extension["pools"]["player:p1"]["qi"]["current"] == 10
+    assert combat_extension_state.current(instance)["pools"]["player:p1"]["qi"]["current"] == 10
 
 
 def test_consume_item_deducts_inventory_atomically() -> None:
@@ -555,7 +556,7 @@ def test_combat_writes_are_rejected_outside_action_phase() -> None:
 
     assert action["code"] == "ROUND_NOT_ACCEPTING_ACTIONS"
     assert advance["code"] == "ROUND_NOT_ACCEPTING_ACTIONS"
-    assert instance.combat_extension == {}
+    assert combat_extension_state.current(instance) == {}
 
 
 def test_corrupt_idempotency_record_fails_closed_without_reexecuting() -> None:
@@ -569,7 +570,7 @@ def test_corrupt_idempotency_record_fails_closed_without_reexecuting() -> None:
         instance, _rule(), intent, actor_uid="p1", viewer_is_gm=False,
     )
     assert first["ok"] is True
-    instance.combat_extension["intents"]["i-corrupt"]["result"] = {"ok": True}
+    combat_extension_state.current(instance)["intents"]["i-corrupt"]["result"] = {"ok": True}
 
     replay = svc.resolve_combat_action(
         instance, _rule(), intent, actor_uid="p1", viewer_is_gm=False,
@@ -585,10 +586,10 @@ def test_unsupported_combat_state_schema_rejects_writes(
     schema_version: object,
 ) -> None:
     instance = _instance()
-    instance.combat_extension = {
+    combat_extension_state.replace_current(instance, {
         "schema_version": schema_version,
         "pools": {},
-    }
+    })
 
     result = svc.resolve_combat_action(
         instance,
@@ -607,7 +608,7 @@ def test_engaged_npc_joins_active_threshold_scheduler() -> None:
     instance = _instance()
     advanced = svc.scheduler_advance(instance, _rule())
     assert advanced["ok"] is True
-    assert "npc:old_monk" not in instance.combat_extension["scheduler"]["gauges"]
+    assert "npc:old_monk" not in combat_extension_state.current(instance)["scheduler"]["gauges"]
 
     acted = svc.resolve_combat_action(
         instance,
@@ -619,7 +620,7 @@ def test_engaged_npc_joins_active_threshold_scheduler() -> None:
     )
 
     assert acted["ok"] is True
-    scheduler = instance.combat_extension["scheduler"]
+    scheduler = combat_extension_state.current(instance)["scheduler"]
     assert scheduler["gauges"]["npc:old_monk"] == 0
     assert "npc:old_monk" in scheduler["order"]
 
@@ -640,7 +641,7 @@ def test_engaged_npc_joins_active_round_robin_scheduler() -> None:
         viewer_is_gm=False,
     )
     assert joined["ok"] is True
-    assert "npc:old_monk" in instance.combat_extension["scheduler"]["order"]
+    assert "npc:old_monk" in combat_extension_state.current(instance)["scheduler"]["order"]
     assert svc.combat_extension_projection(
         instance, rule, viewer_uid="p2", viewer_is_gm=False,
     )["scheduler"]["ready"] == ["player:p2"]
@@ -693,8 +694,8 @@ def test_inventory_is_not_consumed_when_action_is_rejected() -> None:
         {"name": "回春丹", "qty": 1},
     ]
     assert instance.get_character_sheet("p1")["qi"] == 50
-    assert instance.combat_extension == {}
-    assert instance.combat_extension_round_snapshots == {}
+    assert combat_extension_state.current(instance) == {}
+    assert combat_extension_state.round_snapshots(instance) == {}
 
 
 def test_character_sheet_update_reseeds_source_backed_pool() -> None:
@@ -721,7 +722,7 @@ def test_character_sheet_update_reseeds_source_backed_pool() -> None:
 
     assert second["ok"] is True
     assert instance.get_character_sheet("p1")["qi"] == 42
-    assert instance.combat_extension["pools"]["player:p1"]["qi"]["current"] == 42
+    assert combat_extension_state.current(instance)["pools"]["player:p1"]["qi"]["current"] == 42
 
 
 @pytest.mark.parametrize("payload", [
@@ -733,7 +734,7 @@ def test_character_sheet_update_reseeds_source_backed_pool() -> None:
 ])
 def test_malformed_nested_state_fails_closed(payload: dict) -> None:
     instance = _instance()
-    instance.combat_extension = payload
+    combat_extension_state.replace_current(instance, payload)
 
     projection = svc.combat_extension_projection(
         instance, _rule(), viewer_uid="p1", viewer_is_gm=False,
@@ -745,10 +746,10 @@ def test_malformed_nested_state_fails_closed(payload: dict) -> None:
 
 def test_malformed_scheduler_state_cannot_bypass_turn_gating() -> None:
     instance = _instance()
-    instance.combat_extension = {
+    combat_extension_state.replace_current(instance, {
         "schema_version": 1,
         "scheduler": {"kind": "threshold", "gauges": "bad"},
-    }
+    })
 
     result = svc.resolve_combat_action(
         instance,
@@ -803,7 +804,7 @@ async def test_round_rollback_restores_combat_pools_source_fields_and_npc_hp() -
 
     assert await instance.rollback_last_round() == 3
 
-    assert instance.combat_extension == {}
+    assert combat_extension_state.current(instance) == {}
     assert instance.get_character_sheet("p1")["qi"] == 50
     assert instance.npcs["old_monk"]["hp"] == 14
 
@@ -837,7 +838,7 @@ async def test_finished_round_rollback_restores_pre_combat_inventory_and_hp() ->
     assert instance._do_advance_locked() is True
     await instance.finish_judgment("本轮结算")
     assert any("内力掌" in item for item in instance.log[-1]["state_changes"])
-    assert "pending_summaries" not in instance.combat_extension
+    assert "pending_summaries" not in combat_extension_state.current(instance)
 
     # A user can already have acted in the newly opened round when the GM
     # rolls history back. Those unlogged writes must be undone as part of the
@@ -862,7 +863,7 @@ async def test_finished_round_rollback_restores_pre_combat_inventory_and_hp() ->
     assert instance.npcs["old_monk"]["hp"] == 14
     assert instance.npcs["bandit"]["hp"] == 20
     assert "max_hp" not in instance.npcs["old_monk"]
-    assert instance.combat_extension == {}
+    assert combat_extension_state.current(instance) == {}
 
 
 @pytest.mark.asyncio
@@ -898,7 +899,7 @@ async def test_facade_rejects_combat_write_during_historical_rewrite(
 
     assert result["code"] == "REWRITE_IN_PROGRESS"
     assert instance.get_character_sheet("p1")["qi"] == 50
-    assert instance.combat_extension == {}
+    assert combat_extension_state.current(instance) == {}
 
 
 def test_unengaged_npc_still_targetable_and_named() -> None:

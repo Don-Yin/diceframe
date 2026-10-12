@@ -19,13 +19,25 @@ def _is_safe_game_key_part(s: str) -> bool:
 
 
 def _parse_game_key(game_key: str) -> tuple[str, str, str]:
-    """解析公开 game_key，并拒绝路径穿越片段。"""
+    """解析公开 game_key，并拒绝路径穿越片段。
+
+    A game key has at most three ``|`` parts. Extra parts used to be dropped,
+    which let ``a|b|c|anything`` alias the same game under a different key
+    (and slip past per-game state keyed by the raw string); they are refused.
+    """
     raw = str(game_key or "")
     parts = raw.split(_GAME_KEY_SEP)
-    parsed = tuple(parts[:3]) if len(parts) >= 3 else (raw, "", "")
+    if len(parts) > 3:
+        return _INVALID_GAME_KEY
+    parsed = tuple(parts) if len(parts) == 3 else (raw, "", "")
     if not all(_is_safe_game_key_part(part) for part in parsed):
         return _INVALID_GAME_KEY
     return parsed
+
+
+def canonical_game_key(game_key: str) -> str:
+    """The one spelling of a public game key, for keying per-game state."""
+    return _GAME_KEY_SEP.join(_parse_game_key(game_key))
 
 
 def _is_safe_world_id(s: str) -> bool:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
@@ -18,13 +19,16 @@ from src.adventures.graph_v2 import (
     AdventureGraphV2Error,
     validate_graph_v2,
 )
+from src.engine import progression
 from src.engine.legacy_game_projection import project_legacy_game_context
+from src.engine.modules import adventure_runtime_state, legacy_combat, ruleset_runtime
 from src.rulesets.dnd2024.adventure_migrations import (
     apply_unreleased_adventure_binding_migration,
 )
 from src.rulesets.bundle import LoadedRulesetBundle, RulesetBundleLoader
 from src.rulesets.contracts import RulesetCapabilities
 import src.rulesets.dnd2024.advancement_access as advancement_access
+from src.rulesets.dnd2024.binding import rule_binding
 from src.rulesets.dnd2024.character.builder import Dnd2024CharacterBuilder
 from src.rulesets.dnd2024.character.reconciliation import (
     Dnd2024CharacterStateReconciler,
@@ -32,6 +36,7 @@ from src.rulesets.dnd2024.character.reconciliation import (
 )
 from src.rulesets.dnd2024.campaign import CAMPAIGN_INTENT_TYPES, Dnd2024CampaignEngine
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
+import src.rulesets.dnd2024.combat.visibility as combat_visibility
 from src.rulesets.dnd2024.content.catalog import DndContentCatalog
 from src.rulesets.dnd2024.content.provider import (
     DndContentCatalogProvider,
@@ -64,6 +69,9 @@ from src.rulesets.dnd2024.spells import Dnd2024SpellSelection, SpellCatalogError
 from src.rulesets.dnd2024 import adventure_validation  # noqa: F401  (MOD-01: 注册 adventure mechanics validator)
 
 
+logger = logging.getLogger(__name__)
+
+
 class Dnd2024Runtime:
     runtime_id = "core:dnd2024"
     runtime_version = 1
@@ -85,10 +93,8 @@ class Dnd2024Runtime:
     ) -> None:
         """Materialize a clean campaign projection for reset/restart."""
 
-        from src.engine.modules import ruleset_runtime
-
         ruleset_runtime.require_writable(instance)
-        instance.ruleset_state = {"state_schema_version": 1}
+        ruleset_runtime.replace_state(instance, {"state_schema_version": 1})
         self._campaign_engine(
             instance, str(getattr(instance, "language", "") or ""),
         ).initialize_state(instance)
@@ -299,7 +305,7 @@ class Dnd2024Runtime:
     def _rules_outcome(instance: Any, outcome_id: str) -> str:
         """One canonical rules outcome id → its current status string."""
 
-        state = getattr(instance, "ruleset_state", None)
+        state = ruleset_runtime.state(instance)
         state = state if isinstance(state, dict) else {}
         raw_combat = state.get("combat")
         combat: dict[str, Any] = raw_combat if isinstance(raw_combat, dict) else {}
@@ -389,6 +395,16 @@ class Dnd2024Runtime:
         """Contribute D&D-only detail fields through the generic read boundary."""
 
         return {"advancement": advancement_access.project(instance)}
+
+    def project_intent_result(
+        self, instance: Any, result: dict[str, Any], viewer_id: str, viewer_is_gm: bool,
+    ) -> dict[str, Any]:
+        """Strip monster stat blocks from intent/automation payloads for non-GMs."""
+
+        del instance, viewer_id
+        if viewer_is_gm:
+            return result
+        return combat_visibility.public_intent_result(result)
 
     def configure_live_advancement(
         self, instance: Any, mode: str, authority: str,
@@ -501,7 +517,7 @@ class Dnd2024Runtime:
         ``unprepared`` unless the GM explicitly declares a sandbox encounter.
         """
 
-        if str(getattr(instance, "play_mode", "") or "").casefold() == "free":
+        if str(adventure_runtime_state.play_mode(instance) or "").casefold() == "free":
             return EncounterAccess.sandbox()
         # FIX-04 §6.9：绑定的是 Adventure v2 → 遭遇由**v2 进度**（active 节点的
         # encounter_ref）决定，不再走 v1 tutorial step；v1 路径原样保留。
@@ -547,7 +563,7 @@ class Dnd2024Runtime:
     def _v2_encounter_access(self, instance: Any) -> EncounterAccess | None:
         """§6.9：v2 绑定时的剧情遭遇访问权；非 v2 返回 ``None``（走 v1 路径）。"""
 
-        progress = getattr(instance, "adventure_progress", None)
+        progress = adventure_runtime_state.progress(instance)
         if not isinstance(progress, dict) or not progress:
             return None
         try:
@@ -590,6 +606,10 @@ class Dnd2024Runtime:
         ):
             return character
         return Dnd2024RestEngine(bundle).sync_resources(character)
+
+    def game_binding(self, rule: Any, locale: str) -> dict[str, Any]:
+        del rule
+        return rule_binding(self.load_bundle(locale))
 
     def describe_experience(self, rule: Any, locale: str) -> dict[str, Any]:
         del rule
@@ -778,7 +798,7 @@ class Dnd2024Runtime:
     @staticmethod
     def validate_rest_context(instance: Any, actor_id: str, rest: str) -> None:
         del actor_id, rest
-        state = getattr(instance, "ruleset_state", {})
+        state = ruleset_runtime.state(instance)
         combat = state.get("combat") if isinstance(state, dict) else None
         if isinstance(combat, dict) and combat.get("active"):
             raise ValueError("战斗进行中不能休息；请先在“权威战斗”中结束战斗")
@@ -905,6 +925,11 @@ class Dnd2024Runtime:
     def apply_event_batch(
         self, instance: Any, batch: dict[str, Any],
     ) -> dict[str, Any]:
+        from src.engine.modules import narrative_notes
+
+        # Campaign steps write the scene after the batch commits; reject an
+        # unsupported notes slot before any ruleset state changes.
+        narrative_notes.require_writable(instance)
         locale = str(getattr(instance, "language", "") or "")
         bundle = self.load_bundle(locale)
         before_characters = {
@@ -932,7 +957,7 @@ class Dnd2024Runtime:
         else:
             result = self._combat_engine(instance, locale=locale).apply_batch(instance, batch)
             if result.get("applied") and str(batch.get("intent_type") or "") == "combat.start":
-                instance.ruleset_state.pop("encounter_request", None)
+                ruleset_runtime.state(instance).pop("encounter_request", None)
         revisions: dict[str, int] = {}
         if result.get("applied"):
             for uid in getattr(instance, "players", {}):
@@ -968,14 +993,21 @@ class Dnd2024Runtime:
         access = self._encounter_access(instance, campaign)
         combat_engine = self._combat_engine(instance, access, locale)
         view = combat_engine.gameplay_view(instance)
-        request = instance.ruleset_state.get("encounter_request")
+        request = ruleset_runtime.state(instance).get("encounter_request")
         if isinstance(request, dict):
             projected_request = deepcopy(request)
             ready_ids = {
                 str(item) for item in request.get("ready_player_ids") or [] if str(item)
             }
             gm_uid = str(getattr(instance, "gm_uid", "") or "")
-            required_ids = [str(uid) for uid in instance.players if str(uid) != gm_uid]
+            # 与普通回合 human_actions_ready 同一设计：AI 托管、未认领、暂离
+            # 或已倒下的席位不参与人工 ready barrier，避免一个不会点按钮的
+            # AI 座位把整桌遭遇卡成永久 pending。
+            human_seats = instance.active_human_players
+            required_ids = [
+                str(uid) for uid in instance.players
+                if str(uid) != gm_uid and str(uid) in human_seats
+            ]
             projected_request["readiness"] = {
                 "ready_player_ids": sorted(ready_ids),
                 "required_player_ids": required_ids,
@@ -998,6 +1030,18 @@ class Dnd2024Runtime:
             view["encounter_request"] = None
         view["recent_combat_events"] = self._recent_combat_events(instance)
         view["campaign"] = campaign
+        tutorial = campaign.get("tutorial") if isinstance(campaign, dict) else None
+        step = tutorial.get("current_step") if isinstance(tutorial, dict) else None
+        view["encounter_preview"] = combat_visibility.encounter_preview(
+            view.get("encounter_presets") or [],
+            [
+                str(step.get("encounter_preset_id") or "") if isinstance(step, dict) else "",
+                str(request.get("encounter_preset_id") or "") if isinstance(request, dict) else "",
+            ],
+        )
+        if not viewer_is_gm:
+            # The preset catalog carries full monster stat blocks: GM tooling only.
+            view.pop("encounter_presets", None)
         director = self.director_proposal(instance, campaign)
         # Gameplay clients need the recommendation, not the Director's
         # bounded copy of every player action. Full context stays LLM-only.
@@ -1008,7 +1052,7 @@ class Dnd2024Runtime:
     def _recent_combat_events(instance: Any) -> list[dict[str, Any]]:
         """Project a bounded, presentation-safe public combat event feed."""
 
-        ledger = list(getattr(instance, "event_ledger", []) or [])
+        ledger = list(ruleset_runtime.event_ledger(instance) or [])
         start_index = 0
         for index in range(len(ledger) - 1, -1, -1):
             if str((ledger[index] or {}).get("intent_type") or "") == "combat.start":
@@ -1030,8 +1074,8 @@ class Dnd2024Runtime:
             "spell_ref", "resource", "roll", "successes", "failures", "stable", "dead", "hp",
         }
         combat = (
-            instance.ruleset_state.get("combat")
-            if isinstance(getattr(instance, "ruleset_state", None), dict) else {}
+            ruleset_runtime.state(instance).get("combat")
+            if isinstance(ruleset_runtime.state(instance), dict) else {}
         )
         enemies = combat.get("enemies") if isinstance(combat, dict) else {}
         enemies = enemies if isinstance(enemies, dict) else {}
@@ -1099,6 +1143,11 @@ class Dnd2024Runtime:
 
         if str(signal or "").strip().casefold() not in {"start", "begin"}:
             return False
+        try:
+            ruleset_runtime.require_binding(instance, self.runtime_id)
+        except ruleset_runtime.RulesetBindingError as exc:
+            logger.warning("%s: %s (game_key=%s)", exc.code, exc, instance.game_key)
+            return False
         state = self._combat_engine(
             instance, locale=str(getattr(instance, "language", "") or ""),
         ).initialize_state(instance)
@@ -1110,7 +1159,7 @@ class Dnd2024Runtime:
         request = {
             "status": "pending",
             "source": "narrative",
-            "round": int(getattr(instance, "round_number", 0) or 0),
+            "round": progression.current_round(instance),
             "ready_player_ids": [],
         }
         preset_id = str((proposal or {}).get("encounter_preset_id") or "")
@@ -1179,12 +1228,11 @@ class Dnd2024Runtime:
             "combat": gameplay["combat"],
             "campaign": gameplay["campaign"],
             "latest_event_batch": (
-                deepcopy(instance.event_ledger[-1]) if instance.event_ledger else None
+                deepcopy(ruleset_runtime.event_ledger(instance)[-1]) if ruleset_runtime.event_ledger(instance) else None
             ),
             "director": director,
             "policy": "Narrate resolved events only; never invent or mutate mechanics.",
         }
-        state.pop("combat_enemies", None)
         return state
 
     def director_proposal(
@@ -1196,7 +1244,7 @@ class Dnd2024Runtime:
             campaign = self._campaign_engine(
                 instance, str(getattr(instance, "language", "") or ""),
             ).gameplay_view(instance)
-        state = getattr(instance, "ruleset_state", {})
+        state = ruleset_runtime.state(instance)
         persisted_campaign = state.get("campaign") if isinstance(state, dict) else None
         automation = campaign.get("automation") if isinstance(campaign, dict) else None
         if not isinstance(automation, dict) and isinstance(persisted_campaign, dict):
@@ -1213,7 +1261,7 @@ class Dnd2024Runtime:
 
         if not isinstance(proposal, dict) or proposal.get("mode") != "auto":
             return None
-        version = int(instance.ruleset_state.get("version", 0) or 0)
+        version = int(ruleset_runtime.state(instance).get("version", 0) or 0)
         if proposal.get("kind") == "adventure_choice":
             choice_id = str(proposal.get("choice_id") or "")
             if not choice_id:
@@ -1447,3 +1495,27 @@ class Dnd2024Runtime:
         if from_version != 1:
             raise ValueError(f"unsupported D&D 2024 state schema version: {from_version}")
         return deepcopy(payload)
+
+
+def project_combat_view(instance: Any) -> dict[str, Any] | None:
+    """Read-only combat turn view derived from ``ruleset_state["combat"]``."""
+
+    combat = ruleset_runtime.state(instance).get("combat")
+    if not isinstance(combat, Mapping):
+        return None
+    active = combat.get("status") == "active"
+    try:
+        turn_index = int(combat.get("turn_index", 0) or 0)
+    except (TypeError, ValueError):
+        turn_index = 0
+    return {
+        "combat_state": "active" if active else "none",
+        "combat_active": active,
+        "initiative_order": list(combat.get("initiative") or []),
+        "initiative_current": turn_index,
+    }
+
+
+# Registered where the runtime is defined: any code path that can hold this
+# runtime also gets its combat view, with no dependency from src/engine.
+legacy_combat.register_combat_projector(Dnd2024Runtime.runtime_id, project_combat_view)

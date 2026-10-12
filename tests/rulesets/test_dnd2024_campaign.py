@@ -9,6 +9,7 @@ from src.engine.game_instance import GameInstance
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.rulesets.dnd2024.play import resolve_story_encounter_access
 from src.rulesets.automation import apply_director_automation
+from src.engine.modules import ruleset_runtime, table_settings
 
 
 def _character(runtime: Dnd2024Runtime, preset_id: str, name: str) -> dict:
@@ -44,7 +45,7 @@ def _submit(
     runtime: Dnd2024Runtime, instance: GameInstance, intent_type: str,
     submitted_by: str = "gm", **fields,
 ) -> dict:
-    version = int(instance.ruleset_state.get("version", 0) or 0)
+    version = int(ruleset_runtime.state(instance).get("version", 0) or 0)
     intent = {
         "intent_id": f"intent-{intent_type}-{version}",
         "type": intent_type,
@@ -71,16 +72,16 @@ def _agreement(runtime: Dnd2024Runtime, instance: GameInstance) -> None:
 
 def test_new_run_initialization_clears_runtime_state_and_rebinds_campaign() -> None:
     runtime, instance = _instance(adventure=True)
-    instance.ruleset_state = {
+    ruleset_runtime.replace_state(instance, {
         "state_schema_version": 1,
         "combat": {"status": "active"},
         "campaign": {"schema_version": 1, "tutorial": {"status": "completed"}},
-    }
+    })
 
     runtime.initialize_new_run(instance, preserve_characters=True)
 
-    assert "combat" not in instance.ruleset_state
-    campaign = instance.ruleset_state["campaign"]
+    assert "combat" not in ruleset_runtime.state(instance)
+    campaign = ruleset_runtime.state(instance)["campaign"]
     assert campaign["session_zero"]["status"] == "not_started"
     assert campaign["tutorial"]["status"] == "not_started"
     assert campaign["adventure_binding"]["adventure_id"] == "core:lanterns_of_greymoor"
@@ -117,7 +118,7 @@ def test_session_zero_requires_every_player_and_revisions_reset_consent() -> Non
 
 def test_solo_quick_start_uses_safe_defaults_and_enters_first_tutorial_step() -> None:
     runtime, instance = _instance(adventure=True)
-    instance.solo_mode = True
+    table_settings.replace_solo_mode(instance, True)
     actions = runtime.available_intents(instance, "gm")
 
     assert "session_zero.quick_start" in {item["type"] for item in actions}
@@ -137,7 +138,7 @@ def test_solo_quick_start_uses_safe_defaults_and_enters_first_tutorial_step() ->
 
 def test_automation_mode_is_persisted_and_only_the_gm_can_change_it() -> None:
     runtime, instance = _instance(multiplayer=True)
-    instance.solo_mode = False
+    table_settings.replace_solo_mode(instance, False)
     _agreement(runtime, instance)
 
     campaign = runtime.gameplay_view(instance, "ally", False)["campaign"]
@@ -150,7 +151,7 @@ def test_automation_mode_is_persisted_and_only_the_gm_can_change_it() -> None:
 
     denied = runtime.validate_intent(instance, {
         "intent_id": "player-automation", "type": "automation.set",
-        "expected_version": instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": "ally", "mode": "manual",
     })
     assert denied["ok"] is False
@@ -169,7 +170,7 @@ def test_automation_mode_is_persisted_and_only_the_gm_can_change_it() -> None:
 
 def test_auto_mode_starts_only_the_canonical_story_encounter() -> None:
     runtime, instance = _instance(adventure=True)
-    instance.solo_mode = True
+    table_settings.replace_solo_mode(instance, True)
     _agreement(runtime, instance)
     _submit(runtime, instance, "tutorial.start", adventure_id="lanterns_of_greymoor")
     _submit(runtime, instance, "tutorial.choose", choice_id="inspect_cold_ash")
@@ -187,13 +188,13 @@ def test_auto_mode_starts_only_the_canonical_story_encounter() -> None:
     combat = runtime.gameplay_view(instance, "gm", True)["combat"]
     assert combat["status"] == "active"
     assert combat["encounter_preset_id"] == "first_skirmish"
-    assert set(instance.ruleset_state["combat"]["enemies"]) == {"goblin-minion-1"}
+    assert set(ruleset_runtime.state(instance)["combat"]["enemies"]) == {"goblin-minion-1"}
 
 
 @pytest.mark.asyncio
 async def test_auto_mode_maps_free_text_to_a_valid_adventure_choice() -> None:
     runtime, instance = _instance(adventure=True)
-    instance.solo_mode = True
+    table_settings.replace_solo_mode(instance, True)
     _submit(runtime, instance, "session_zero.quick_start")
     instance.action_queue = [{"user_id": "gm", "text": "I inspect the cold ash closely."}]
 
@@ -218,7 +219,7 @@ async def test_auto_mode_maps_free_text_to_a_valid_adventure_choice() -> None:
 
 def test_active_adventure_step_owns_scene_while_free_play_keeps_legacy_scene_tags() -> None:
     runtime, adventure = _instance(adventure=True)
-    adventure.solo_mode = True
+    table_settings.replace_solo_mode(adventure, True)
     _submit(runtime, adventure, "session_zero.quick_start")
 
     filtered = runtime.filter_narrative_state_update(
@@ -290,7 +291,7 @@ def test_free_play_request_persists_only_a_valid_catalog_recommendation() -> Non
     assert runtime.apply_narrative_combat_signal(instance, "start", {
         **proposal, "encounter_preset_id": "invented_enemy",
     }) is True
-    assert "encounter_preset_id" not in instance.ruleset_state["encounter_request"]
+    assert "encounter_preset_id" not in ruleset_runtime.state(instance)["encounter_request"]
 
 
 def test_multiplayer_encounter_readiness_is_authoritative_and_visible_to_gm() -> None:
@@ -329,11 +330,11 @@ def test_combat_communication_is_shared_without_spending_turn_resources() -> Non
         runtime, instance, "combat.start",
         encounter_preset_id=preset["id"], enemies=preset["enemies"],
     )
-    before = dict(instance.ruleset_state["combat"]["economy"])
+    before = dict(ruleset_runtime.state(instance)["combat"]["economy"])
 
     _submit(runtime, instance, "combat.message", "ally", text="Fall back behind me!")
 
-    assert instance.ruleset_state["combat"]["economy"] == before
+    assert ruleset_runtime.state(instance)["combat"]["economy"] == before
     view = runtime.gameplay_view(instance, "gm", True)
     message = view["recent_combat_events"][-1]
     assert message == {
@@ -355,10 +356,10 @@ def test_combat_communication_is_shared_without_spending_turn_resources() -> Non
 
 def test_public_combat_feed_inherits_round_and_source_actor_for_damage() -> None:
     runtime, instance = _instance()
-    instance.ruleset_state["combat"] = {
+    ruleset_runtime.state(instance)["combat"] = {
         "enemies": {"goblin": {"name": "Goblin"}},
     }
-    instance.event_ledger = [{
+    ruleset_runtime.replace_event_ledger(instance, [{
         "batch_id": "start", "intent_type": "combat.start", "result_version": 1,
         "events": [{"type": "dnd2024.combat.started", "round": 1}],
     }, {
@@ -370,7 +371,7 @@ def test_public_combat_feed_inherits_round_and_source_actor_for_damage() -> None
                 "target_id": "player:gm", "delta": -6, "amount": 6,
             },
         ],
-    }]
+    }])
 
     damage = runtime._recent_combat_events(instance)[-1]
 
@@ -383,7 +384,7 @@ def test_public_combat_feed_inherits_round_and_source_actor_for_damage() -> None
 
 def test_public_combat_feed_keeps_death_save_hp_and_combat_end_reason() -> None:
     runtime, instance = _instance()
-    instance.event_ledger = [{
+    ruleset_runtime.replace_event_ledger(instance, [{
         "batch_id": "death-save", "intent_type": "death_save", "result_version": 3,
         "events": [{
             "type": "dnd2024.death_save.resolved", "actor_id": "player:gm",
@@ -394,7 +395,7 @@ def test_public_combat_feed_keeps_death_save_hp_and_combat_end_reason() -> None:
         "events": [{
             "type": "dnd2024.combat.ended", "reason": "party_incapacitated",
         }],
-    }]
+    }])
 
     events = runtime._recent_combat_events(instance)
 
@@ -404,7 +405,7 @@ def test_public_combat_feed_keeps_death_save_hp_and_combat_end_reason() -> None:
 
 def test_auto_mode_can_start_a_valid_free_play_catalog_encounter() -> None:
     runtime, instance = _instance()
-    instance.solo_mode = True
+    table_settings.replace_solo_mode(instance, True)
     _submit(runtime, instance, "session_zero.quick_start")
     proposal = {
         "kind": "combat", "mode": "auto", "confidence": 0.95,
@@ -432,7 +433,7 @@ def test_loaded_but_inactive_adventure_does_not_replace_free_play_encounter_cata
 
 def test_campaign_step_grants_one_shot_authoritative_encounter_access() -> None:
     runtime, instance = _instance(adventure=True)
-    instance.solo_mode = True
+    table_settings.replace_solo_mode(instance, True)
     _submit(runtime, instance, "session_zero.quick_start")
     _submit(runtime, instance, "tutorial.choose", choice_id="inspect_cold_ash")
     _submit(runtime, instance, "tutorial.choose", choice_id="reassure_mira")
@@ -474,7 +475,7 @@ def test_campaign_step_grants_one_shot_authoritative_encounter_access() -> None:
     replay = runtime.validate_intent(instance, {
         "intent_id": "replay-story-encounter",
         "type": "combat.start",
-        "expected_version": instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": "gm",
         "encounter_preset_id": "first_skirmish",
         "encounter_instance_id": start["encounter_instance_id"],
@@ -534,7 +535,7 @@ def test_multiplayer_branch_collects_party_intents_before_advancing() -> None:
 
     denied = runtime.validate_intent(instance, {
         "intent_id": "player-direct-choice", "type": "tutorial.choose",
-        "expected_version": instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": "ally", "choice_id": "inspect_cold_ash",
     })
     assert denied["ok"] is False
@@ -542,7 +543,7 @@ def test_multiplayer_branch_collects_party_intents_before_advancing() -> None:
 
     empty_resolve = runtime.validate_intent(instance, {
         "intent_id": "empty-party-resolve", "type": "party_decision.resolve",
-        "expected_version": instance.ruleset_state["version"], "submitted_by": "gm",
+        "expected_version": ruleset_runtime.state(instance)["version"], "submitted_by": "gm",
     })
     assert empty_resolve["ok"] is False
     assert "choice is required" in empty_resolve["error"]
@@ -560,7 +561,7 @@ def test_multiplayer_branch_collects_party_intents_before_advancing() -> None:
 
     duplicate = runtime.validate_intent(instance, {
         "intent_id": "duplicate-party-submit", "type": "party_decision.submit",
-        "expected_version": instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": "ally", "choice_id": "check_wagon_tracks",
     })
     assert duplicate["ok"] is False
@@ -576,7 +577,7 @@ def test_multiplayer_branch_collects_party_intents_before_advancing() -> None:
     assert campaign["tutorial"]["current_step"]["id"] == "keepers_plea"
     assert any(
         event["type"] == "dnd2024.party_decision.resolved"
-        for batch in instance.event_ledger for event in batch["events"]
+        for batch in ruleset_runtime.event_ledger(instance) for event in batch["events"]
     )
 
 
@@ -601,7 +602,7 @@ def test_multiplayer_party_decision_tie_break_is_deterministic_and_gm_can_force(
 
 def test_standard_professional_game_has_no_tutorial_actions() -> None:
     runtime, instance = _instance()
-    instance.solo_mode = True
+    table_settings.replace_solo_mode(instance, True)
     _submit(runtime, instance, "session_zero.quick_start")
     gameplay = runtime.gameplay_view(instance, "gm", True)
     assert gameplay["campaign"]["tutorial"]["status"] == "unavailable"
@@ -622,7 +623,7 @@ def test_guided_adventure_runs_to_completion_with_combat_gate_and_summaries() ->
 
     blocked = runtime.validate_intent(instance, {
         "intent_id": "skip-combat", "type": "tutorial.choose",
-        "expected_version": instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": "gm", "choice_id": "secure_the_glade",
     })
     assert blocked["ok"] is False
@@ -657,7 +658,7 @@ def test_guided_adventure_runs_to_completion_with_combat_gate_and_summaries() ->
     assert task["status"] == "completed"
     assert sum(
         event["type"] == "dnd2024.chapter.summarized"
-        for batch in instance.event_ledger for event in batch["events"]
+        for batch in ruleset_runtime.event_ledger(instance) for event in batch["events"]
     ) == 3
     assert any(
         event["type"] == "dnd2024.tutorial.completed"
@@ -682,14 +683,14 @@ def test_guided_combat_uses_story_preset_and_ignores_forged_enemy_stats() -> Non
 
     wrong = runtime.validate_intent(instance, {
         "intent_id": "wrong-story-encounter", "type": "combat.start",
-        "expected_version": instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": "gm", "encounter_preset_id": "cave_duo",
         "enemies": [],
     })
     assert wrong["ok"] is False
     assert "assigned encounter preset" in wrong["error"]
 
-    version = int(instance.ruleset_state["version"])
+    version = int(ruleset_runtime.state(instance)["version"])
     resolved = runtime.resolve_intent(instance, {
         "intent_id": "forged-story-enemy", "type": "combat.start",
         "expected_version": version, "submitted_by": "gm",
@@ -739,7 +740,7 @@ def test_active_adventure_without_binding_reports_unprepared_instead_of_generic_
     # 不带显式 sandbox 声明的开战请求被拒绝，并给出可解释原因。
     denied = runtime.validate_intent(instance, {
         "intent_id": "silent-fallback-start", "type": "combat.start",
-        "expected_version": instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": "gm", "encounter_preset_id": "goblin_patrol",
     })
     assert denied["ok"] is False
@@ -781,7 +782,7 @@ def test_story_encounter_binding_is_recorded_and_cannot_be_downgraded_to_sandbox
         denied = runtime.validate_intent(instance, {
             "intent_id": f"downgrade-{fields['encounter_preset_id']}",
             "type": "combat.start",
-            "expected_version": instance.ruleset_state["version"],
+            "expected_version": ruleset_runtime.state(instance)["version"],
             "submitted_by": "gm", **fields,
         })
         assert denied["ok"] is False
@@ -844,4 +845,4 @@ def test_campaign_intent_replay_is_idempotent() -> None:
 
     assert replay["replayed"] is True
     assert reapplied["duplicate"] is True
-    assert instance.ruleset_state["version"] == 1
+    assert ruleset_runtime.state(instance)["version"] == 1

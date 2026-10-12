@@ -22,6 +22,7 @@ from src.commands.tag_summary import summarize_tags
 from src.engine.constants import WEAPON_DAMAGE
 from src.engine.economy import filter_unconfirmed_purchase_grants, queue_purchase_offer
 from src.engine.game_instance import GameInstance, GameState
+from src.engine.modules import economy_state
 from src.rules.rule_system import RuleSystem
 
 PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
@@ -354,7 +355,7 @@ def test_pending_purchase_blocks_item_gains_and_equips():
     assert [op["op"] for op in pud["equipment_ops"]] == ["unequip"]  # 卸下不授予物品，放行
 
     # 购买结算（committed）后同名叙事获得不再被拦截。
-    instance.economy["proposals"][0]["status"] = "committed"
+    economy_state.state(instance)["proposals"][0]["status"] = "committed"
     settled = {"state_update": {"players": {"p1": {
         "item_gains": [{"name": "长剑", "category": "weapon", "qty": 1}],
     }}}}

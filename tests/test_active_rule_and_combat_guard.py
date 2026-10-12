@@ -15,6 +15,8 @@ from src.commands.progression_resolver import ProgressionResolver
 from src.engine.game_instance import GameInstance
 from src.engine.checks import build_check_request, resolve_check_request, roll_check_request
 from src.rules.rule_system import RuleSystem
+from src.engine.modules import checks
+from src.engine.modules import round_presentation
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,7 +99,7 @@ def test_magic_research_does_not_attack_first_player() -> None:
 
     assert text == ""
     assert instance.get_character_sheet("a")["hp"] == 14
-    assert instance.pending_combat_results == []
+    assert round_presentation.pending_combat_results(instance) == []
 
 
 def test_only_named_attacker_hits_named_target() -> None:
@@ -115,7 +117,7 @@ def test_only_named_attacker_hits_named_target() -> None:
             },
         },
     ]
-    instance.last_checks = [{
+    checks.replace_last_checks(instance, [{
         "check_id": "b-attacks-a",
         "actor_uid": "b",
         "actor_name": "星墨",
@@ -127,14 +129,14 @@ def test_only_named_attacker_hits_named_target() -> None:
         "verdict": "成功",
         "is_critical": False,
         "is_fumble": False,
-    }]
+    }])
 
     text = CombatResolver().resolve_combat(instance, "ignored", "hp_based")
 
     assert "星墨持法杖攻击冒险者" in text
-    assert len(instance.pending_combat_results) == 1
-    assert instance.pending_combat_results[0]["attacker"] == "星墨"
-    assert instance.pending_combat_results[0]["target"] == "冒险者"
+    assert len(round_presentation.pending_combat_results(instance)) == 1
+    assert round_presentation.pending_combat_results(instance)[0]["attacker"] == "星墨"
+    assert round_presentation.pending_combat_results(instance)[0]["target"] == "冒险者"
 
 
 def test_dnd_level_up_uses_active_rule_and_class_hit_die() -> None:
@@ -219,8 +221,8 @@ def test_coc_bonus_die_in_round_pipeline_shares_units(monkeypatch) -> None:
     action["dice_value"] = result["value"]
     action["dice_rolls"] = result["rolls"]
     DiceResolver().resolve_action_check(instance, action, rule)
-    assert instance.last_check["roll"] == 30
-    assert instance.last_check["advantage_mode"] == "advantage"
+    assert checks.last_check(instance)["roll"] == 30
+    assert checks.last_check(instance)["advantage_mode"] == "advantage"
 
 
 def test_explicit_coc_penalty_die_overrides_percent_modifier() -> None:
@@ -375,7 +377,7 @@ def test_core_resolution_is_the_same_result_recorded_by_command_adapter() -> Non
     DiceResolver().resolve_action_check(instance, action, rule)
 
     assert expected is not None
-    assert instance.last_check == expected
+    assert checks.last_check(instance) == expected
     assert expected["total"] == 15
     assert expected["verdict"] == "成功"
 

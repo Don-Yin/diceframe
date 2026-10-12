@@ -154,6 +154,8 @@ export interface Player {
   character_sheet?: CharacterSheet
   /** 谁在玩这个角色：真人 / 服务器 AI / 尚未认领（AI 队友控制契约）。 */
   control?: PlayerControl
+  /** 席位已行动过：之后只有 GM 能为它套用角色卡或删除它。 */
+  has_acted?: boolean
   [key: string]: unknown
 }
 
@@ -304,8 +306,15 @@ export interface PendingPayment {
   [key: string]: unknown
 }
 
+/** Who a game detail was projected for; visitors only ever get the lobby view. */
+export interface DetailViewer {
+  kind: 'gm' | 'seat' | 'outsider'
+  uid?: string
+}
+
 export interface GameDetail {
   game_key: string
+  viewer?: DetailViewer
   world_name?: string
   world_id?: string
   rule_id?: string
@@ -475,6 +484,8 @@ export interface MapDefinition {
 export interface MapData {
   schema_version?: number
   map_mode?: 'graph' | string
+  /** Server-side empty-view hint; see services/maps.py. */
+  visibility_hint?: '' | 'no_visible_locations' | 'players_see_no_locations'
   locations: MapLocation[]
   current_scene?: string
   current_location_id?: string
@@ -645,6 +656,8 @@ export interface PlayerCreateResponse {
   ok?: boolean
   error?: string
   user_id: string
+  /** Plaintext seat credential, returned once when a new seat is created. */
+  seat_token?: string
   [key: string]: unknown
 }
 
@@ -774,11 +787,18 @@ export interface WorldCreateResponse {
   id?: string
   [key: string]: unknown
 }
+export interface CheckRevealRecord {
+  by: string
+  at: string
+}
+
 export interface GameLogResponse {
   log?: LogEntry[]
   total?: number
   total_pages?: number
   page?: number
+  check_reveals?: Record<string, CheckRevealRecord>
+  dice_reveal_mode?: string
 }
 
 export interface PrivateLogResponse {
@@ -1148,6 +1168,13 @@ export interface RulesetEncounterPreset extends JsonObject {
   enemies: JsonObject[]
 }
 
+export interface RulesetEncounterPreview extends JsonObject {
+  id: string
+  name?: string
+  description?: string
+  difficulty?: string
+}
+
 export interface RulesetTemporaryEncounterAttack extends JsonObject {
   id?: string
   name?: string
@@ -1354,7 +1381,10 @@ export interface RulesetGameplayView {
       encounter_instance_id: string
     } | null
   }
-  encounter_presets: RulesetEncounterPreset[]
+  /** GM-only：完整预设目录（含怪物数据块）。非 GM 视图中服务端不下发该字段。 */
+  encounter_presets?: RulesetEncounterPreset[]
+  /** 当前剧情指向的遭遇摘要（仅名称/描述/难度，无数值），所有入座视角可见。 */
+  encounter_preview?: RulesetEncounterPreview | null
   /** 服务端权威遭遇访问状态，前端据此区分剧情绑定 / 尚未准备 / 自由遭遇。 */
   encounter_access?: {
     mode: 'blocked' | 'story' | 'sandbox' | string

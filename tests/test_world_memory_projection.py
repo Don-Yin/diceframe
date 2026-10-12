@@ -17,6 +17,7 @@ import asyncio
 import pytest
 
 from src.engine.game_instance import GameInstance
+from src.engine.modules import economy_state
 from src.engine.world.memory_projection import (
     PROMOTED_EVENT_KINDS,
     queue_world_memory,
@@ -130,7 +131,7 @@ def test_queue_world_memory_is_idempotent_per_event() -> None:
     assert first[0]["id"] == "memory:worldevent:evt:000001:0:x"
     again = queue_world_memory(instance, [receipt], round_number=3)
     assert again == first
-    deliveries = instance.economy["external_effects_outbox"]
+    deliveries = economy_state.state(instance)["external_effects_outbox"]
     assert len(deliveries) == 1
     # 投递负载携带 provenance 与 GM 可见性。
     assert deliveries[0]["payload"]["memory_kind"] == "authoritative_world"

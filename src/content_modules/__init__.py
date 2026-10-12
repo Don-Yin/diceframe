@@ -5,19 +5,36 @@ MOD 程序的 generic 半区（不依赖具体 ruleset）。D&D 内容目录的�
 """
 
 from src.content_modules.refs import (
+    CONTENT_KIND_REGISTRY,
     CONTENT_KINDS,
     ContentRef,
     ContentRefChain,
     ContentRefError,
+    ContentDraft,
+    CommitOperation,
+    CommitPlan,
+    ContentKindRegistry,
+    ContentKindSpec,
     ContentResolution,
+    build_commit_plan,
+    collect_content_refs,
     parse_content_ref,
 )
+from src.content_modules.projection import ContentProjection, ContentProjectionService
+from src.content_modules.receipts import ImportReceipt, ImportReceiptStore
 
 __all__ = [
     "CONTENT_KINDS",
+    "CONTENT_KIND_REGISTRY",
+    "ContentKindRegistry",
+    "ContentKindSpec",
     "ContentRef",
     "ContentRefChain",
     "ContentRefError",
     "ContentResolution",
+    "ContentDraft", "CommitOperation", "CommitPlan",
+    "build_commit_plan", "collect_content_refs",
     "parse_content_ref",
+    "ContentProjection", "ContentProjectionService",
+    "ImportReceipt", "ImportReceiptStore",
 ]

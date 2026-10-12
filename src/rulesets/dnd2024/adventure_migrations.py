@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.engine.modules import ruleset_runtime
+
 
 _GREYMOOR_ADVENTURE_ID = "core:lanterns_of_greymoor"
 _GREYMOOR_VERSION = "1.0.0"
@@ -80,7 +82,7 @@ def apply_unreleased_adventure_binding_migration(
         return None
 
     campaign_binding: dict[str, Any] | None = None
-    ruleset_state = getattr(instance, "ruleset_state", None)
+    ruleset_state = ruleset_runtime.state(instance)
     if isinstance(ruleset_state, dict):
         campaign = ruleset_state.get("campaign")
         if isinstance(campaign, dict):

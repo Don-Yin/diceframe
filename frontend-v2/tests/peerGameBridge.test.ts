@@ -57,14 +57,33 @@ describe('peer host game bridge', () => {
     expect(result).toEqual({ ...projected, has_room_password: false, peer_transport: true })
   })
 
+  it('shows the scene to unbound peers of a room without a password', async () => {
+    const executor = vi.fn<PeerLocalApiExecutor>(async () => ({ ...hostDetail, has_room_password: false }))
+    const bridge = new PeerHostGameBridge('web|game|host', executor, () => undefined)
+    const result = await bridge.handle('peer_1', 'game.detail', {}) as Record<string, unknown>
+    expect(result.scene).toBe('Gate')
+  })
+
+  it('never hands a guest the host card library', async () => {
+    const requestGame = vi.fn()
+    const session = { requestGame } as unknown as MultiPeerConnectionSession
+    const client = new PeerRemoteGameClient(session, 'h_abcdefghijk', 'web|game|host')
+    const result = await client.tryApi<{ cards: unknown[] }>('/games/web%7Cgame%7Chost/character-cards')
+    expect(result).toEqual({ handled: true, value: { cards: [] } })
+    expect(requestGame).not.toHaveBeenCalled()
+  })
+
   it('L4 returns only lobby fields for an unbound peer', async () => {
     const executor = vi.fn<PeerLocalApiExecutor>(async () => hostDetail)
     const bridge = new PeerHostGameBridge('web|game|host', executor, () => undefined)
     const result = await bridge.handle('peer_1', 'game.detail', {})
+    // The host room has a password and cannot know whether this guest passed
+    // it, so the scene text is withheld (same rule as the server lobby).
     expect(result).toEqual({
       game_key: 'web|game|host', player_access_open: true, player_count: 5, max_players: 6,
-      has_room_password: false, world_name: 'World', scene: 'Gate', rule_id: 'freeform',
+      has_room_password: false, world_name: 'World', rule_id: 'freeform',
       solo_mode: false, multiplayer: lobbyMultiplayer, peer_transport: true,
+      viewer: { kind: 'outsider' },
     })
     for (const value of privateValues) expect(JSON.stringify(result)).not.toContain(value)
     expect(executor.mock.calls).toEqual([['/games/web%7Cgame%7Chost', undefined]])
@@ -145,6 +164,24 @@ describe('peer host game bridge', () => {
     await bridge.handle('peer_1', 'roll.resolve', { request_id: 'req_1', run_id: 'run_1', target_uid: 'forged' })
     expect(calls[1].path).toBe('/games/web%7Cgame%7Chost/roll-requests/req_1/roll?user=player_1&share=1&delegate=1')
     expect(JSON.parse(String(calls[1].init?.body))).toEqual({ run_id: 'run_1', target_uid: 'player_1' })
+  })
+
+  it('keeps the new seat credential on the host when a guest creates a character', async () => {
+    const executor: PeerLocalApiExecutor = async (path) => {
+      if (path === '/games/web%7Cgame%7Chost') {
+        return { game_key: 'web|game|host', player_access_open: true, player_count: 1, max_players: 6 }
+      }
+      if (path === '/games/web%7Cgame%7Chost/players') {
+        return { ok: true, user_id: 'player_9', seat_token: 'host-only-token' }
+      }
+      return { ok: true }
+    }
+    const bridge = new PeerHostGameBridge('web|game|host', executor, () => undefined)
+
+    const result = await bridge.handle('p_abcdefghijk', 'player.create', { character_name: 'Guest' })
+
+    expect(result).toMatchObject({ ok: true, user_id: 'player_9' })
+    expect(JSON.stringify(result)).not.toContain('host-only-token')
   })
 
   it('maps allowlisted operations to a delegated player identity', async () => {
@@ -248,6 +285,17 @@ describe('peer host game bridge', () => {
     const luckBody = JSON.parse(String(calls[3].init?.body))
     expect(luckBody).toEqual({ spend: true })
 
+    // 揭示骰子：对端伪造的 user_id 被剥离，宿主按绑定角色代发，请求体为空。
+    await bridge.handle('p_abcdefghijk', 'check.reveal', {
+      check_id: 'check-1',
+      user_id: 'someone-else',
+    })
+    const revealCall = calls[calls.length - 1]
+    expect(revealCall.path).toBe(
+      '/games/web%7Cgame%7Chost/checks/check-1/reveal?user=player_123&share=1&delegate=1',
+    )
+    expect(JSON.parse(String(revealCall.init?.body))).toEqual({})
+
     // 职业特性能力 intent：只放行 capability id 与目标，伪造的成本字段被剥离，
     // 与 Web 端一样仍由服务端 capability 声明决定实际消耗。
     await bridge.handle('p_abcdefghijk', 'ruleset.intent', {
@@ -345,6 +393,34 @@ describe('peer host game bridge', () => {
       rest: 'short', hit_dice: { d10: 1 }, expected_revision: 3, operation_id: 'rest-1',
     })
     expect(changed).toHaveBeenCalledTimes(2)
+  })
+
+  it('relays only profile fields and level-up attributes for a guest sheet update', async () => {
+    const calls: Array<{ path: string; init?: RequestInit }> = []
+    const executor: PeerLocalApiExecutor = async (path, init) => {
+      calls.push({ path, init })
+      if (path === '/games/web%7Cgame%7Chost') {
+        return { game_key: 'web|game|host', player_access_open: true }
+      }
+      return { ok: true }
+    }
+    const bridge = new PeerHostGameBridge(
+      'web|game|host', executor, vi.fn(), {}, { p_abcdefghijk: 'player_bound' },
+    )
+
+    await bridge.handle('p_abcdefghijk', 'character.update', {
+      character_name: '旅人', background: '新背景', attributes: { str: 12 },
+      hp: 999, max_hp: 999, class: '法师', skills: [{ name: '侦查', value: 99 }],
+      gold: 99999, level: 20, inventory: [{ name: '万能药' }],
+    })
+
+    expect(calls[1].path).toBe(
+      '/games/web%7Cgame%7Chost/character/player_bound?user=player_bound&share=1&delegate=1',
+    )
+    expect(calls[1].init?.method).toBe('PUT')
+    expect(JSON.parse(String(calls[1].init?.body))).toEqual({
+      character_name: '旅人', background: '新背景', attributes: { str: 12 },
+    })
   })
 
   it('allows only player-side Session 0 and tutorial intent fields', async () => {

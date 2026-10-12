@@ -109,6 +109,22 @@ describe('D&D 2024 professional character builder', () => {
     })
   })
 
+  it('shows a quick-mode finish failure instead of silently staying put', async () => {
+    mocks.validate.mockRejectedValueOnce(new Error('操作太频繁，请等待约 14 秒后再试。'))
+    const wrapper = mountBuilder({})
+    await flushPromises()
+
+    await wrapper.findAll('button').find(item => item.text().includes('可靠守护者'))!.trigger('click')
+    const nameInput = wrapper.findAll('label').find(item => item.text().includes('角色名'))!.find('input')
+    await nameInput.setValue('阿岚')
+    await buttonByText(wrapper, '完成并使用这个角色').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('操作太频繁')
+    expect(mocks.finalize).not.toHaveBeenCalled()
+    expect(wrapper.emitted('submit')).toBeUndefined()
+  })
+
   it('exposes quick, guided, and expert modes without loading arbitrary components', async () => {
     const wrapper = mountBuilder({})
     await flushPromises()

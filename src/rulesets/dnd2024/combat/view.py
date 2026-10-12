@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.features import CombatCapabilityView
 from src.rulesets.dnd2024.features.combat import martial_arts_profile
 
@@ -27,7 +28,7 @@ class CombatViewMixin:
 
     def _companion(self, instance: Any, raw_id: str) -> dict[str, Any]:
         """从 DND party companion 权威状态读取一个活跃的 AI 队友。"""
-        state = getattr(instance, "ruleset_state", None)
+        state = ruleset_runtime.state(instance)
         party = state.get("party") if isinstance(state, dict) else None
         companions = party.get("companions") if isinstance(party, dict) else None
         companion = companions.get(raw_id) if isinstance(companions, dict) else None
@@ -36,7 +37,7 @@ class CombatViewMixin:
         return companion
 
     def _active_companions(self, instance: Any) -> dict[str, dict[str, Any]]:
-        state = getattr(instance, "ruleset_state", None)
+        state = ruleset_runtime.state(instance)
         party = state.get("party") if isinstance(state, dict) else None
         companions = party.get("companions") if isinstance(party, dict) else None
         if not isinstance(companions, dict):

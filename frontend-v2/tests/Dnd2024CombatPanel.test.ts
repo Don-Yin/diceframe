@@ -408,6 +408,55 @@ describe('D&D 2024 combat panel', () => {
     wrapper.unmount()
   })
 
+  it('names the requested encounter for a player view without the GM-only preset catalog', async () => {
+    const requested = response('none') as any
+    delete requested.gameplay.encounter_presets
+    requested.gameplay.encounter_preview = {
+      id: 'first_skirmish', name: 'First Skirmish', description: 'Standard encounter',
+    }
+    requested.gameplay.encounter_request = {
+      status: 'pending', source: 'narrative', encounter_preset_id: 'first_skirmish',
+      ready_player_ids: [],
+    }
+    requested.available_actions = [{ type: 'encounter.ready', label: 'Ready', expected_version: 0 }]
+    mocks.fetch.mockResolvedValueOnce(requested)
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'ally', isGm: false },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('AI GM matched opposition')
+    expect(wrapper.text()).toContain('First Skirmish')
+    expect(wrapper.text()).toContain('Standard encounter')
+    expect(wrapper.find('select').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows a guided story encounter to a player without flagging the absent catalog as broken', async () => {
+    const guided = response('none') as any
+    delete guided.gameplay.encounter_presets
+    guided.gameplay.encounter_preview = { id: 'first_skirmish', name: 'First Skirmish', description: 'Ambush' }
+    guided.gameplay.campaign = {
+      tutorial: {
+        status: 'active',
+        current_step: {
+          id: 'fight', title: 'Ambush', narration: 'Goblins leap out.',
+          requires: 'combat_ended', encounter_preset_id: 'first_skirmish',
+        },
+      },
+    }
+    guided.available_actions = []
+    mocks.fetch.mockResolvedValueOnce(guided)
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'ally', isGm: false },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.guided-preset strong').text()).toBe('First Skirmish')
+    expect(wrapper.find('.guided-preset .combat-error').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('shows the GM every party member readiness state before combat', async () => {
     const requested = response('none') as any
     requested.gameplay.encounter_request = {
@@ -592,6 +641,25 @@ describe('D&D 2024 combat panel', () => {
 
     expect(wrapper.text()).toContain('Waiting for teammate：Guardian')
     expect(wrapper.find('.combat-actions').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows a seated player the exact current and maximum HP of a wounded enemy', async () => {
+    const wounded = response('active') as any
+    wounded.available_actions = []
+    wounded.gameplay.combat.actors[1] = { ...wounded.gameplay.combat.actors[1], hp: 3, max_hp: 7 }
+    mocks.fetch.mockResolvedValueOnce(wounded)
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'player-two', isGm: false },
+    })
+    await flushPromises()
+
+    const card = wrapper.findAll('.actor-card.enemy').find(item => item.text().includes('Goblin'))!
+    expect(card.text()).toContain('HP 3/7')
+    const bar = card.get('.hp-track')
+    expect(bar.attributes('aria-valuenow')).toBe('3')
+    expect(bar.attributes('aria-valuemax')).toBe('7')
+    expect(bar.get('i').attributes('style')).toContain(`width: ${3 / 7 * 100}%`)
     wrapper.unmount()
   })
 

@@ -12,15 +12,15 @@ from typing import Any
 from src.engine.combat import AttackResult, resolve_attack, _check_succeeded
 from src.engine.character_utils import is_conscious, record_death_save_failures, sync_death_from_hp
 from src.engine.constants import WEAPON_DAMAGE, canonical_item_key
-from src.engine.dice import roll_initiative
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text
+from src.engine.modules import checks, progression_state, round_presentation, table_settings
 
 logger = logging.getLogger("trpg")
 
 
 class CombatResolver:
-    """处理战斗目标、权威检定消费、伤害和先攻顺序。"""
+    """处理战斗目标、权威检定消费与伤害。"""
 
     @staticmethod
     def _authoritative_attack_check(
@@ -41,7 +41,7 @@ class CombatResolver:
             return None
         matches = [
             check
-            for check in instance.last_checks
+            for check in checks.last_checks(instance)
             if str(check.get("check_id") or "") == check_id
             and str(check.get("actor_uid") or "") == actor_uid
             and str(check.get("kind") or "") == "attack"
@@ -84,21 +84,6 @@ class CombatResolver:
                 name = str(npc.get("character_name") or npc.get("name") or npc_id)
                 return npc, name, ""
             return None, "", ""
-        if target_ref.startswith("enemy:"):
-            try:
-                index = int(target_ref.split(":", 1)[1])
-                if index < 0:
-                    return None, "", ""
-                enemy = instance.combat_enemies[index]
-            except (ValueError, IndexError):
-                return None, "", ""
-            name = str(enemy.get("character_name") or enemy.get("name") or f"敌人{index + 1}")
-            state = (
-                enemy.get("character_sheet")
-                if "hp" not in enemy and isinstance(enemy.get("character_sheet"), dict)
-                else enemy
-            )
-            return state, name, ""
         return None, "", ""
 
     @staticmethod
@@ -139,7 +124,7 @@ class CombatResolver:
         """保持旧字段并补齐多人结算引用；同 check_id 不重复追加。"""
         if any(
             str(item.get("check_id") or "") == result.check_id
-            for item in instance.pending_combat_results
+            for item in round_presentation.pending_combat_results(instance)
         ):
             return
         instance.record_combat_result({
@@ -157,7 +142,7 @@ class CombatResolver:
             "target_hp_before": result.target_hp_before,
             "target_hp_after": result.target_hp_after,
             "description": result.description,
-            "round": instance.round_number,
+            "round": progression_state.round_value(instance),
         })
 
     def resolve_combat(self, instance: GameInstance, actions_text: str, combat_model: str, rule: Any | None = None) -> str:
@@ -230,7 +215,7 @@ class CombatResolver:
                     weapon=weapon,
                     attr_value=attr_value,
                     combat_model=combat_model,
-                    difficulty=instance.difficulty,
+                    difficulty=table_settings.difficulty(instance),
                     check_result=check,
                     same_faction=same_faction,
                     attacker_uid=actor_uid,
@@ -244,7 +229,7 @@ class CombatResolver:
                     and rule is not None
                     and rule.death_mechanic["hp_zero"] == "downed_death_saves"
                 ):
-                    sync_death_from_hp(target, instance.round_number, rule)
+                    sync_death_from_hp(target, progression_state.round_value(instance), rule)
                 # 5e：昏迷中受击累加死亡豁免失败（任何伤害 1 次、暴击 2 次）。
                 if (
                     was_unconscious
@@ -255,7 +240,7 @@ class CombatResolver:
                 ):
                     failures = 2 if result.is_critical else 1
                     outcome = record_death_save_failures(
-                        target, failures, instance.round_number
+                        target, failures, progression_state.round_value(instance)
                     )
                     result.description += localized_text(instance.language, {
                         "zh-CN": (
@@ -347,36 +332,3 @@ class CombatResolver:
             [result.check_id for result, _ in results],
         )
         return "\n".join(lines)
-
-    def initiate_combat(self, instance: GameInstance) -> str:
-        """初始化战斗先攻顺序。返回战斗开始公告文本。"""
-        combatants: list[tuple[str, int]] = []
-
-        for uid in instance.alive_players:
-            character_sheet = instance.get_character_sheet(uid)
-            dexterity = character_sheet.get("attributes", {}).get("dex", 10)
-            initiative = roll_initiative((dexterity - 10) // 2)
-            combatants.append((uid, initiative.total))
-            logger.info(
-                "先攻: %s dex=%d roll=%d",
-                instance.players[uid].get("character_name", uid),
-                dexterity,
-                initiative.total,
-            )
-
-        for enemy in instance.combat_enemies:
-            enemy_id = enemy.get("name", enemy.get("character_name", "敌人"))
-            dexterity = enemy.get("character_sheet", {}).get("attributes", {}).get("dex", 10)
-            initiative = roll_initiative((dexterity - 10) // 2)
-            combatants.append((enemy_id, initiative.total))
-
-        combatants.sort(key=lambda item: -item[1])
-        instance.begin_combat([combatant[0] for combatant in combatants])
-
-        order_text = " → ".join(
-            f"{instance.players[uid].get('character_name', uid)}({score})"
-            if uid in instance.players else f"{uid}({score})"
-            for uid, score in combatants
-        )
-        logger.info("战斗开始: order=%s", order_text)
-        return f"⚔ 战斗开始！先攻顺序: {order_text}"

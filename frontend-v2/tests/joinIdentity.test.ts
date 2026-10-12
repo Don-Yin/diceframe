@@ -30,4 +30,15 @@ describe('isStoredPlayerMember', () => {
   it('returns false when no multiplayer info is present', () => {
     expect(isStoredPlayerMember({}, 'u1')).toBe(false)
   })
+
+  it('trusts the server viewer signal over any roster', () => {
+    const roster = { ready_players: [player('u1')], waiting_players: [], away_players: [] }
+    expect(isStoredPlayerMember({ viewer: { kind: 'seat', uid: 'u1' }, multiplayer: roster }, 'u1')).toBe(true)
+    expect(isStoredPlayerMember({ viewer: { kind: 'seat', uid: 'u2' }, multiplayer: roster }, 'u1')).toBe(false)
+    expect(isStoredPlayerMember({ viewer: { kind: 'outsider' }, multiplayer: roster }, 'u1')).toBe(false)
+  })
+
+  it('treats a visitor lobby view as not a member', () => {
+    expect(isStoredPlayerMember({ viewer: { kind: 'outsider' }, multiplayer: { player_count: 3 } as GameDetail['multiplayer'] }, 'u1')).toBe(false)
+  })
 })

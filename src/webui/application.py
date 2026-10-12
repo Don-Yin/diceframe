@@ -20,6 +20,7 @@ from src.webui.errors import error_code_middleware
 from src.webui.device_tokens import DEVICE_TOKENS_KEY, DeviceTokenStore
 from src.webui.login_audit import LOGIN_AUDIT_KEY, LoginAuditStore
 from src.webui.pairing import PairingService
+from src.webui.server_identity import SERVER_IDENTITY_KEY, ServerIdentityStore
 from src.webui.routes.adventures import register_adventures
 from src.webui.routes.announcements import register_announcements
 from src.webui.routes.asr import register_asr
@@ -28,6 +29,7 @@ from src.webui.routes.auth import register_auth
 from src.webui.routes.avatars import register_avatars
 from src.webui.routes.bot import register_bot
 from src.webui.routes.character_cards import register_character_cards
+from src.webui.routes.content import register_content
 from src.webui.routes.games import register_games
 from src.webui.routes.generated_images import register_generated_images
 from src.webui.routes.generation import register_generation
@@ -97,6 +99,7 @@ def create_app(dependencies: ApplicationDependencies) -> web.Application:
     application[ABUSE_GUARD_KEY] = AbuseGuard()
     application[LOGIN_AUDIT_KEY] = LoginAuditStore(dependencies.data_dir)
     application[DEVICE_TOKENS_KEY] = DeviceTokenStore(dependencies.data_dir)
+    application[SERVER_IDENTITY_KEY] = ServerIdentityStore(dependencies.data_dir)
     application[PAIRING_SERVICE_KEY] = PairingService(
         application[DEVICE_TOKENS_KEY],
         audit=application[LOGIN_AUDIT_KEY],
@@ -149,6 +152,7 @@ def register_routes(
     register_adventures(application)
     register_modules(application)
     register_character_cards(application)
+    register_content(application)
     register_avatars(application)
     register_scene_images(application)
     register_maps(application)

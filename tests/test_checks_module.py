@@ -27,6 +27,14 @@ def new_instance(**kwargs):
     return GameInstance(game_key=("test", "checks", "bot"), **kwargs)
 
 
+def read_field(instance, key):
+    return getattr(module, key)(instance)
+
+
+def write_field(instance, key, value):
+    getattr(module, f"replace_{key}")(instance, value)
+
+
 def test_migration_moves_fields_without_mutating_input_and_is_idempotent():
     original = {"instance_schema_version": 30, **deepcopy(VALUES), "opaque": {"items": [1]}}
     before = deepcopy(original)
@@ -89,8 +97,8 @@ def test_ensure_preserves_valid_objects_and_does_not_filter_list_elements():
     instance = GameInstance.from_dict({"game_key": ["test", "checks", "bot"], "state": "waiting",
                                        "instance_schema_version": 30,
                                        **{key: raw[key] for key in VALUES}})
-    assert instance.last_checks == raw["last_checks"]
-    assert instance.manual_roll_requests == raw["manual_roll_requests"]
+    assert module.last_checks(instance) == raw["last_checks"]
+    assert module.manual_roll_requests(instance) == raw["manual_roll_requests"]
 
 
 def test_future_instance_version_is_rejected():
@@ -105,9 +113,9 @@ def test_unknown_module_version_is_preserved_and_access_fails_closed():
     before = deepcopy(instance.modules)
     for key, value in VALUES.items():
         with pytest.raises(ModuleStateError):
-            getattr(instance, key)
+            read_field(instance, key)
         with pytest.raises(ModuleStateError):
-            setattr(instance, key, value)
+            write_field(instance, key, value)
     assert instance.modules == before
     encoded = instance.to_dict()
     assert encoded["modules"][module.MODULE_NAME] == raw
@@ -115,21 +123,28 @@ def test_unknown_module_version_is_preserved_and_access_fails_closed():
     assert restored.modules[module.MODULE_NAME] == raw
 
 
-def test_properties_use_live_slot_and_roundtrip_has_one_storage_owner():
+def test_game_instance_has_no_checks_facades():
+    instance = new_instance()
+    for key in VALUES:
+        assert not hasattr(GameInstance, key)
+        assert not hasattr(instance, key)
+
+
+def test_module_accessors_use_live_slot_and_roundtrip_has_one_storage_owner():
     instance = new_instance()
     other = new_instance()
     slot = instance.modules[module.MODULE_NAME]
     assert slot is not other.modules[module.MODULE_NAME]
-    assert slot["last_checks"] is not other.last_checks
-    assert slot["manual_roll_requests"] is not other.manual_roll_requests
+    assert slot["last_checks"] is not module.last_checks(other)
+    assert slot["manual_roll_requests"] is not module.manual_roll_requests(other)
     assert not VALUES.keys() & {item.name for item in fields(instance)}
     assert not VALUES.keys() & vars(instance).keys()
     for key, value in deepcopy(VALUES).items():
-        setattr(instance, key, value)
+        write_field(instance, key, value)
         assert slot[key] is value
-        assert getattr(instance, key) is slot[key]
-    instance.last_checks.append({"check_id": "in-place"})
-    instance.manual_roll_requests[0]["status"] = "cancelled"
+        assert read_field(instance, key) is slot[key]
+    module.last_checks(instance).append({"check_id": "in-place"})
+    module.manual_roll_requests(instance)[0]["status"] = "cancelled"
     encoded = instance.to_dict()
     assert not VALUES.keys() & encoded.keys()
     restored = GameInstance.from_dict(deepcopy(encoded))
@@ -142,14 +157,14 @@ def test_properties_use_live_slot_and_roundtrip_has_one_storage_owner():
 def test_clear_round_preserves_manual_rolls_and_list_identity(prepared):
     instance = new_instance()
     for key, value in deepcopy(VALUES).items():
-        setattr(instance, key, value)
-    requests, records = instance.manual_roll_requests, instance.last_checks
+        write_field(instance, key, value)
+    requests, records = module.manual_roll_requests(instance), module.last_checks(instance)
     module.clear_round(instance, prepared=prepared)
-    assert instance.last_check is None
-    assert instance.last_checks is records
+    assert module.last_check(instance) is None
+    assert module.last_checks(instance) is records
     assert records == []
-    assert instance.round_checks_prepared is prepared
-    assert instance.manual_roll_requests is requests
+    assert module.round_checks_prepared(instance) is prepared
+    assert module.manual_roll_requests(instance) is requests
     assert requests == VALUES["manual_roll_requests"]
 
 
@@ -157,11 +172,11 @@ def test_clear_round_preserves_manual_rolls_and_list_identity(prepared):
 async def test_reset_preserves_manual_roll_requests_implicitly():
     instance = new_instance()
     for key, value in deepcopy(VALUES).items():
-        setattr(instance, key, value)
-    requests = instance.manual_roll_requests
+        write_field(instance, key, value)
+    requests = module.manual_roll_requests(instance)
     await instance.reset()
     assert instance.modules[module.MODULE_NAME] == {**module.fresh(), "manual_roll_requests": requests}
-    assert instance.manual_roll_requests is requests
+    assert module.manual_roll_requests(instance) is requests
     assert requests == VALUES["manual_roll_requests"]
 
 
@@ -169,26 +184,26 @@ def test_record_sync_and_preparation_preserve_aliasing_contract():
     instance = new_instance()
     check = {"check_id": "record", "roll": 12}
     instance.record_check(check)
-    assert instance.last_check is instance.last_checks[-1] is check
+    assert module.last_check(instance) is module.last_checks(instance)[-1] is check
     instance.sync_last_check(check)
-    assert instance.last_check == check
-    assert instance.last_check is not check
+    assert module.last_check(instance) == check
+    assert module.last_check(instance) is not check
     check["roll"] = 20
-    assert instance.last_check["roll"] == 12
+    assert module.last_check(instance)["roll"] == 12
     instance.complete_round_check_preparation()
-    assert instance.last_check is check
-    assert instance.round_checks_prepared is True
+    assert module.last_check(instance) is check
+    assert module.round_checks_prepared(instance) is True
     module.invalidate_prepared(instance)
-    assert instance.round_checks_prepared is False
+    assert module.round_checks_prepared(instance) is False
 
 
 def test_mark_prepared_with_empty_list_preserves_last_check():
     instance = new_instance()
-    instance.last_check = {"check_id": "previous"}
-    previous = instance.last_check
+    module.replace_last_check(instance, {"check_id": "previous"})
+    previous = module.last_check(instance)
     instance.complete_round_check_preparation()
-    assert instance.last_check is previous
-    assert instance.round_checks_prepared is True
+    assert module.last_check(instance) is previous
+    assert module.round_checks_prepared(instance) is True
 
 
 def test_legacy_null_lists_keep_codec_defaults():
@@ -196,14 +211,15 @@ def test_legacy_null_lists_keep_codec_defaults():
         "instance_schema_version": 30, "game_key": ["test", "checks", "bot"], "state": "waiting",
         "last_checks": None, "manual_roll_requests": None, "round_checks_prepared": "truthy",
     })
-    assert instance.last_checks == []
-    assert instance.manual_roll_requests == []
-    assert instance.round_checks_prepared is True
+    assert module.last_checks(instance) == []
+    assert module.manual_roll_requests(instance) == []
+    assert module.round_checks_prepared(instance) is True
 
 
-def test_manual_roll_append_supports_attribute_based_test_doubles():
-    instance = SimpleNamespace(modules={}, manual_roll_requests=[])
+def test_manual_roll_append_writes_module_slot_on_non_aggregate_doubles():
+    instance = SimpleNamespace(modules={})
     request = {"id": "manual"}
     module.add_manual_roll_request(instance, request)
-    assert instance.manual_roll_requests[-1] is request
-    assert instance.modules == {}
+    assert module.manual_roll_requests(instance)[-1] is request
+    assert instance.modules[module.MODULE_NAME]["manual_roll_requests"] == [request]
+    assert not hasattr(instance, "manual_roll_requests")

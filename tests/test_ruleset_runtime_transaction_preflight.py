@@ -9,9 +9,15 @@ import pytest
 from src.engine import instance_lifecycle, round_recovery, round_snapshots, turn_state
 from src.engine.game_instance import GameRegistry, GameState
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import ruleset_runtime
+import asyncio
+
+from src.engine.modules import legacy_combat, ruleset_runtime
+from src.engine.modules import round_safety
 from tests.test_game_instance_reset_characterization import _make_populated_instance
-from tests.test_legacy_combat_transaction_preflight import live_state
+
+
+def live_state(instance):
+    return {key: value for key, value in vars(instance).items() if not isinstance(value, asyncio.Lock)}
 
 
 def unsupported_instance():
@@ -107,7 +113,7 @@ def test_owner_and_aggregate_entries_reject_before_mutation(operation):
 @pytest.mark.parametrize("operation", ["capture", "restore"])
 def test_entity_snapshot_entries_reject_before_npc_or_snapshot_writes(operation, direct):
     instance = unsupported_instance()
-    instance.round_entity_snapshot = {"npcs": {"different": {"hp": 1}}, "combat_enemies": []}
+    round_safety.replace_entity_snapshot(instance, {"npcs": {"different": {"hp": 1}}, "combat_enemies": []})
     before = deepcopy(live_state(instance))
     with pytest.raises(ModuleStateError, match="unsupported ruleset_runtime module schema"):
         if direct:
@@ -122,7 +128,7 @@ def test_entity_snapshot_entries_reject_before_npc_or_snapshot_writes(operation,
 async def test_existing_readonly_returns_remain_before_preflight(operation):
     instance = unsupported_instance()
     instance.state = GameState.WAITING
-    instance.round_entity_snapshot.clear()
+    round_safety.round_entity_snapshot(instance).clear()
     before = deepcopy(live_state(instance))
     if operation == "abort":
         assert await instance.abort_round_processing() is False
@@ -196,7 +202,7 @@ def test_dnd_engines_reject_before_defaults_or_reduction(engine_name, operation,
 
     runtime = Dnd2024Runtime()
     instance = _make_populated_instance()
-    instance.ruleset_state = {}
+    ruleset_runtime.replace_state(instance, {})
     instance.adventure_binding = {}
     if engine_name == "campaign":
         engine = runtime._campaign_engine(instance, "en")
@@ -266,8 +272,6 @@ async def test_party_rest_rejects_before_session_or_character_mutation():
     from src.webui.services.ruleset_rest import LiveRulesetRestDependencies, resolve_live_party
 
     instance = unsupported_instance()
-    instance.combat_active = False
-    instance.combat_state = "none"
     instance.players = {
         uid: {"character_name": uid, "character_sheet": {"hp": 5}}
         for uid in ("hero", "ally")
@@ -308,9 +312,51 @@ def test_replayed_combat_batch_rejects_before_default_repair():
     engine, instance = _instance()
     batch = _start(engine, instance)
     assert engine.apply_batch(instance, batch)["duplicate"] is True
-    del instance.ruleset_state["combat_history"]
+    del ruleset_runtime.state(instance)["combat_history"]
     instance.modules["ruleset_runtime"]["schema_version"] = 99
     before = deepcopy(live_state(instance))
     with pytest.raises(ModuleStateError, match="unsupported ruleset_runtime module schema"):
+        engine.apply_batch(instance, batch)
+    assert live_state(instance) == before
+
+
+def test_dnd_projection_and_duplicate_batch_preserve_authority():
+    from tests.rulesets.test_dnd2024_combat import _instance, _start
+
+    engine, instance = _instance()
+    batch = _start(engine, instance)
+    authority = deepcopy(ruleset_runtime.state(instance))
+    assert legacy_combat.combat_state(instance) == "active"
+    assert legacy_combat.combat_active(instance) is True
+    assert legacy_combat.initiative_order(instance) == ruleset_runtime.state(instance)["combat"]["initiative"]
+    assert legacy_combat.initiative_order(instance) is not ruleset_runtime.state(instance)["combat"]["initiative"]
+    before = deepcopy(live_state(instance))
+    result = engine.apply_batch(instance, batch)
+    assert result["duplicate"] is True
+    assert live_state(instance) == before
+    assert ruleset_runtime.state(instance) == authority
+
+
+def test_duplicate_needing_defaults_preserves_repair_semantics():
+    from tests.rulesets.test_dnd2024_combat import _instance, _start
+
+    engine, instance = _instance()
+    batch = _start(engine, instance)
+    del ruleset_runtime.state(instance)["combat_history"]
+    authority = ruleset_runtime.state(instance)
+    assert engine.apply_batch(instance, batch)["duplicate"] is True
+    assert ruleset_runtime.state(instance) is authority
+    assert ruleset_runtime.state(instance)["combat_history"] == []
+
+
+def test_duplicate_keeps_ruleset_schema_validation():
+    from tests.rulesets.test_dnd2024_combat import _instance, _start
+    from src.rulesets.dnd2024.combat.primitives import CombatIntentError
+
+    engine, instance = _instance()
+    batch = _start(engine, instance)
+    ruleset_runtime.state(instance)["state_schema_version"] = 99
+    before = deepcopy(live_state(instance))
+    with pytest.raises(CombatIntentError, match="unsupported D&D 2024 combat state schema"):
         engine.apply_batch(instance, batch)
     assert live_state(instance) == before

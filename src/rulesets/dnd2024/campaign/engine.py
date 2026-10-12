@@ -7,6 +7,7 @@ from copy import deepcopy
 from hashlib import sha256
 from typing import Any
 
+from src.engine.modules import ruleset_runtime, table_settings
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.play.contracts import story_encounter_instance_id
 from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch_id
@@ -157,7 +158,7 @@ class Dnd2024CampaignEngine:
         }
 
     def initialize_state(self, instance: Any) -> dict[str, Any]:
-        state = instance.ruleset_state
+        state = ruleset_runtime.state(instance)
         if not isinstance(state, dict):
             raise CampaignIntentError("ruleset_state must be an object")
         state.setdefault("state_schema_version", 1)
@@ -174,7 +175,7 @@ class Dnd2024CampaignEngine:
         mode = str(automation.get("mode") or "")
         if mode not in AUTOMATION_MODES:
             automation["mode"] = (
-                "auto" if bool(getattr(instance, "solo_mode", False)) else "assist"
+                "auto" if bool(table_settings.solo_mode(instance)) else "assist"
             )
         world_binding = campaign.setdefault(
             "world_binding", deepcopy(self._initial_campaign()["world_binding"]),
@@ -278,7 +279,7 @@ class Dnd2024CampaignEngine:
         tutorial = campaign["tutorial"]
         if (
             is_gm
-            and bool(getattr(instance, "solo_mode", False))
+            and bool(table_settings.solo_mode(instance))
             and session.get("status") == "not_started"
             and tutorial.get("status") in {"not_started", "unavailable"}
         ):
@@ -402,7 +403,7 @@ class Dnd2024CampaignEngine:
         state = self.initialize_state(instance)
         intent_id = str(intent.get("intent_id") or "")
         prior = next(
-            (item for item in instance.event_ledger if item.get("intent_id") == intent_id),
+            (item for item in ruleset_runtime.event_ledger(instance) if item.get("intent_id") == intent_id),
             None,
         )
         if prior is not None:
@@ -540,7 +541,7 @@ class Dnd2024CampaignEngine:
         party = campaign.get("party_decision") or {}
         if str(party.get("status") or "") == "open":
             return True
-        if bool(getattr(instance, "solo_mode", False)) or len(instance.players) <= 1:
+        if bool(table_settings.solo_mode(instance)) or len(instance.players) <= 1:
             return False
         tutorial = campaign.get("tutorial") or {}
         if tutorial.get("status") != "active":
@@ -611,29 +612,28 @@ class Dnd2024CampaignEngine:
         return events
 
     def apply_batch(self, instance: Any, batch: dict[str, Any]) -> dict[str, Any]:
-        from src.engine.modules import ruleset_runtime
-
         ruleset_runtime.require_writable(instance)
+        ruleset_runtime.require_binding(instance, self.bundle.manifest.runtime_id)
         state = self.initialize_state(instance)
         snapshot = {
             "version": int(state.get("version", 0) or 0),
             "ruleset_state": deepcopy(state),
         }
         updated, ledger, duplicate = apply_event_batch(
-            snapshot, instance.event_ledger, batch, self._reduce_event,
+            snapshot, ruleset_runtime.event_ledger(instance), batch, self._reduce_event,
         )
         if not duplicate:
             next_state = updated["ruleset_state"]
             next_state["version"] = updated["version"]
-            instance.ruleset_state = next_state
-            instance.event_ledger = ledger
+            ruleset_runtime.replace_state(instance, next_state)
+            ruleset_runtime.replace_event_ledger(instance, ledger)
         return {
             "ok": True,
             "applied": not duplicate,
             "duplicate": duplicate,
-            "state_version": int(instance.ruleset_state.get("version", 0) or 0),
+            "state_version": int(ruleset_runtime.state(instance).get("version", 0) or 0),
             "event_batch": deepcopy(batch),
-            "campaign": deepcopy(instance.ruleset_state.get("campaign") or {}),
+            "campaign": deepcopy(ruleset_runtime.state(instance).get("campaign") or {}),
         }
 
     def gameplay_view(
@@ -728,7 +728,7 @@ class Dnd2024CampaignEngine:
         } and not is_gm:
             raise CampaignIntentError("only the GM can perform this campaign operation")
         if intent_type == "session_zero.quick_start":
-            if not bool(getattr(instance, "solo_mode", False)):
+            if not bool(table_settings.solo_mode(instance)):
                 raise CampaignIntentError("recommended quick start is only available in solo mode")
             tutorial = state["campaign"]["tutorial"]
             if (

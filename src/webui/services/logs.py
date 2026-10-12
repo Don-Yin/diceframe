@@ -6,6 +6,7 @@ import copy
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
+from src.engine.modules import check_reveals, progression_state, session_stats, table_settings
 from src.llm.parser import sanitize_narration
 
 GameKey = tuple[str, ...]
@@ -15,6 +16,10 @@ PUBLIC_LOG_FIELDS = frozenset({
     "check_results", "swipes", "current_swipe", "timestamp",
     "story_recaps", "scene_image",
 })
+
+# The image prompts are written by the GM model from GM context and may name
+# unrevealed lore; players only get the picture and its public panels.
+GM_ONLY_SCENE_IMAGE_FIELDS = frozenset({"prompt", "revised_prompt"})
 
 # Historical action renderers use the actor identity and display text only.
 # Live-action revision/dice status and internal adjudication are separate contracts.
@@ -82,11 +87,36 @@ def get_log(
             {key: value for key, value in entry.items() if key in PUBLIC_LOG_FIELDS}
             for entry in page_items
         ]
+        for entry in page_items:
+            scene_image = entry.get("scene_image")
+            if isinstance(scene_image, dict):
+                entry["scene_image"] = {
+                    key: value for key, value in scene_image.items()
+                    if key not in GM_ONLY_SCENE_IMAGE_FIELDS
+                }
+    # 揭示标记与揭示方式是展示层信息：与日志同页返回，供时间线恢复
+    # 已揭示/未揭示卡片状态。records 上限有界（模块内裁剪），整包返回。
+    page_ids: set[str] = set()
+    for entry in page_items:
+        results = entry.get("check_results")
+        if not isinstance(results, list):
+            continue
+        for check in results:
+            if isinstance(check, dict) and str(check.get("check_id") or ""):
+                page_ids.add(str(check.get("check_id")))
+    reveal_records = check_reveals.records(inst)
+    check_reveals_map = {
+        check_id: copy.deepcopy(record)
+        for check_id, record in reveal_records.items()
+        if isinstance(record, dict) and (check_id in page_ids or not page_ids)
+    }
     return {
         "log": page_items,
         "total": total,
         "page": page,
         "total_pages": max(1, (total + per_page - 1) // per_page),
+        "check_reveals": check_reveals_map,
+        "dice_reveal_mode": table_settings.dice_reveal_mode(inst),
     }
 
 
@@ -109,10 +139,10 @@ def get_statistics(dependencies: LogDependencies, game_key: str) -> dict[str, An
                 player_stats[name]["actions"] = player_stats[name].get("actions", 0) + 1
 
     return {
-        "total_rounds": inst.round_number,
+        "total_rounds": progression_state.round_value(inst),
         "total_battles": battles,
-        "total_llm_calls": inst.total_llm_calls,
-        "total_tokens": inst.total_tokens,
+        "total_llm_calls": session_stats.total_llm_calls(inst),
+        "total_tokens": session_stats.total_tokens(inst),
         "player_stats": list(player_stats.values()),
     }
 

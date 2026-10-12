@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from aiohttp.test_utils import TestClient, TestServer
+from src.engine.modules import private_channels, room_access
 import pytest
 
 from src.webui.session import SessionManager, session_middleware
@@ -19,10 +20,10 @@ from test_game_query_routes_http import (
 def viewer_env(play_env, tmp_path):
     game_key, instance = _make_game(play_env, "viewer")
     instance.players["p2"] = {"character_name": "乙", "character_sheet": {}}
-    instance.private_log = {
+    private_channels.replace_private_log(instance, {
         "p1": [{"round": 1, "text": "A private", "source": "gm"}],
         "p2": [{"round": 1, "text": "B private", "source": "gm"}],
-    }
+    })
     instance.log = [{
         "round": 1, "gm_response": "Public narration",
         "actions": [
@@ -76,15 +77,20 @@ async def test_existing_owner_and_shared_player_read_projections(viewer_env, pla
     suffix = "" if owner else "?user=p1&share=1"
     uid = instance.gm_uid if owner else "p1"
     expected = {
-        "": play_env.api.game_detail(key, uid, viewer_is_gm=owner),
+        "": {
+            **play_env.api.game_detail(key, uid, viewer_is_gm=owner),
+            "viewer": {"kind": "gm" if owner else "seat", "uid": uid},
+        },
         "/log": play_env.api.get_log(key, 1, 50, owner),
         "/private-log": (play_env.api.private_log(key) if owner else play_env.api.private_log_for_user(key, uid)),
         "/table-talk": play_env.api.table_talk(key),
         "/adventure": play_env.api.game_adventure_projection(key, viewer_is_gm=owner),
     }
+    # A share-link player proves its seat with the seat's token, not ?user=.
+    player_headers = {} if owner else {"X-Seat-Token": room_access.issue_seat_token(instance, "p1")}
     async with TestClient(TestServer(app)) as client:
         for path, payload in expected.items():
-            response = await client.get(f"/api/games/{key}{path}{suffix}", headers=headers if owner else {})
+            response = await client.get(f"/api/games/{key}{path}{suffix}", headers=headers if owner else player_headers)
             assert response.status == 200
             assert await response.json() == payload
 

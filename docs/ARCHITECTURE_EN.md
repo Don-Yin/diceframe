@@ -10,9 +10,11 @@
 > - Branch: `main`
 > - Commit: `962fda45a68caa24bac38fd2313d92d66fa59a7a`
 > - Release: `2.6.1`
-> - Current GameInstance persisted schema: `34`
-> - R8-e: `ruleset_runtime`, `ruleset_state`, and `event_ledger` proxy the same objects in `modules.ruleset_runtime` under `binding`, `state`, and `event_ledger`; migration 33→34 removes the old top-level keys. Reset preserves binding, rebuilds state, then clears the ledger. Encoding still drops unbound state/ledger without changing live data; persistence of rest sessions on unbound games remains a follow-up.
-> - R8-d: `combat_active`, `combat_enemies`, `combat_state`, `initiative_order`, and `initiative_current` live in `modules.legacy_combat`; migration 32→33 removes the old top-level keys. This stores a compatibility projection; D&D 2024 combat authority remains in `ruleset_state["combat"]`. Only invalid types are repaired; valid list contents are not filtered.
+> - Current GameInstance persisted schema: `40`
+> - R9-b: `scene` proxies `modules.narrative_notes.scene`, upgrading that slot to v2; migration 39→40 removes the old top-level key and keeps the value verbatim. Reset still clears it. Transactions that write the scene (run opening, round processing, swipe, ruleset batches and Director automation, ruleset transaction restore, reset) preflight `narrative_notes.require_writable`. The `scene` in list, detail, lobby (including the password gate), SSE, recap and the LLM view is unchanged.
+> - R9-a: `adventure_progress` and `play_mode` proxy the same objects in `modules.adventure_runtime` under `progress` and `play_mode`; migration 38→39 removes the old top-level keys. Adventure identity stays only in top-level `adventure_binding`. An empty or unknown play mode is still derived from the binding on load; in-place reset clears progress and keeps the play mode; a new run (reset/restart/seed) keeps the play mode and re-initializes v2 progress, all through the module owner after a preflight.
+> - R8-e: `ruleset_runtime`, `ruleset_state`, and `event_ledger` proxy the same objects in `modules.ruleset_runtime` under `binding`, `state`, and `event_ledger`; migration 33→34 removes the old top-level keys. Reset preserves binding, rebuilds state, then clears the ledger. Encoding still drops unbound state/ledger without changing live data. Normal and seed creation bind `versioned_state` runtimes through `VersionedStateRuntime.game_binding` before advancement configuration or character joins, rolling creation back if binding fails. Rest, advancement, and ruleset event batches reject writes with missing or mismatched runtime IDs; narrative combat signals return False and log a warning. Existing unbound saves are not automatically bound; schema and persisted shape are unchanged.
+> - R8-d: `combat_active`, `combat_enemies`, `combat_state`, `initiative_order`, and `initiative_current` moved into `modules.legacy_combat` (migration 32→33 removes the old top-level keys). Since 41→42 the slot (schema 2) stored only `combat_enemies`; 42→43 removes the whole `modules.legacy_combat` slot (`combat_enemies` is retired and never guessed into NPCs; generic hp_based combat targets player uids and `npc:<id>` only). The four turn fields are a read-only derived view: a ruleset registers `legacy_combat.register_combat_projector(runtime_id, projector)` (D&D 2024 projects its own `ruleset_state["combat"]`), and rulesets without a formal encounter authority read neutral values (`"none"`/`False`/`[]`/`0`). The migration drops the stored copies and never reinterprets them. Only invalid types are repaired; valid list contents are not filtered.
 > - R8-c2: `round_start_snapshot`, `round_entity_snapshot`, and `death_save_outcomes` live in `modules.round_safety`; compatibility properties remain, and migration 31→32 removes the old top-level keys. Reset clears only the two snapshots and preserves death-save caches.
 > - R8-c1: `last_check`, `last_checks`, `round_checks_prepared`, and `manual_roll_requests` live in `modules.checks`; compatibility properties remain, and migration 30→31 removes the old top-level keys. Reset continues to preserve manual roll requests.
 > - R8-a: `total_llm_calls`, `total_tokens`, `started_at`, and `last_activity` live in `modules.session_stats`; compatibility properties remain, and migration 29→30 removes the old top-level keys.
@@ -484,6 +486,8 @@ Frontend / Bot / Plugin Client
   - must not be aware of TLS, certificates, or a concrete transport.
 
 This is one of the most important current **hard architecture boundaries**.
+
+`tests/architecture/test_game_instance_facades.py` records module-state facade debt: after R7–R9 moved fields into `src/engine/modules`, `GameInstance` still keeps a compatibility property for each one, and every `src/` caller that reads or writes `instance.<field>` is counted per file + property in a shrink-only baseline. The facade set is detected from the AST (properties whose body references `src.engine.modules`), and its size may only shrink too; when callers move to the module API, the same PR lowers or removes the matching baseline entries.
 
 ---
 
@@ -2734,6 +2738,7 @@ This means the architecture has successfully extracted a rules runtime, but the 
 
 To avoid forcing every runtime to implement an ever-growing method set, additional abilities are exposed through optional Protocols such as:
 
+- `VersionedStateRuntime` (required for `versioned_state=True`; games and character sheets share binding identity)
 - `AuthoritativeIntentHooks`
 - `NarrativeStatePolicyRuntime`
 - `NarrativeCombatSignalRuntime`
@@ -3097,6 +3102,13 @@ Profile edits cannot directly overwrite:
 - runtime/content/state versions.
 
 Mechanical changes must be revalidated from canonical choices/history.
+
+The generic sheet write for classic (non rules-aware) rules, `PUT /api/games/{game}/character/{uid}`, separates authority the same way (`src/webui/character_sheet_authority.py`):
+
+- the table GM, or the owner acting as itself, may change every editable field;
+- a seated player, a bot acting for a player seat, and a P2P guest relayed by the host with `delegate=1` may only change profile fields (name, race, background, identity, portrait) and spend engine-granted `level_up_points` on attributes (increase only);
+- HP, level, XP, gold/currency, resources, progression, attributes, skills, class, equipment/inventory/key items and rule special stats (sanity, luck...) are engine / GM authority; a player-side request that changes any of them is rejected as a whole with `403 FIELD_REQUIRES_GM` (listing `fields`), never partially applied;
+- adopting a card goes through `POST .../adopt-card`: the server loads the card from the library by `card_id`; the request body carries no mechanical values.
 
 ---
 
@@ -4690,6 +4702,19 @@ player API
 ```
 
 instead of allowing every endpoint to accept the administrative access token directly.
+
+Storage and lifetime (`room_access` slot schema 3):
+
+- the room password is stored only as a salted PBKDF2 hash (same format as the owner access password); the GM can set, replace or clear it but never read it back. New passwords need at least 6 characters; hashes of older, shorter passwords keep working;
+- each successful password entry mints its own room token; only its SHA-256 digest and an expiry are stored (default 30 days, `TRPG_ROOM_TOKEN_TTL_DAYS`, max 365). Changing or clearing the password revokes every room token;
+- removing a player does **not** rotate room tokens: that would log every other player out. A removed player loses the seat (its seat credential is revoked); the room token only gates the lobby, and the GM changes the password to shut a former player out of the lobby too;
+- passwords are never trimmed (create, change or join); a whitespace-only password is refused;
+- the room token travels only in the `X-Room-Token` header, never in a URL (SSE authenticates with its one-time ticket). Access logs additionally redact `room_token`, `ticket`, `seat` and `seat_token` query values;
+- password attempts are limited per IP **and** (canonical) game with a token bucket: 5 attempts, then one more every 30 s. Only attempts the verify handler marks as a wrong password take a token; correct entries and other errors are free. Attempts for one IP + game run one at a time, so parallel guesses cannot all pass the check before a failure is recorded. The wait comes from the token deficit alone (refused attempts take nothing and never push the next slot back) and never exceeds 30 s — a slow-down, not a lockout. There is no cross-game per-IP cap, so failures on one game never affect another. Players sharing an IP (tunnel, proxy, NAT) share a bucket: the scheme guarantees a bounded wait, not separation within one address — a griefer behind the same IP can race legitimate players for each refilled token. A per-session bucket (in addition to the per-address one) is a possible future step. The body is read (10 s limit) before queueing for the per-IP+game lock and the lock wait is bounded (10 s), so a stalled upload cannot hold the lock. The client identity is the direct peer address, IPv6 keyed by its /64 prefix (in every abuse-guard bucket) so rotating addresses inside one /64 gains nothing; `X-Forwarded-For` is not trusted, as there is no trusted-proxy configuration;
+- a token is only issued if the password hash is unchanged after the (off-loop) check, so a password change during verification never yields a token;
+- loading a save with plaintext room credentials (schema < 38) rewrites `state.json` and `state.backup.json` immediately with hashes;
+- staged commits (`replace_persisted_state_from`) never overwrite the live `room_access` slot;
+- exports and imports never carry the password hash, room tokens, seat credentials or the bot bind token; a password-protected save arrives with its player entrance closed until the GM sets a new password and reopens it.
 
 ---
 

@@ -26,6 +26,7 @@ import pytest
 
 from src.engine.game_instance import GameInstance, GameRegistry
 from src.engine.memory_outbox import pending_memory_deliveries, queue_memory_delivery
+from src.engine.modules import economy_state, table_settings
 from src.engine.world_events import advance_world_time
 from src.engine.world_state import (
     WORLD_STATE_SCHEMA_VERSION,
@@ -38,6 +39,7 @@ from src.engine.world_state import (
     world_revision,
     world_scheduled_events,
 )
+from src.engine.modules import ruleset_runtime
 
 
 def make_instance(**kwargs) -> GameInstance:
@@ -162,7 +164,7 @@ def test_world_writes_produce_no_memory_deltas() -> None:
     instance = make_instance()
     populate_world(instance)
     assert pending_memory_deliveries(instance) == []
-    assert instance.economy.get("external_effects_outbox", []) == []
+    assert economy_state.state(instance).get("external_effects_outbox", []) == []
 
     summary = advance_world_time(instance, 1200)
     assert summary["applied"]
@@ -184,7 +186,7 @@ def test_world_writes_produce_no_memory_deltas() -> None:
 def test_rollback_restores_world_but_not_bindings() -> None:
     instance = make_instance()
     instance.world_id = "world-1"
-    instance.solo_mode = True
+    table_settings.replace_solo_mode(instance, True)
     instance.players["p1"] = {"character_name": "Alice", "character_sheet": {"hp": 10}}
     instance.bind_ruleset_runtime({
         "runtime_id": "core:dnd2024",
@@ -210,7 +212,7 @@ def test_rollback_restores_world_but_not_bindings() -> None:
     assert fact_value(instance.world_state, "torch.lit") is None
     # binding 与规则选择不是"这一轮结算出来的东西"：rollback 不触碰。
     assert instance.adventure_binding["adventure_id"] == "adv-1"
-    assert instance.ruleset_runtime["id"] == "core:dnd2024"
+    assert ruleset_runtime.binding(instance)["id"] == "core:dnd2024"
     assert instance.rule_id == "coc7"
 
 

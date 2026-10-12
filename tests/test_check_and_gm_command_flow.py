@@ -16,6 +16,8 @@ from src.llm.parser import sanitize_narration
 from src.rules.rule_system import RuleSystem
 from src.webui.services import game_controls, game_master
 from src.webui.services.logs import GameLogService, LogDependencies
+from src.engine.modules import checks as checks_module
+from src.engine.modules import round_presentation
 
 
 def _coc_instance() -> tuple[GameInstance, RuleSystem]:
@@ -113,9 +115,9 @@ def test_confirmed_roll_is_reused_without_a_second_random_roll(monkeypatch):
     block = build_dice_constraint_block(instance, collect_actions_text(instance), rule, "d100", DiceResolver())
 
     assert "d100=54" in block
-    assert instance.last_check["actor_uid"] == "p1"
-    assert instance.last_check["skill"] == "潜行"
-    assert instance.last_check["roll"] == 54
+    assert checks_module.last_check(instance)["actor_uid"] == "p1"
+    assert checks_module.last_check(instance)["skill"] == "潜行"
+    assert checks_module.last_check(instance)["roll"] == 54
 
 
 def test_round_checks_pause_before_narration_when_luck_can_change_the_result():
@@ -148,7 +150,7 @@ def test_round_checks_pause_before_narration_when_luck_can_change_the_result():
     assert checks[0]["luck_cost"] == 2
     assert checks[0]["luck_decision"] == "pending"
     assert instance.pending_luck_checks()[0]["check_id"]
-    assert instance.last_check["threshold"] == 20
+    assert checks_module.last_check(instance)["threshold"] == 20
 
 
 def test_d100_resolver_ignores_model_target_and_uses_character_skill_value():
@@ -179,8 +181,8 @@ def test_d100_resolver_ignores_model_target_and_uses_character_skill_value():
         DiceResolver(),
     )
 
-    assert instance.last_check["threshold"] == 45
-    assert instance.last_check["verdict"] == "失败"
+    assert checks_module.last_check(instance)["threshold"] == 45
+    assert checks_module.last_check(instance)["verdict"] == "失败"
 
 
 def test_d20_advantage_reuses_both_confirmed_rolls():
@@ -224,10 +226,10 @@ def test_d20_advantage_reuses_both_confirmed_rolls():
         DiceResolver(),
     )
 
-    assert instance.last_check["dice"] == "d20"
-    assert instance.last_check["rolls"] == [4, 17]
-    assert instance.last_check["roll"] == 17
-    assert instance.last_check["advantage_mode"] == "advantage"
+    assert checks_module.last_check(instance)["dice"] == "d20"
+    assert checks_module.last_check(instance)["rolls"] == [4, 17]
+    assert checks_module.last_check(instance)["roll"] == 17
+    assert checks_module.last_check(instance)["advantage_mode"] == "advantage"
 
 
 def test_structured_runtime_can_defer_an_action_before_any_generic_roll():
@@ -259,7 +261,7 @@ def test_structured_runtime_can_defer_an_action_before_any_generic_roll():
     assert block == ""
     assert "check_request" not in instance.action_queue[0]
     assert "dice_value" not in instance.action_queue[0]
-    assert instance.last_checks == []
+    assert checks_module.last_checks(instance) == []
 
 
 def test_late_game_d20_target_is_capped_and_nineteen_can_succeed() -> None:
@@ -288,16 +290,16 @@ def test_late_game_d20_target_is_capped_and_nineteen_can_succeed() -> None:
     DiceResolver().resolve_action_check(instance, action, base)
 
     # 通用规则仍把失控 DC 30 钳制到 20，19+3 可以成功
-    assert instance.last_check["dc"] == 20
-    assert instance.last_check["total"] == 22
-    assert instance.last_check["verdict"] == "成功"
+    assert checks_module.last_check(instance)["dc"] == 20
+    assert checks_module.last_check(instance)["total"] == 22
+    assert checks_module.last_check(instance)["verdict"] == "成功"
 
     dnd = RuleSystem.load(Path("templates/rules/dnd5e.json"))
     DiceResolver().resolve_action_check(instance, action, dnd)
 
     # dnd5e 显式允许 DC 30（近乎不可能），不再钳制到 20
-    assert instance.last_check["dc"] == 30
-    assert instance.last_check["verdict"] == "失败"
+    assert checks_module.last_check(instance)["dc"] == 30
+    assert checks_module.last_check(instance)["verdict"] == "失败"
 
 def test_confirmed_d20_without_target_still_uses_dc_cap() -> None:
     instance = GameInstance(("web", "room", "bot"))
@@ -325,9 +327,9 @@ def test_confirmed_d20_without_target_still_uses_dc_cap() -> None:
 
     DiceResolver().resolve_action_check(instance, action, rule)
 
-    assert instance.last_check["dc"] == 20
-    assert instance.last_check["total"] == 22
-    assert instance.last_check["verdict"] == "成功"
+    assert checks_module.last_check(instance)["dc"] == 20
+    assert checks_module.last_check(instance)["total"] == 22
+    assert checks_module.last_check(instance)["verdict"] == "成功"
 
 
 def test_custom_d20_rule_can_disable_natural_twenty_auto_success() -> None:
@@ -361,9 +363,9 @@ def test_custom_d20_rule_can_disable_natural_twenty_auto_success() -> None:
 
     DiceResolver().resolve_action_check(instance, action, rule)
 
-    assert instance.last_check["total"] == 22
-    assert instance.last_check["dc"] == 25
-    assert instance.last_check["verdict"] == "失败"
+    assert checks_module.last_check(instance)["total"] == 22
+    assert checks_module.last_check(instance)["dc"] == 25
+    assert checks_module.last_check(instance)["verdict"] == "失败"
 
 
 class _Registry:
@@ -438,7 +440,7 @@ async def test_gm_resource_command_updates_luck_directly_without_public_action()
     assert result["kind"] == "resource_update"
     assert instance.get_character_sheet("p1")["luck"] == 50
     assert instance.action_queue == []
-    assert instance.gm_directives == []
+    assert round_presentation.gm_directives(instance) == []
 
 
 def _office_like_rule(tmp_path: Path) -> RuleSystem:
@@ -533,7 +535,7 @@ async def test_gm_revive_command_revives_dead_character():
     assert sheet["hp"] == 50
     assert "death_round" not in sheet
     assert instance.action_queue == []
-    assert instance.gm_directives == []
+    assert round_presentation.gm_directives(instance) == []
 
 
 @pytest.mark.asyncio
@@ -632,7 +634,7 @@ async def test_gm_resource_heal_revives_dead_character():
 async def test_spending_luck_is_atomic_persistent_and_idempotent():
     instance, rule = _coc_instance()
     instance.state = GameState.ACTIVE_JUDGMENT
-    instance.round_checks_prepared = True
+    checks_module.replace_round_checks_prepared(instance, True)
     check = {
         "check_id": "check-1",
         "actor_uid": "p1",
@@ -645,8 +647,8 @@ async def test_spending_luck_is_atomic_persistent_and_idempotent():
         "luck_spend_available": True,
         "luck_decision": "pending",
     }
-    instance.last_checks = [check]
-    instance.last_check = check
+    checks_module.replace_last_checks(instance, [check])
+    checks_module.replace_last_check(instance, check)
     api = _Api(instance, rule)
 
     first = await resolve_luck_decision(api, "web|room|bot", "check-1", "p1", True)
@@ -659,7 +661,7 @@ async def test_spending_luck_is_atomic_persistent_and_idempotent():
     assert second["already_resolved"] is True
     assert second["round_already_resolved"] is True
     assert instance.get_character_sheet("p1")["luck"] == 28
-    assert instance.last_checks[0]["luck_decision"] == "spent"
+    assert checks_module.last_checks(instance)[0]["luck_decision"] == "spent"
     assert api._reg.saved == 2
 
 
@@ -667,8 +669,8 @@ async def test_spending_luck_is_atomic_persistent_and_idempotent():
 async def test_luck_decision_is_rejected_while_historical_rewrite_is_active():
     instance, rule = _coc_instance()
     instance.state = GameState.ACTIVE_JUDGMENT
-    instance.round_checks_prepared = True
-    instance.last_checks = [{
+    checks_module.replace_round_checks_prepared(instance, True)
+    checks_module.replace_last_checks(instance, [{
         "check_id": "rewrite-luck",
         "actor_uid": "p1",
         "dice": "d100",
@@ -677,7 +679,7 @@ async def test_luck_decision_is_rejected_while_historical_rewrite_is_active():
         "verdict": "失败",
         "luck_decision": "pending",
         "luck_spend_available": True,
-    }]
+    }])
     api = _Api(instance, rule)
     entered, release = asyncio.Event(), asyncio.Event()
 
@@ -694,7 +696,7 @@ async def test_luck_decision_is_rejected_while_historical_rewrite_is_active():
         1,
     )
     assert result["code"] == "REWRITE_IN_PROGRESS"
-    assert instance.last_checks[0]["luck_decision"] == "pending"
+    assert checks_module.last_checks(instance)[0]["luck_decision"] == "pending"
     release.set()
     await asyncio.wait_for(rewrite, 1)
 
@@ -703,8 +705,8 @@ async def test_luck_decision_is_rejected_while_historical_rewrite_is_active():
 async def test_gm_force_advance_declines_every_pending_luck_choice():
     instance, rule = _coc_instance()
     instance.state = GameState.ACTIVE_JUDGMENT
-    instance.round_checks_prepared = True
-    instance.last_checks = [{
+    checks_module.replace_round_checks_prepared(instance, True)
+    checks_module.replace_last_checks(instance, [{
         "check_id": "check-1",
         "actor_uid": "p1",
         "dice": "d100",
@@ -714,7 +716,7 @@ async def test_gm_force_advance_declines_every_pending_luck_choice():
         "luck_cost": 2,
         "luck_spend_available": True,
         "luck_decision": "pending",
-    }]
+    }])
     api = _Api(instance, rule)
 
     result = await decline_pending_luck(api, "web|room|bot")
@@ -733,7 +735,7 @@ async def test_gm_narrative_command_is_private_and_cannot_trigger_check_detectio
 
     assert result["kind"] == "directive"
     assert instance.action_queue == []
-    assert instance.gm_directives[0]["text"] == "让下一次判定伴随更强的死亡风险"
+    assert round_presentation.gm_directives(instance)[0]["text"] == "让下一次判定伴随更强的死亡风险"
     assert "GM指令" not in collect_actions_text(instance)
 
 
@@ -775,3 +777,25 @@ def test_public_log_filters_legacy_gm_instruction():
     assert public["log"][0]["swipes"] == ["警报声响起。"]
     assert internal["log"][0]["gm_response"] == "门锁生锈了。"
     assert instance.log[0]["gm_response"].startswith("**SANCheck:")
+
+
+@pytest.mark.asyncio
+async def test_spending_own_luck_marks_the_seat_as_having_acted():
+    """Card adoption / deletion become GM-only once the seat is in play."""
+    from src.engine.modules import seat_activity
+
+    instance, rule = _coc_instance()
+    instance.state = GameState.ACTIVE_JUDGMENT
+    checks_module.replace_round_checks_prepared(instance, True)
+    check = {
+        "check_id": "check-own-luck", "actor_uid": "p1", "dice": "d100",
+        "roll": 22, "threshold": 20, "verdict": "失败",
+        "luck_spend_available": True, "luck_decision": "pending",
+    }
+    checks_module.replace_last_checks(instance, [check])
+    assert not seat_activity.has_acted(instance, "p1")
+
+    result = await instance.resolve_luck_decision("check-own-luck", "p1", True, rule=rule)
+
+    assert result["ok"] is True, result
+    assert seat_activity.has_acted(instance, "p1")

@@ -13,6 +13,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.engine.modules import ruleset_runtime
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.combat.action_adapter import (
@@ -52,7 +53,7 @@ class Dnd2024ExplorationEngine:
 
     @staticmethod
     def _state(instance: Any) -> dict[str, Any]:
-        state = instance.ruleset_state
+        state = ruleset_runtime.state(instance)
         if not isinstance(state, dict):
             raise ExplorationIntentError("ruleset_state must be an object")
         state.setdefault("state_schema_version", 1)
@@ -69,7 +70,7 @@ class Dnd2024ExplorationEngine:
             if raw_id not in instance.players:
                 raise ExplorationIntentError("spellcasting actor does not exist")
             return instance.get_character_sheet(raw_id).setdefault("ruleset_character", {})
-        party = instance.ruleset_state.get("party", {})
+        party = ruleset_runtime.state(instance).get("party", {})
         companion = (party.get("companions", {}) or {}).get(raw_id)
         if not isinstance(companion, dict) or not companion.get("active", True):
             raise ExplorationIntentError("spellcasting target does not exist")
@@ -87,7 +88,7 @@ class Dnd2024ExplorationEngine:
                 "name": str(instance.players[uid].get("character_name") or uid),
             })
         for companion_id, companion in sorted(
-            (instance.ruleset_state.get("party", {}).get("companions", {}) or {}).items(),
+            (ruleset_runtime.state(instance).get("party", {}).get("companions", {}) or {}).items(),
         ):
             if not isinstance(companion, dict) or not companion.get("active", True):
                 continue
@@ -348,36 +349,35 @@ class Dnd2024ExplorationEngine:
     # ------------------------------------------------------------------
 
     def apply_batch(self, instance: Any, batch: dict[str, Any]) -> dict[str, Any]:
-        from src.engine.modules import ruleset_runtime
-
         ruleset_runtime.require_writable(instance)
+        ruleset_runtime.require_binding(instance, self.bundle.manifest.runtime_id)
         snapshot = {
-            "version": int(instance.ruleset_state.get("version", 0) or 0),
-            "ruleset_state": deepcopy(instance.ruleset_state),
+            "version": int(ruleset_runtime.state(instance).get("version", 0) or 0),
+            "ruleset_state": deepcopy(ruleset_runtime.state(instance)),
             "characters": {
                 uid: deepcopy(instance.get_character_sheet(uid).get("ruleset_character", {}))
                 for uid in instance.players
             },
         }
         updated, ledger, duplicate = apply_event_batch(
-            snapshot, instance.event_ledger, batch, self._reduce_event,
+            snapshot, ruleset_runtime.event_ledger(instance), batch, self._reduce_event,
         )
         if not duplicate:
             ruleset_state = updated["ruleset_state"]
             ruleset_state["version"] = updated["version"]
-            instance.ruleset_state = ruleset_state
+            ruleset_runtime.replace_state(instance, ruleset_state)
             for uid, canonical in updated["characters"].items():
                 if uid not in instance.players:
                     continue
                 sheet = deepcopy(instance.get_character_sheet(uid))
                 sheet["ruleset_character"] = deepcopy(canonical)
                 instance.set_character_sheet(uid, sheet)
-            instance.event_ledger = ledger
+            ruleset_runtime.replace_event_ledger(instance, ledger)
         return {
             "ok": True,
             "applied": not duplicate,
             "duplicate": duplicate,
-            "state_version": int(instance.ruleset_state.get("version", 0) or 0),
+            "state_version": int(ruleset_runtime.state(instance).get("version", 0) or 0),
             "event_batch": deepcopy(batch),
         }
 

@@ -16,6 +16,7 @@ from src.rulesets.registry import RulesetRuntimeRegistry
 from src.webui.services import turns
 from tests.test_ai_player_combat import _setup, _start
 from tests.test_ai_player_exploration import FakePlayerLLM, make_dependencies, make_instance
+from src.engine.modules import ruleset_runtime
 
 
 def production_dependencies(instance, llm, runtime):
@@ -51,7 +52,7 @@ async def test_service_fill_during_real_authoritative_combat_does_not_enqueue(al
     else:
         assert await instance.add_action("gm", "I watch the door.")
     _start(engine, instance, rolls=[15, 10, 5])
-    assert instance.ruleset_state["combat"]["status"] == "active"
+    assert ruleset_runtime.state(instance)["combat"]["status"] == "active"
     assert runtime.capabilities.authoritative_intents
     before = list(instance.action_queue)
     llm = FakePlayerLLM()
@@ -83,7 +84,7 @@ async def test_service_uses_capabilities_not_ruleset_identity(
     instance = make_instance(humans=() if all_ai else ("h1",), ai=("a1",))
     if not all_ai:
         assert await instance.add_action("h1", "I watch.")
-    instance.ruleset_state = {"combat": {"status": "active" if active else "ended"}}
+    ruleset_runtime.replace_state(instance, {"combat": {"status": "active" if active else "ended"}})
     runtime = SimpleNamespace(
         runtime_id="test:other-ruleset", runtime_version=1,
         capabilities=RulesetCapabilities(
@@ -169,7 +170,7 @@ async def test_service_discards_generation_when_real_combat_starts_during_await(
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
-    assert instance.ruleset_state["combat"]["status"] == "active"
+    assert ruleset_runtime.state(instance)["combat"]["status"] == "active"
     assert instance.action_queue == before
     # On an all-AI table the second seat is blocked before another model call.
     assert len(llm.calls) == 1

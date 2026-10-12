@@ -10,9 +10,11 @@
 > - 分支：`main`
 > - Commit：`962fda45a68caa24bac38fd2313d92d66fa59a7a`
 > - Release：`2.6.1`
-> - 当前 GameInstance persisted schema：`34`
-> - R8-e：`ruleset_runtime`、`ruleset_state`、`event_ledger` 通过同对象代理存于 `modules.ruleset_runtime` 的 `binding`、`state`、`event_ledger`；33→34 迁移删除旧顶层键。reset 保留 binding、重建 state、清 ledger；编码继续丢弃无 binding 的 state/ledger，但不修改内存（无绑定休息会话不持久化的问题留待后续修复）。
-> - R8-d：`combat_active`、`combat_enemies`、`combat_state`、`initiative_order`、`initiative_current` 存于 `modules.legacy_combat`，32→33 迁移删除旧顶层键。它是兼容投影存储；D&D 2024 战斗权威仍在 `ruleset_state["combat"]`。模块只修复非法类型，不过滤合法列表内容。
+> - 当前 GameInstance persisted schema：`40`
+> - R9-b：`scene` 通过属性代理存于 `modules.narrative_notes.scene`，该槽升到 v2；39→40 迁移删除旧顶层键，值原样保留。reset 照旧清空；写 scene 的事务（开局、回合处理、swipe、规则批次与 Director 自动化、ruleset 事务回滚、reset）先做 `narrative_notes.require_writable` 预检。列表、详情、大厅（含密码遮挡）、SSE、recap 与 LLM 视图的 `scene` 不变。
+> - R9-a：`adventure_progress` 与 `play_mode` 通过同对象代理存于 `modules.adventure_runtime` 的 `progress`、`play_mode`；38→39 迁移删除旧顶层键。Adventure 身份仍只在顶层 `adventure_binding`。读档时空或未知的 play_mode 仍按绑定推导；原地 reset 清空 progress、保留 play_mode；新 run（reset/restart/种子）沿用 play_mode 并重新初始化 v2 进度，写入均经模块 owner 并先做预检。
+> - R8-e：`ruleset_runtime`、`ruleset_state`、`event_ledger` 通过同对象代理存于 `modules.ruleset_runtime` 的 `binding`、`state`、`event_ledger`；33→34 迁移删除旧顶层键。reset 保留 binding、重建 state、清 ledger；编码继续丢弃无 binding 的 state/ledger，但不修改内存。创建普通或种子游戏时，`versioned_state` runtime 通过 `VersionedStateRuntime.game_binding` 在成长策略配置及角色加入前绑定；绑定失败回滚创建。休息、成长及规则事件批次拒绝无绑定或 runtime id 不匹配的写入；叙事战斗信号在此情况下返回 False 并记录警告。旧未绑定存档不自动绑定，schema 与存档形状不变。
+> - R8-d：`combat_active`、`combat_enemies`、`combat_state`、`initiative_order`、`initiative_current` 曾存于 `modules.legacy_combat`（32→33 迁移删除旧顶层键）。41→42 起槽位 schema 2 只存 `combat_enemies`，42→43 删除整个 `modules.legacy_combat` 槽位（`combat_enemies` 退役，不猜测迁入 NPC；通用 hp_based 战斗目标只用玩家 uid 与 `npc:<id>`）；四个回合字段改为只读派生视图：规则通过 `legacy_combat.register_combat_projector(runtime_id, projector)` 注册投影器（D&D 2024 投影自身 `ruleset_state["combat"]`），没有正式遭遇权威的规则返回中立值（`"none"`/`False`/`[]`/`0`）。迁移只丢弃旧副本，不重新解释。模块只修复非法类型，不过滤合法列表内容。
 > - R8-c2：`round_start_snapshot`、`round_entity_snapshot`、`death_save_outcomes` 存于 `modules.round_safety`；旧属性代理保留，31→32 迁移删除旧顶层键。reset 只清两个快照，继续保留死亡豁免缓存。
 > - R8-c1：`last_check`、`last_checks`、`round_checks_prepared`、`manual_roll_requests` 存于 `modules.checks`；旧属性代理保留，30→31 迁移删除旧顶层键。reset 继续保留手动骰请求。
 > - R8-a：统计字段 `total_llm_calls`、`total_tokens`、`started_at`、`last_activity` 存于 `modules.session_stats`；旧属性代理保留，29→30 迁移删除旧顶层键。
@@ -486,6 +488,8 @@ Frontend / Bot / Plugin Client
   - 不得感知 TLS、证书或具体 transport。
 
 这是当前最重要的“硬架构边界”之一。
+
+`tests/architecture/test_game_instance_facades.py` 记录模块状态的门面债：R7–R9 把字段搬进 `src/engine/modules` 后，`GameInstance` 上仍为每个字段保留兼容 property，`src/` 中经 `instance.<field>` 读写它们的调用按“文件 + property”计入只减不增的基线。门面集合由 AST 自动识别（body 引用 `src.engine.modules` 的 property），数量也只减不增；调用方改走模块 API 时，同一 PR 下调或删除对应基线条目。
 
 ---
 
@@ -2769,6 +2773,7 @@ migrate_state
 
 为了避免所有 runtime 都实现越来越多方法，额外能力通过可选 Protocol 暴露，例如：
 
+- `VersionedStateRuntime`（`versioned_state=True` 必须实现；游戏与角色卡共享绑定 identity）
 - `AuthoritativeIntentHooks`
 - `NarrativeStatePolicyRuntime`
 - `NarrativeCombatSignalRuntime`
@@ -3133,6 +3138,13 @@ flowchart LR
 - runtime/content/state version。
 
 机械变化需要基于 canonical choices/history 重新验证。
+
+经典（非 rules-aware）规则的通用角色卡写入口 `PUT /api/games/{game}/character/{uid}` 同样区分权威（`src/webui/character_sheet_authority.py`）：
+
+- 本局 GM 或以自身身份操作的 owner：可改全部可编辑字段；
+- 席位玩家、代表玩家席位的 Bot、经主机 `delegate=1` 转发的 P2P 访客：只可改资料字段（名字、种族、背景、identity、头像），以及在引擎授予的 `level_up_points` 内只增不减地分配属性；
+- HP、等级、XP、金币/货币、resources、progression、属性、技能、职业、装备/物品/关键物品与规则特殊数值（理智、幸运等）属于引擎 / GM 权威，玩家侧请求改动时整体拒绝：`403 FIELD_REQUIRES_GM`（附 `fields`），不做部分写入；
+- 采用角色卡走 `POST .../adopt-card`，服务端按 `card_id` 从角色卡库读取并应用，请求体不携带机械数值。
 
 ---
 
@@ -4729,6 +4741,19 @@ player API
 ```
 
 而不是每个 endpoint 都直接接受后台 access token。
+
+存储与有效期（`room_access` slot schema 3）：
+
+- 房间密码只存加盐 PBKDF2 哈希（与 owner 访问密码同一格式）；GM 只能设置、替换或取消，不能回看。新密码至少 6 位，旧的较短密码哈希继续有效；
+- 每次密码验证成功各自签发一个 room token，只存 SHA-256 摘要与过期时间（默认 30 天，`TRPG_ROOM_TOKEN_TTL_DAYS`，上限 365）。修改或取消密码会吊销全部 room token；
+- 移除玩家**不**轮换 room token：那会把其他所有玩家一起踢出。被移除的玩家失去席位（席位凭证被吊销）；room token 只把守大厅，若要连大厅也拒之门外，GM 修改房间密码即可；
+- 密码在创建、修改、验证时一律不 trim；只含空白的密码被拒绝；
+- room token 只经 `X-Room-Token` 请求头传递，绝不进 URL（SSE 用一次性 ticket 认证）。访问日志另外会脱敏 `room_token`、`ticket`、`seat`、`seat_token` 查询参数；
+- 密码尝试按「IP + 规范化后的游戏」令牌桶限流：5 次，之后每 30 秒回补 1 次。只有验证处理器明确标记为「密码错误」的尝试才消耗令牌，输对或其它错误不计。同一 IP + 同一局的尝试串行执行，并发猜测无法在失败被记录前一起通过检查。等待时间只由令牌缺口决定（被拒的请求不消耗令牌，不会把下一次机会往后推），最长 30 秒——是减速不是封锁。不设跨局的 IP 总上限，某一局的失败不影响其它局。共用出口 IP（隧道/代理/NAT）的玩家共享同一个桶，只保证等待有上限，无法在同一 IP 内区分人——同一 IP 后的捣乱者可以和正常玩家抢每一个回补的令牌；在按地址计的桶之外再加按会话计的桶，是可能的后续改进。请求体在排队等锁之前读完（限时 10 秒），等锁也限时 10 秒，上传卡住的请求不会占住锁。客户端身份取直连对端地址，IPv6 按 /64 前缀计（所有限流桶一致），在同一 /64 内轮换地址得不到新额度；不信任 `X-Forwarded-For`（项目没有可信代理配置）；
+- 只有在（事件循环外的）校验完成后密码哈希仍未变化才签发 token，校验期间改密码不会产生有效 token；
+- 加载含明文房间凭据的存档（schema < 38）时立即用哈希重写 `state.json` 与 `state.backup.json`；
+- 暂存提交（`replace_persisted_state_from`）从不覆盖实时的 `room_access` 槽；
+- 导出/导入永不携带密码哈希、room token、席位凭证与 bot 绑定令牌；带密码的存档导入后玩家入口为关闭状态，GM 设置新密码并重新开放即可。
 
 ---
 

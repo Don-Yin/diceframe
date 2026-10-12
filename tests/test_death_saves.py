@@ -17,6 +17,8 @@ from src.engine.character_utils import (
 )
 from src.engine.game_instance import GameInstance
 from src.rules.rule_system import RuleSystem
+from src.engine.modules import checks
+from src.engine.modules import round_safety
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -169,7 +171,7 @@ def test_round_tracker_caches_each_downed_player_independently(monkeypatch) -> N
 
     resolve_round_death_saves(instance, _dnd())
 
-    outcomes = instance.death_save_outcomes["4"]
+    outcomes = round_safety.death_save_outcomes(instance)["4"]
     assert outcomes["a"]["roll"] == 12
     assert outcomes["b"]["roll"] == 3
     assert instance.get_character_sheet("a")["death_saves"] == {"success": 1, "failure": 0}
@@ -241,11 +243,11 @@ def test_combat_hit_on_downed_player_accumulates_failure(monkeypatch) -> None:
     instance = _combat_instance_with_downed_target()
     request = {"check_id": "atk1", "actor_uid": "a", "kind": "attack", "opponent": "b", "dice_system": "d20", "attribute": "str", "target": 10}
     instance.action_queue = [{"user_id": "a", "text": "我补刀尤落。", "check_request": request}]
-    instance.last_checks = [{
+    checks.replace_last_checks(instance, [{
         "check_id": "atk1", "actor_uid": "a", "kind": "attack", "opponent": "b",
         "dice": "d20", "roll": 18, "total": 19, "verdict": "成功",
         "is_critical": False, "is_fumble": False,
-    }]
+    }])
     monkeypatch.setattr("random.randint", lambda _a, _b: 6)
 
     CombatResolver().resolve_combat(instance, "ignored", "hp_based", _dnd())
@@ -265,11 +267,11 @@ def test_combat_hit_with_zero_actual_damage_does_not_accumulate_failure(monkeypa
     ]
     request = {"check_id": "atk-zero", "actor_uid": "a", "kind": "attack", "opponent": "b", "dice_system": "d20", "attribute": "str", "target": 10}
     instance.action_queue = [{"user_id": "a", "text": "我攻击尤落。", "check_request": request}]
-    instance.last_checks = [{
+    checks.replace_last_checks(instance, [{
         "check_id": "atk-zero", "actor_uid": "a", "kind": "attack", "opponent": "b",
         "dice": "d20", "roll": 18, "total": 19, "verdict": "成功",
         "is_critical": False, "is_fumble": False,
-    }]
+    }])
 
     CombatResolver().resolve_combat(instance, "ignored", "hp_based", _dnd())
 
@@ -283,11 +285,11 @@ def test_combat_critical_on_downed_player_counts_double(monkeypatch) -> None:
     instance.players["b"]["character_sheet"]["death_saves"]["failure"] = 1
     request = {"check_id": "atk2", "actor_uid": "a", "kind": "attack", "opponent": "b", "dice_system": "d20", "attribute": "str", "target": 10}
     instance.action_queue = [{"user_id": "a", "text": "我补刀尤落。", "check_request": request}]
-    instance.last_checks = [{
+    checks.replace_last_checks(instance, [{
         "check_id": "atk2", "actor_uid": "a", "kind": "attack", "opponent": "b",
         "dice": "d20", "roll": 20, "total": 21, "verdict": "成功",
         "is_critical": True, "is_fumble": False,
-    }]
+    }])
     monkeypatch.setattr("random.randint", lambda _a, _b: 6)
 
     CombatResolver().resolve_combat(instance, "ignored", "hp_based", _dnd())

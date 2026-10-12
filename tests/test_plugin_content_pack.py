@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
+from src.engine.modules import narrative_notes
 from src.plugin_host import PluginHost
 from src.plugin_host.runtime_protocol import PluginInvocationError, PluginProtocolError
 from src.rules.rule_system import RuleSystem
@@ -26,6 +27,9 @@ from src.webui.services import worlds as world_service
 
 
 from plugin_host_common import write_plugin, write_png, make_plugin_zip
+from src.engine.participant_view import Viewer
+
+GM_VIEWER = Viewer("gm", "gm")
 
 class ContentMapApiFacade:
     """Minimal WebAPI map-packaging facade used by service unit tests."""
@@ -158,13 +162,17 @@ def test_import_all_plugin_content_imports_characters_and_entries(tmp_path):
                  manifest_extra={"docs": "README.md", "contributes": {
                      "characters": ["characters/*.json"],
                      "npcs": ["npc/*.json"],
+                     "classes": ["classes/*.json"],
                  }})
     (plugins / "packs" / "characters").mkdir()
     (plugins / "packs" / "npc").mkdir()
+    (plugins / "packs" / "classes").mkdir()
     (plugins / "packs" / "characters" / "hero.json").write_text(json.dumps({
         "id": "hero", "character_name": "Hero", "attributes": {}, "skills": []}), encoding="utf-8")
     (plugins / "packs" / "npc" / "mentor.json").write_text(json.dumps({
         "id": "mentor", "name": "Mentor", "description": "old mentor"}), encoding="utf-8")
+    (plugins / "packs" / "classes" / "scout.json").write_text(json.dumps({
+        "id": "scout", "name": "Scout", "description": "old scout"}), encoding="utf-8")
     data_dir = tmp_path / "data"
     cfg = data_dir / "packs"
     cfg.mkdir(parents=True)
@@ -189,9 +197,87 @@ def test_import_all_plugin_content_imports_characters_and_entries(tmp_path):
     result = import_all_plugin_content(_plugin_content_dependencies(api), "packs", "w1")
 
     assert result["ok"] is True
-    assert result["imported_count"] == 2
+    assert result["imported_count"] == 3
     assert len(api.cards) == 1
+    assert len(api._lore.entries) == 2
+
+
+def test_plugin_content_import_can_target_standalone_canonical_book(tmp_path):
+    """Book scoped imports do not require a legacy world projection."""
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "standalone-pack",
+        plugin_type="content-pack",
+        entrypoint=False,
+        manifest_extra={"contributes": {"npcs": ["npc/*.json"]}},
+    )
+    (plugins / "standalone-pack" / "npc").mkdir()
+    (plugins / "standalone-pack" / "npc" / "guide.json").write_text(
+        json.dumps({"id": "guide", "name": "Guide", "description": "A guide"}),
+        encoding="utf-8",
+    )
+    data_dir = tmp_path / "data"
+    (data_dir / "standalone-pack").mkdir(parents=True)
+    (data_dir / "standalone-pack" / "config.json").write_text(
+        json.dumps({"enabled": True}), encoding="utf-8",
+    )
+    host = PluginHost(plugins, data_dir)
+    host.discover()
+
+    class _Lore:
+        def __init__(self):
+            self.books = {"standalone-book": {"id": "standalone-book"}}
+            self.entries = {}
+
+        def get_lorebook(self, book_id):
+            return self.books.get(book_id)
+
+        def bound_world_projection_for_book(self, book_id):
+            return None
+
+        def get_world(self, world_id):
+            return None
+
+        def get_entry(self, entry_id):
+            return self.entries.get(entry_id)
+
+        def add_book_entry(self, book_id, entry):
+            payload = dict(entry)
+            payload["book_id"] = book_id
+            payload["world_id"] = None
+            self.entries[payload["id"]] = payload
+
+    class _Api:
+        def __init__(self):
+            self._plugins = host
+            self._lore = _Lore()
+
+        def save_character_card(self, card):
+            return {"ok": True, "card": card}
+
+        def save_entry(self, entry):
+            return {"ok": False, "error": "legacy world writer should not be used"}
+
+    api = _Api()
+    dependencies = _plugin_content_dependencies(api)
+
+    single = plugin_service.import_plugin_content(
+        dependencies, "npc", "guide", "standalone-pack", target_book_id="standalone-book",
+    )
+    batch = plugin_service.import_all_plugin_content(
+        dependencies, "standalone-pack", target_book_id="standalone-book",
+    )
+
+    assert single["ok"] is True
+    assert single["entry"]["book_id"] == "standalone-book"
+    assert single["entry"]["world_id"] == ""
+    assert batch["ok"] is True
+    assert batch["imported_count"] == 1
     assert len(api._lore.entries) == 1
+    saved = next(iter(api._lore.entries.values()))
+    assert saved["book_id"] == "standalone-book"
+    assert saved["world_id"] is None
 
 
 def test_content_pack_portraits_preview_and_import_as_local_uploads(tmp_path):
@@ -1348,7 +1434,7 @@ async def test_content_pack_maps_are_consumed_by_map_service(tmp_path):
         def get(self, key):
             class Instance:
                 world_id = "pack_world"
-                scene = ""
+                modules = {"narrative_notes": narrative_notes.fresh()}
             return Instance()
 
     class Lore:
@@ -1364,7 +1450,7 @@ async def test_content_pack_maps_are_consumed_by_map_service(tmp_path):
         def _parse_key(game_key):
             return ("web", game_key, "web_bot")
 
-    result = map_service.get_map_locations(_map_dependencies(Api), "demo")
+    result = map_service.get_map_locations(_map_dependencies(Api), "demo", viewer=GM_VIEWER)
 
     assert result["locations"][0]["id"] == "town"
     assert result["assets"]["icons"][0]["url"] == "/api/plugins/assets/map-assets/maps/icons/town.png"
@@ -1377,7 +1463,7 @@ def test_fantasy_world_uses_builtin_map_background_without_plugin(tmp_path):
     class Registry:
         @staticmethod
         def get(_key):
-            return SimpleNamespace(world_id="default_fantasy", scene="")
+            return SimpleNamespace(world_id="default_fantasy", modules={"narrative_notes": narrative_notes.fresh()})
 
     class Lore:
         @staticmethod
@@ -1393,7 +1479,7 @@ def test_fantasy_world_uses_builtin_map_background_without_plugin(tmp_path):
         def _parse_key(game_key):
             return ("web", game_key, "web_bot")
 
-    result = map_service.get_map_locations(_map_dependencies(Api), "demo")
+    result = map_service.get_map_locations(_map_dependencies(Api), "demo", viewer=GM_VIEWER)
 
     assert result["active_map"]["id"] == "builtin:map:fantasy-region-v1"
     assert result["active_map"]["background"]["url"] == "/v2-assets/ui/maps/fantasy-region-v1.webp"
@@ -1409,7 +1495,7 @@ def test_copied_world_uses_builtin_background_recommended_by_rule(rule_id, asset
     class Registry:
         @staticmethod
         def get(_key):
-            return SimpleNamespace(world_id="custom_copy_123", rule_id=rule_id, scene="")
+            return SimpleNamespace(world_id="custom_copy_123", rule_id=rule_id, modules={"narrative_notes": narrative_notes.fresh()})
 
     class Lore:
         @staticmethod
@@ -1425,7 +1511,7 @@ def test_copied_world_uses_builtin_background_recommended_by_rule(rule_id, asset
         def _parse_key(game_key):
             return ("web", game_key, "web_bot")
 
-    result = map_service.get_map_locations(_map_dependencies(Api), "demo")
+    result = map_service.get_map_locations(_map_dependencies(Api), "demo", viewer=GM_VIEWER)
 
     assert result["active_map"]["id"] == f"builtin:map:{asset_id}"
     assert result["active_map"]["background"]["url"] == f"/v2-assets/ui/maps/{asset_id}.webp"
@@ -1435,7 +1521,7 @@ def test_old_save_without_rule_uses_world_template_rule_for_builtin_background()
     class Registry:
         @staticmethod
         def get(_key):
-            return SimpleNamespace(world_id="legacy_copy_123", rule_id="", scene="")
+            return SimpleNamespace(world_id="legacy_copy_123", rule_id="", modules={"narrative_notes": narrative_notes.fresh()})
 
     class Lore:
         @staticmethod
@@ -1455,7 +1541,7 @@ def test_old_save_without_rule_uses_world_template_rule_for_builtin_background()
         def _load_world_template(_world_id):
             return {"default_rule": "freeform_coc"}
 
-    result = map_service.get_map_locations(_map_dependencies(Api), "demo")
+    result = map_service.get_map_locations(_map_dependencies(Api), "demo", viewer=GM_VIEWER)
 
     assert result["active_map"]["id"] == "builtin:map:occult-town-v1"
 
@@ -1503,7 +1589,7 @@ async def test_content_pack_map_definition_applies_background_icons_and_stable_c
     class Registry:
         @staticmethod
         def get(_key):
-            return SimpleNamespace(world_id="coc_horror", scene="Station")
+            return SimpleNamespace(world_id="coc_horror", modules={"narrative_notes": {**narrative_notes.fresh(), "scene": "Station"}})
 
     class Lore:
         @staticmethod
@@ -1523,7 +1609,7 @@ async def test_content_pack_map_definition_applies_background_icons_and_stable_c
         def _load_world_template(_world_id):
             return {"world_id": "coc_horror", "default_map": "plugin:map-assets:map:arkham"}
 
-    result = map_service.get_map_locations(_map_dependencies(Api), "demo")
+    result = map_service.get_map_locations(_map_dependencies(Api), "demo", viewer=GM_VIEWER)
 
     assert result["current_location_id"] == "station"
     assert result["active_map"]["id"] == "plugin:map-assets:map:arkham"
@@ -2009,3 +2095,85 @@ def test_manifest_future_and_non_numeric_versions_fail_closed(tmp_path, field, v
     assert details[0]["status"] == "failed"
 
 
+
+
+def _real_store_receipt_setup(tmp_path):
+    """Content pack + real sqlite LorebookStore, imported through the receipt path."""
+    from src.lorebook.store import LorebookStore
+    from src.webui.services.plugins import import_all_plugin_content
+
+    plugins = tmp_path / "plugins"
+    write_plugin(plugins, "packs", plugin_type="content-pack", entrypoint=False,
+                 manifest_extra={"docs": "README.md", "contributes": {
+                     "npcs": ["npc/*.json"],
+                     "classes": ["classes/*.json"],
+                 }})
+    (plugins / "packs" / "npc").mkdir()
+    (plugins / "packs" / "classes").mkdir()
+    (plugins / "packs" / "npc" / "mentor.json").write_text(json.dumps({
+        "id": "mentor", "name": "Mentor", "description": "old mentor"}), encoding="utf-8")
+    (plugins / "packs" / "classes" / "scout.json").write_text(json.dumps({
+        "id": "scout", "name": "Scout", "description": "old scout"}), encoding="utf-8")
+    data_dir = tmp_path / "data"
+    (data_dir / "packs").mkdir(parents=True)
+    (data_dir / "packs" / "config.json").write_text(json.dumps({"enabled": True}), encoding="utf-8")
+    host = PluginHost(plugins, data_dir)
+    host.discover()
+    store = LorebookStore(tmp_path / "lorebook.db")
+    store.open()
+    store.create_world("w1", "W")
+
+    class _Api:
+        _plugins = host
+        _lore = store
+        _reg = None
+
+        def save_entry(self, entry):
+            store.add_entry(entry)
+            return {"ok": True}
+
+    api = _Api()
+    deps = _plugin_content_dependencies(api)
+
+    def import_all():
+        result = import_all_plugin_content(deps, "packs", "w1")
+        assert result["ok"] is True
+        return result
+
+    import_all()
+    plugin_ids = sorted(e["id"] for e in store.list_entries("w1") if e.get("source_plugin") == "packs")
+    assert len(plugin_ids) == 2
+    return store, deps, import_all, plugin_ids
+
+
+def test_receipt_cleanup_counts_removals_against_real_store(tmp_path):
+    from src.webui.services.plugins import cleanup_plugin_lorebook
+
+    store, deps, import_all, plugin_ids = _real_store_receipt_setup(tmp_path)
+    # A package re-import rewrites its own entries; that is not a user edit.
+    import_all()
+    store.add_entry({"id": "user_note", "world_id": "w1", "name": "Note"})
+
+    result = cleanup_plugin_lorebook(deps, "packs")
+
+    assert result["removed"] == 2
+    assert result["entries_kept"] == []
+    assert all(store.get_entry(entry_id) is None for entry_id in plugin_ids)
+    assert store.get_entry("user_note") is not None
+    store.close()
+
+
+def test_receipt_cleanup_keeps_plugin_entry_the_user_edited(tmp_path):
+    from src.webui.services.plugins import cleanup_plugin_lorebook
+
+    store, deps, _import_all, plugin_ids = _real_store_receipt_setup(tmp_path)
+    edited, untouched = plugin_ids
+    store.update_entry(edited, {"content": "my own notes"})
+
+    result = cleanup_plugin_lorebook(deps, "packs")
+
+    assert result["removed"] == 1
+    assert result["entries_kept"] == [edited]
+    assert store.get_entry(edited)["content"] == "my own notes"
+    assert store.get_entry(untouched) is None
+    store.close()

@@ -18,6 +18,12 @@ VALUES = {
     "event_ledger": [{"batch_id": "battle-1", "events": [{"type": "opaque", "value": [1]}]}],
 }
 KEYS = {"ruleset_runtime": "binding", "ruleset_state": "state", "event_ledger": "event_ledger"}
+GETTERS = {"ruleset_runtime": module.binding, "ruleset_state": module.state, "event_ledger": module.event_ledger}
+SETTERS = {
+    "ruleset_runtime": module.replace_binding,
+    "ruleset_state": module.replace_state,
+    "event_ledger": module.replace_event_ledger,
+}
 
 
 def new_instance(**kwargs):
@@ -27,7 +33,7 @@ def new_instance(**kwargs):
 def populated_instance():
     instance = new_instance()
     for key, value in deepcopy(VALUES).items():
-        setattr(instance, key, value)
+        SETTERS[key](instance, value)
     return instance
 
 
@@ -105,9 +111,9 @@ def test_unknown_module_version_is_preserved_and_access_fails_closed():
     before = deepcopy(instance.modules)
     for key, value in VALUES.items():
         with pytest.raises(ModuleStateError):
-            getattr(instance, key)
+            GETTERS[key](instance)
         with pytest.raises(ModuleStateError):
-            setattr(instance, key, value)
+            SETTERS[key](instance, value)
     assert instance.modules == before
     encoded = instance.to_dict()
     assert encoded["modules"][module.MODULE_NAME] == raw
@@ -122,38 +128,46 @@ def test_properties_use_live_slot_and_bound_roundtrip_has_one_storage_owner():
     assert not VALUES.keys() & {item.name for item in fields(instance)}
     assert not VALUES.keys() & vars(instance).keys()
     for field, value in deepcopy(VALUES).items():
-        setattr(instance, field, value)
+        SETTERS[field](instance, value)
         assert slot[KEYS[field]] is value
-        assert getattr(instance, field) is slot[KEYS[field]]
-    assert instance.ruleset_runtime is not slot
+        assert GETTERS[field](instance) is slot[KEYS[field]]
+    assert module.binding(instance) is not slot
     assert module.persisted_state(instance) is slot
     encoded = instance.to_dict()
     assert not VALUES.keys() & encoded.keys()
     restored = GameInstance.from_dict(deepcopy(encoded))
-    assert restored.ruleset_state == instance.ruleset_state
-    assert restored.event_ledger == instance.event_ledger
+    assert module.state(restored) == module.state(instance)
+    assert module.event_ledger(restored) == module.event_ledger(instance)
     assert restored.modules[module.MODULE_NAME] == slot
     instance.replace_persisted_state_from(restored)
     assert instance.modules[module.MODULE_NAME] == slot
 
 
+def test_game_instance_has_no_ruleset_runtime_facades():
+    instance = populated_instance()
+    for name in VALUES:
+        assert not hasattr(GameInstance, name)
+        assert not hasattr(instance, name)
+    assert not VALUES.keys() & vars(instance).keys()
+
+
 def test_unbound_state_and_ledger_are_dropped_only_in_save_projection():
     instance = new_instance()
-    instance.ruleset_state["rest_session"] = {"status": "collecting", "participants": {"hero": {}}}
-    instance.event_ledger.append({"batch_id": "unbound", "events": [1]})
-    state, ledger = instance.ruleset_state, instance.event_ledger
+    module.state(instance)["rest_session"] = {"status": "collecting", "participants": {"hero": {}}}
+    module.event_ledger(instance).append({"batch_id": "unbound", "events": [1]})
+    state, ledger = module.state(instance), module.event_ledger(instance)
     before = deepcopy(instance.modules[module.MODULE_NAME])
     encoded = instance.to_dict()
     assert encoded["modules"][module.MODULE_NAME] == module.fresh()
     assert encoded["modules"][module.MODULE_NAME] is not instance.modules[module.MODULE_NAME]
     assert instance.modules[module.MODULE_NAME] == before
-    assert instance.ruleset_state is state
-    assert instance.event_ledger is ledger
+    assert module.state(instance) is state
+    assert module.event_ledger(instance) is ledger
     assert "rest_session" in state
     restored = GameInstance.from_dict(encoded)
-    assert restored.ruleset_runtime == {}
-    assert restored.ruleset_state == {}
-    assert restored.event_ledger == []
+    assert module.binding(restored) == {}
+    assert module.state(restored) == {}
+    assert module.event_ledger(restored) == []
 
 
 def test_unbound_defaults_roundtrip():
@@ -163,54 +177,54 @@ def test_unbound_defaults_roundtrip():
 
 def test_bind_initializes_only_empty_state_and_keeps_ledger():
     instance = new_instance()
-    ledger = instance.event_ledger
+    ledger = module.event_ledger(instance)
     binding = {"runtime_id": "core:dnd2024", "runtime_version": 1,
                "content_version": "srd", "state_schema_version": 7}
     assert instance.bind_ruleset_runtime(binding) is True
-    assert instance.ruleset_state == {"state_schema_version": 7}
-    state = instance.ruleset_state
+    assert module.state(instance) == {"state_schema_version": 7}
+    state = module.state(instance)
     assert instance.bind_ruleset_runtime(binding) is True
-    assert instance.ruleset_state is state
-    assert instance.event_ledger is ledger
+    assert module.state(instance) is state
+    assert module.event_ledger(instance) is ledger
     assert instance.bind_ruleset_runtime({**binding, "runtime_id": "other"}) is False
 
 
 def test_copy_binding_for_new_run_copies_binding_rebuilds_state_and_keeps_ledger():
     source, candidate = populated_instance(), populated_instance()
-    ledger = candidate.event_ledger
+    ledger = module.event_ledger(candidate)
     module.copy_binding_for_new_run(candidate, source)
-    assert candidate.ruleset_runtime == source.ruleset_runtime
-    assert candidate.ruleset_runtime is not source.ruleset_runtime
-    assert candidate.ruleset_state == {"state_schema_version": 1}
-    assert candidate.event_ledger is ledger
-    source.ruleset_runtime = {}
+    assert module.binding(candidate) == module.binding(source)
+    assert module.binding(candidate) is not module.binding(source)
+    assert module.state(candidate) == {"state_schema_version": 1}
+    assert module.event_ledger(candidate) is ledger
+    module.replace_binding(source, {})
     module.copy_binding_for_new_run(candidate, source)
-    assert candidate.ruleset_runtime == candidate.ruleset_state == {}
+    assert module.binding(candidate) == module.state(candidate) == {}
 
 
 @pytest.mark.asyncio
 async def test_reset_preserves_binding_deepcopy_and_clears_ledger_after_state_rebuild():
     instance = populated_instance()
-    binding = instance.ruleset_runtime
+    binding = module.binding(instance)
     observations = []
 
     class Ledger(list):
         def clear(self):
-            observations.append((deepcopy(instance.ruleset_runtime), deepcopy(instance.ruleset_state)))
+            observations.append((deepcopy(module.binding(instance)), deepcopy(module.state(instance))))
             super().clear()
 
-    ledger = Ledger(instance.event_ledger)
-    instance.event_ledger = ledger
+    ledger = Ledger(module.event_ledger(instance))
+    module.replace_event_ledger(instance, ledger)
     await instance.reset()
-    assert instance.ruleset_runtime == binding
-    assert instance.ruleset_runtime is not binding
+    assert module.binding(instance) == binding
+    assert module.binding(instance) is not binding
     assert observations == [(binding, {"state_schema_version": 1})]
-    assert instance.event_ledger is ledger
+    assert module.event_ledger(instance) is ledger
     assert ledger == []
 
 
 @pytest.mark.parametrize("engine_name", ["campaign", "combat", "exploration"])
-def test_unbound_dnd_batches_keep_live_state_and_ledger_but_do_not_persist(engine_name):
+def test_unbound_dnd_batches_reject_without_changing_live_or_saved_state(engine_name):
     from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 
     runtime, instance = Dnd2024Runtime(), new_instance()
@@ -224,10 +238,11 @@ def test_unbound_dnd_batches_keep_live_state_and_ledger_but_do_not_persist(engin
         "batch_id": "batch_unbound", "intent_id": "unbound", "expected_version": 0,
         "result_version": 1, "events": [{"type": "intent.submitted"}],
     }
-    assert engine.apply_batch(instance, batch)["applied"] is True
-    assert instance.ruleset_runtime == {}
-    assert instance.event_ledger == [batch]
     before = deepcopy(instance.modules[module.MODULE_NAME])
+    with pytest.raises(module.RulesetBindingError, match="存档未绑定当前权威规则运行时"):
+        engine.apply_batch(instance, batch)
+    assert module.binding(instance) == {}
+    assert module.event_ledger(instance) == []
     restored = GameInstance.from_dict(instance.to_dict())
     assert restored.modules[module.MODULE_NAME] == module.fresh()
     assert instance.modules[module.MODULE_NAME] == before
@@ -235,12 +250,12 @@ def test_unbound_dnd_batches_keep_live_state_and_ledger_but_do_not_persist(engin
 
 def test_transaction_restore_deepcopies_state_and_ledger_without_touching_binding():
     instance = populated_instance()
-    binding = instance.ruleset_runtime
+    binding = module.binding(instance)
     snapshot = deepcopy(VALUES)
     module.restore_from_transaction(instance, snapshot)
-    assert instance.ruleset_runtime is binding
-    assert instance.ruleset_state == snapshot["ruleset_state"]
-    assert instance.event_ledger == snapshot["event_ledger"]
-    instance.ruleset_state["combat"]["status"] = "none"
-    instance.event_ledger[0]["events"].clear()
+    assert module.binding(instance) is binding
+    assert module.state(instance) == snapshot["ruleset_state"]
+    assert module.event_ledger(instance) == snapshot["event_ledger"]
+    module.state(instance)["combat"]["status"] = "none"
+    module.event_ledger(instance)[0]["events"].clear()
     assert snapshot == VALUES

@@ -13,6 +13,7 @@ from src.compat.dnd2024_adventure_bindings import (
     migrate_unreleased_adventure_binding,
 )
 from src.engine.game_instance import GameRegistry
+from src.engine.modules import ruleset_runtime
 
 
 ROOT = Path(__file__).parents[1]
@@ -56,7 +57,7 @@ def test_instance_migration_updates_campaign_projection_without_losing_metadata(
     old, current = _bindings("portable-world")
     instance = SimpleNamespace(
         adventure_binding=deepcopy(old),
-        ruleset_state={
+        modules={"ruleset_runtime": {**ruleset_runtime.fresh(), "state": {
             "campaign": {
                 "adventure_binding": {
                     "adventure_id": old["adventure_id"],
@@ -68,12 +69,12 @@ def test_instance_migration_updates_campaign_projection_without_losing_metadata(
                     "content_digest": old["content_digest"],
                 },
             },
-        },
+        }}},
     )
 
     assert apply_unreleased_adventure_binding_migration(instance, current) is True
     assert instance.adventure_binding == current
-    projected = instance.ruleset_state["campaign"]["adventure_binding"]
+    projected = ruleset_runtime.state(instance)["campaign"]["adventure_binding"]
     assert projected["content_digest"] == current["content_digest"]
     assert projected["version"] == current["version"]
     assert projected["recommended_world_id"] == "greymoor"
@@ -85,7 +86,7 @@ def test_conflicting_campaign_projection_fails_closed() -> None:
     old, current = _bindings()
     instance = SimpleNamespace(
         adventure_binding=deepcopy(old),
-        ruleset_state={
+        modules={"ruleset_runtime": {**ruleset_runtime.fresh(), "state": {
             "campaign": {
                 "adventure_binding": {
                     "adventure_id": old["adventure_id"],
@@ -94,7 +95,7 @@ def test_conflicting_campaign_projection_fails_closed() -> None:
                     "content_digest": "sha256:another-unknown-digest",
                 },
             },
-        },
+        }}},
     )
 
     assert apply_unreleased_adventure_binding_migration(instance, current) is None
@@ -128,5 +129,5 @@ async def test_real_unreleased_save_copy_migrates_and_persists(tmp_path: Path) -
     recovered = await GameRegistry(save_dir).load(game_key)
     assert recovered is not None
     assert recovered.adventure_binding == expected
-    projected = recovered.ruleset_state["campaign"]["adventure_binding"]
+    projected = ruleset_runtime.state(recovered)["campaign"]["adventure_binding"]
     assert projected["content_digest"] == expected["content_digest"]

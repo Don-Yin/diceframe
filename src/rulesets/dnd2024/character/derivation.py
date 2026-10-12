@@ -6,6 +6,8 @@ from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from typing import Any
 
+from src.rulesets.dnd2024.binding import rule_binding
+
 from .primitives import ABILITY_IDS, ability_modifier, proficiency_bonus, ref_id as _ref_id
 
 
@@ -230,13 +232,7 @@ class CharacterDerivationMixin:
         ]
 
         return {
-            "rule_binding": {
-                "rule_id": "dnd2024_srd",
-                "runtime_id": "core:dnd2024",
-                "runtime_version": 1,
-                "content_version": self.bundle.manifest.content_version,
-                "state_schema_version": 1,
-            },
+            "rule_binding": rule_binding(self.bundle),
             "locale": self.bundle.locale,
             "identity": {
                 "name": str(draft["name"]).strip(),

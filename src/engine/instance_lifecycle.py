@@ -13,6 +13,8 @@
   保留/清空/轮换行为以基线代码为唯一真值，禁止按字段清单重新实现。
   未被基线 reset() 触碰的字段（play_mode / scene_image / death_save_outcomes
   等"隐式保留"字段）在本 PR 中保持原样；疑似 bug 记录 follow-up，不顺手修。
+  例外：``adventure_progress`` 已有意改为随 ``world_state`` 一起清空（两者同属
+  一轮 run，见 reset_locked 内注释）。
 - 不 runtime import ``src.engine.game_instance``（仅 ``TYPE_CHECKING`` 类型引用），
   依赖方向保持 ``game_instance → instance_lifecycle``。
 """
@@ -67,65 +69,78 @@ def reset_locked(instance: GameInstance, *, keep_seed: bool = True) -> None:
     集合与基线逐句一致。reset 的真实契约由
     ``tests/test_game_instance_reset_characterization.py`` 冻结。
     """
-    from src.engine.modules import checks, legacy_combat, round_safety, ruleset_runtime, session_stats
+    from src.engine.modules import (
+        adventure_runtime_state, checks, narrative_notes, private_channels, round_safety,
+        ruleset_runtime, seat_activity, session_stats, table_settings,
+    )
+    from src.engine.modules import combat_extension_state
+    from src.engine.modules import health, lorebook_runtime, round_presentation
 
     session_stats.require_writable(instance)
     checks.require_writable(instance)
     round_safety.require_writable(instance)
-    legacy_combat.require_writable(instance)
     ruleset_runtime.require_writable(instance)
-    saved_seed = instance.seed_code if keep_seed else ""
+    adventure_runtime_state.require_writable(instance)
+    narrative_notes.require_writable(instance)
+    seat_activity.require_writable(instance)
+    saved_seed = table_settings.seed_code(instance) if keep_seed else ""
     saved_world_id = instance.world_id
     saved_world_name = instance.world_name
     saved_group_name = instance.group_name
-    saved_solo = instance.solo_mode
-    saved_narrative_perspective = instance.narrative_perspective
-    saved_gm_style_override = copy.deepcopy(instance.gm_style_override)
+    saved_solo = table_settings.solo_mode(instance)
+    saved_narrative_perspective = table_settings.narrative_perspective(instance)
+    saved_gm_style_override = copy.deepcopy(table_settings.gm_style_override(instance))
     saved_language = normalize_language(instance.language)
-    saved_ruleset_runtime = copy.deepcopy(instance.ruleset_runtime)
+    saved_ruleset_runtime = copy.deepcopy(ruleset_runtime.binding(instance))
     saved_adventure_binding = copy.deepcopy(instance.adventure_binding)
     instance.rotate_run_identity()
     instance.players.clear()
+    # 例外（同 adventure_progress）：席位"已行动"标记属于这一轮 run，随名册与日志一起清空。
+    seat_activity.reset(instance)
     instance.npcs.clear()
     progression.reset(instance)
     instance.action_queue.clear()
     instance.pending_actions.clear()
     instance.ready_players.clear()
-    legacy_combat.reset(instance)
-    instance.scene = ""
-    instance.game_time = ""
+    narrative_notes.replace_scene(instance, "")
+    narrative_notes.replace_game_time(instance, "")
     instance.log.clear()
-    instance.summary.clear()
-    instance.key_facts.clear()
+    narrative_notes.summary(instance).clear()
+    narrative_notes.key_facts(instance).clear()
     # 世界真相属于这一轮 run：重置与重开都从空世界重新开始。
     instance.world_state = fresh_world_state()
+    # Adventure v2 进度与世界状态同属这一轮 run（完成节点的后果写在 world_state
+    # 里）：只清世界却保留进度会出现"节点已完成、世界没变"的矛盾。原地 reset
+    # 不能解析冒险包，因此清空为"未初始化"（节点推进 fail closed）；生产的
+    # reset/restart 走新 run 候选并由 initialize_adventure_run 重新初始化。
+    adventure_runtime_state.replace_progress(instance, {})
     session_stats.reset(instance)
     instance.puzzle_manager = None
     instance.plot_tracker = None
-    instance.pending_combat_results.clear()
-    instance.combat_extension = {}
-    instance.combat_extension_round_snapshots.clear()
-    instance.lorebook_timed_state.clear()
-    instance.health_events.clear()
-    instance.health_status.clear()
-    instance.quick_actions.clear()
-    instance.confirmed_items.clear()
-    instance.private_log.clear()
-    instance.table_talk.clear()
+    round_presentation.pending_combat_results(instance).clear()
+    combat_extension_state.replace_current(instance, {})
+    combat_extension_state.round_snapshots(instance).clear()
+    lorebook_runtime.timers(instance).clear()
+    health.health_events(instance).clear()
+    health.health_status(instance).clear()
+    round_presentation.quick_actions(instance).clear()
+    narrative_notes.confirmed_items(instance).clear()
+    private_channels.private_log(instance).clear()
+    private_channels.table_talk(instance).clear()
     checks.clear_round(instance)
     round_safety.clear_snapshots(instance)
-    instance.last_state_update = None
-    instance.last_token_budget_bump = None
-    instance.gm_directives.clear()
+    round_presentation.replace_last_state_update(instance, None)
+    round_presentation.replace_last_token_budget_bump(instance, None)
+    round_presentation.gm_directives(instance).clear()
     ruleset_runtime.reset(instance, saved_ruleset_runtime)
     instance.adventure_binding = saved_adventure_binding
     instance.state = GameState.CREATED
     instance.world_id = saved_world_id
     instance.world_name = saved_world_name
     instance.group_name = saved_group_name
-    instance.solo_mode = saved_solo
-    instance.narrative_perspective = saved_narrative_perspective
-    instance.gm_style_override = saved_gm_style_override
+    table_settings.replace_solo_mode(instance, saved_solo)
+    table_settings.replace_narrative_perspective(instance, saved_narrative_perspective)
+    table_settings.replace_gm_style_override(instance, saved_gm_style_override)
     instance.language = saved_language
-    instance.seed_code = saved_seed
-    logger.info("游戏已重置 (seed=%s) - game_key=%s", instance.seed_code, instance.game_key)
+    table_settings.replace_seed_code(instance, saved_seed)
+    logger.info("游戏已重置 (seed=%s) - game_key=%s", table_settings.seed_code(instance), instance.game_key)

@@ -136,4 +136,15 @@ jobs:
 
       - name: Run clean-data browser tests
         working-directory: frontend-v2
+        env:
+          DICEFRAME_E2E_SERVER_LOG: ${{ github.workspace }}/frontend-v2/test-results/server.log
         run: npm run test:e2e:smoke
+
+      - name: Upload browser test artifacts
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: browser-smoke-results
+          path: frontend-v2/test-results/
+          retention-days: 7
+          if-no-files-found: ignore

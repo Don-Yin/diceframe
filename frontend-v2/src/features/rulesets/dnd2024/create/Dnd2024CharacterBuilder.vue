@@ -679,6 +679,7 @@ onMounted(async () => {
         </button>
       </div>
       <label class="name-field"><span>{{ text('角色名', 'Character name') }}</span><input v-model.trim="draft.name" maxlength="100" :placeholder="text('例如：阿岚', 'For example: Arden')"></label>
+      <p v-if="error" class="builder-error" role="alert">{{ error }}</p>
       <div class="quick-actions"><button @click="mode = 'guided'">{{ text('进入引导模式微调', 'Fine-tune in Guided mode') }}</button><button class="primary" :disabled="busy || !selectedPreset || !draft.name.trim()" @click="finish">{{ busy ? text('检查中…', 'Checking…') : text('完成并使用这个角色', 'Use this character') }}</button></div>
     </main>
 

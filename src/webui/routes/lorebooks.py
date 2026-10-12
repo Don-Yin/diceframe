@@ -1,6 +1,7 @@
 """Canonical Lorebook v2 import routes; legacy world routes remain façades."""
 from __future__ import annotations
 
+from dataclasses import asdict, is_dataclass
 from aiohttp import web
 
 from src.webui.routes._common import _get_api
@@ -16,10 +17,24 @@ def _result_response(result: dict) -> web.Response:
     if result.get("ok"):
         return web.json_response(result)
     error = str(result.get("error") or "Request failed")
+    if result.get("error_code") == "LOREBOOK_IDENTITY_CONFLICT":
+        return web.json_response(result, status=409)
     status = 409 if "primary" in error.lower() or "already exists" in error.lower() else (
         404 if "not found" in error.lower() else 400
     )
     return web.json_response(result, status=status)
+
+
+def _json_safe(value):
+    """Serialize preview dataclasses for lightweight API adapters and tests."""
+
+    if is_dataclass(value):
+        return _json_safe(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 async def api_lorebook_create(request: web.Request) -> web.Response:
@@ -80,16 +95,36 @@ async def api_lorebook_import_preview(request: web.Request) -> web.Response:
     body = await request.json()
     if not isinstance(body, dict):
         return web.json_response({"ok": False, "error": "Lorebook payload must be an object"}, status=400)
-    return web.json_response(_get_api(request).preview_lorebook_import(body))
+    result = _json_safe(_get_api(request).preview_lorebook_import(body))
+    return web.json_response(result, status=400 if result.get("ok") is False else 200)
+
+
+#: Plan-only request fields: without a confirmed plan they must not reach the
+#: legacy commit, which would silently ignore them.
+_PLAN_FIELDS = ("source", "external_id", "decision")
+_CONFLICT_CODES = frozenset({"PLAN_STALE", "LOREBOOK_IDENTITY_CONFLICT"})
 
 
 async def api_lorebook_import_commit(request: web.Request) -> web.Response:
     body = await request.json()
     if not isinstance(body, dict) or not isinstance(body.get("payload"), dict):
         return web.json_response({"ok": False, "error": "payload must be an object"}, status=400)
+    if "plan_digest" in body:
+        planned = _json_safe(_get_api(request).commit_lorebook_plan(body))
+        if planned.get("ok"):
+            return web.json_response(planned)
+        status = 409 if planned.get("error_code") in _CONFLICT_CODES else 400
+        return web.json_response(planned, status=status)
+    if any(field in body for field in _PLAN_FIELDS):
+        return web.json_response({
+            "ok": False, "error_code": "PLAN_DIGEST_REQUIRED",
+            "error": "source, external_id and decision need a previewed plan_digest",
+        }, status=400)
     result = _get_api(request).commit_lorebook_import(
         body["payload"], body.get("binding"), body.get("book_id"),
     )
+    if result.get("error_code") == "LOREBOOK_IDENTITY_CONFLICT":
+        return web.json_response(result, status=409)
     return web.json_response(result, status=200 if result.get("ok") else 400)
 
 

@@ -12,7 +12,7 @@ advance_adventure_world    §6.8      逻辑时间推进后（进程 due_at 结�
 硬边界：
 
 - Adventure 定义层不写 authority：world ops 只经 ``apply_world_ops``，奖励只经
-  注入的 reward sink（既有 proposal 权威），进度只写 ``instance.adventure_progress``；
+  注入的 reward sink（既有 proposal 权威），进度只写 ``adventure_runtime_state`` 槽位；
 - **全有或全无**（§6.7）：任一环节失败 → 恢复进度与世界状态的 before-image；
 - v2 进度与 v1 campaign 并存互不迁移（§6.9/母方案 §71）：本模块只在绑定为 v2
   图上工作，v1 路径完全不变。
@@ -39,6 +39,7 @@ from src.adventures.progress import (
     complete_objective,
     new_progress,
 )
+from src.engine.modules import adventure_runtime_state, economy_state
 
 logger = logging.getLogger("trpg")
 
@@ -105,9 +106,10 @@ def initialize_adventure_run(
     if graph is None:
         # v1：走既有 campaign/ruleset 路径，行为不变。
         return {"ok": True, "initialized": False, "reason": "v1"}
+    adventure_runtime_state.require_writable(instance)
     progress = new_progress(graph)
     receipt = dependencies.materialize_world_seed(instance, resolution.bundle)
-    instance.adventure_progress = progress
+    adventure_runtime_state.replace_progress(instance, progress)
     return {
         "ok": True,
         "initialized": True,
@@ -115,6 +117,25 @@ def initialize_adventure_run(
         "active_nodes": list(progress["active_nodes"]),
         "world_seed": dict(receipt),
     }
+
+
+def initialize_adventure_new_run(
+    dependencies: AdventureRuntimeDependencies, instance: Any,
+) -> dict[str, Any]:
+    """Initialization for a new run of an existing game (reset / restart).
+
+    The persisted binding already records the package format.  A v1 binding
+    never had graph progress, so it is not re-resolved here: restarting a v1
+    game keeps working exactly as before even if its source is unavailable.
+    v2 bindings go through the same step as game creation.
+    """
+
+    binding = getattr(instance, "adventure_binding", None)
+    if not isinstance(binding, dict) or not binding.get("adventure_id"):
+        return {"ok": True, "initialized": False, "reason": "unbound"}
+    if str(binding.get("format") or "") != ADVENTURE_GRAPH_FORMAT_V2:
+        return {"ok": True, "initialized": False, "reason": "v1"}
+    return initialize_adventure_run(dependencies, instance)
 
 
 def _apply_progress_events(
@@ -162,7 +183,8 @@ def complete_adventure_node(
     if node is None:
         raise AdventureRuntimeError(f"node does not exist: {wanted!r}")
 
-    progress = getattr(instance, "adventure_progress", None)
+    adventure_runtime_state.require_writable(instance)
+    progress = adventure_runtime_state.progress(instance)
     if not isinstance(progress, dict) or not progress.get("active_nodes"):
         if not isinstance(progress, dict) or not progress:
             raise AdventureRuntimeError("adventure progress is not initialized")
@@ -205,7 +227,7 @@ def complete_adventure_node(
     # ``item_reward`` is queued by the Economy authority.  It is still part of
     # this aggregate transaction: a failed queue must not leave a pending
     # proposal behind after the graph/world changes have been compensated.
-    before_economy = deepcopy(getattr(instance, "economy", None))
+    before_economy = deepcopy(economy_state.state(instance))
     activated: list[str] = []
     try:
         # ② 节点完成的后果先落世界（§6.4/§6.7）：gate 评估必须看到本次完成的
@@ -229,20 +251,20 @@ def complete_adventure_node(
             if intents["reward_intents"] and dependencies.queue_reward_intents
             else []
         )
-        instance.adventure_progress = progress
+        adventure_runtime_state.replace_progress(instance, progress)
     except (ProgressError, OutcomeError, AdventureRuntimeError):
-        instance.adventure_progress = before_progress
+        adventure_runtime_state.replace_progress(instance, before_progress)
         if before_world is not None:
             instance.world_state = before_world
         if before_economy is not None:
-            instance.economy = before_economy
+            economy_state.replace_state(instance, before_economy)
         raise
     except Exception:
-        instance.adventure_progress = before_progress
+        adventure_runtime_state.replace_progress(instance, before_progress)
         if before_world is not None:
             instance.world_state = before_world
         if before_economy is not None:
-            instance.economy = before_economy
+            economy_state.replace_state(instance, before_economy)
         raise
 
     return {
@@ -277,7 +299,8 @@ def advance_adventure_world(
     graph = adventure_graph(resolution)
     if graph is None:
         return {"ok": True, "advanced": False, "reason": "v1"}
-    progress = getattr(instance, "adventure_progress", None)
+    adventure_runtime_state.require_writable(instance)
+    progress = adventure_runtime_state.progress(instance)
     if not isinstance(progress, dict) or not progress:
         raise AdventureRuntimeError("adventure progress is not initialized")
 
@@ -325,6 +348,7 @@ __all__ = [
     "advance_adventure_world",
     "adventure_graph",
     "complete_adventure_node",
+    "initialize_adventure_new_run",
     "initialize_adventure_run",
     "resolve_instance_adventure",
 ]

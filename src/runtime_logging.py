@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -58,6 +59,45 @@ def cleanup_expired_runtime_logs(
     return deleted
 
 
+# Credentials that can appear in a request URL; never written to a log.
+_URL_SECRET_PARAMS = re.compile(r'(?i)(?<![\w-])(room_token|ticket|seat|seat_token)=[^&\s"]*')
+_REDACTION_MARKER = "_diceframe_access_log_redaction"
+
+
+class _AccessLogRedaction(logging.Filter):
+    """Redact credential query values from aiohttp access log lines."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:  # pragma: no cover - malformed record, leave as is
+            message = None
+        if message is not None:
+            redacted = _redact_url_secrets(message)
+            if redacted != message:
+                record.msg = redacted
+                record.args = None
+        # aiohttp also attaches the raw request line as structured "extra" data,
+        # which JSON or custom formatters may print.
+        line = getattr(record, "first_request_line", None)
+        if isinstance(line, str):
+            record.first_request_line = _redact_url_secrets(line)
+        return True
+
+
+def _redact_url_secrets(text: str) -> str:
+    return _URL_SECRET_PARAMS.sub(lambda match: f"{match.group(1)}=[redacted]", text)
+
+
+def install_access_log_redaction(logger: logging.Logger | None = None) -> None:
+    """Attach the redaction filter to the aiohttp access logger (once)."""
+    target = logger or logging.getLogger("aiohttp.access")
+    if not any(getattr(item, _REDACTION_MARKER, False) for item in target.filters):
+        redaction = _AccessLogRedaction()
+        setattr(redaction, _REDACTION_MARKER, True)
+        target.addFilter(redaction)
+
+
 def configure_runtime_logging(
     data_dir: Path,
     *,
@@ -66,6 +106,7 @@ def configure_runtime_logging(
 ) -> Path:
     """Add one daily rotating file handler while preserving console logging."""
     target_logger = logger or logging.getLogger()
+    install_access_log_redaction()
     directory = (log_dir or resolve_runtime_log_dir(data_dir)).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     cleanup_expired_runtime_logs(directory)

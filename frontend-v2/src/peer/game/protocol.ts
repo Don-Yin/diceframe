@@ -20,6 +20,7 @@ export type PeerGameOperation =
   | 'ruleset.intent'
   | 'ruleset.decision'
   | 'luck.resolve'
+  | 'check.reveal'
   | 'payment.resolve'
   | 'character.update'
   | 'character.profile'
@@ -46,6 +47,7 @@ const GAME_OPERATIONS = new Set<PeerGameOperation>([
   'ruleset.intent',
   'ruleset.decision',
   'luck.resolve',
+  'check.reveal',
   'payment.resolve',
   'character.update',
   'character.profile',

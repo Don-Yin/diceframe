@@ -18,6 +18,7 @@ from src.engine.combat import calc_hp_based_damage, resolve_attack
 from src.engine.dice import d20_dc_cap
 from src.engine.game_instance import GameInstance
 from src.rules.rule_system import RuleSystem
+from src.engine.modules import checks
 
 ROOT = Path(__file__).resolve().parents[1]
 RULES = ROOT / "templates" / "rules"
@@ -347,7 +348,7 @@ def _combat_instance(*, weapon: dict, attributes: dict[str, int], check: dict) -
         "attribute": check.get("attribute_key", "str"),
     }
     instance.action_queue = [{"user_id": "fighter", "text": "I attack Target.", "check_request": request}]
-    instance.last_checks = [check]
+    checks.replace_last_checks(instance, [check])
     return instance
 
 

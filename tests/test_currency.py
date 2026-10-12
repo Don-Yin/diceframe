@@ -453,10 +453,11 @@ class _EconomyInstance:
         self.gm_uid = "gm"
         self.players = {"p1": {"character_name": "张三"}}
         self.sheet = {"gold": 1000, "currency": {"amount": 1000}}
-        self.economy = {
+        # economy 账本经 economy_state 模块槽读取（与 GameInstance 相同的存储形状）。
+        self.modules = {"economy": {"schema_version": 1, "state": {
             "proposals": [], "transactions": [], "outcomes": [],
             "idempotency_records": {}, "effect_groups": [], "next_sequence": 1,
-        }
+        }}}
 
     def get_character_sheet(self, uid):
         return self.sheet

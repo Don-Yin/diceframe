@@ -10,6 +10,7 @@ from src.engine.character_utils import initial_special_stat_value, make_default_
 from src.engine.game_instance import GameInstance
 from src.llm.protocol import KNOWN_PROTOCOL_TAGS
 from src.rules.rule_system import RuleSystem, _safe_eval, list_available_rules
+from src.engine.modules import checks
 
 
 def test_builtin_rule_appendices_only_reference_supported_protocol_tags():
@@ -239,9 +240,9 @@ def test_dnd5e_rule_check_uses_advantage_from_action_text(monkeypatch):
     text = DiceResolver().roll_rule_check(instance, "我借着夜色有优势潜行绕后", rule)
 
     assert "d20优势=[5, 17] 取 17" in text
-    assert instance.last_check["advantage_mode"] == "advantage"
-    assert instance.last_check["rolls"] == [5, 17]
-    assert instance.last_check["roll"] == 17
+    assert checks.last_check(instance)["advantage_mode"] == "advantage"
+    assert checks.last_check(instance)["rolls"] == [5, 17]
+    assert checks.last_check(instance)["roll"] == 17
 
 
 def test_dnd5e_rule_check_cancels_advantage_and_disadvantage(monkeypatch):
@@ -265,8 +266,8 @@ def test_dnd5e_rule_check_cancels_advantage_and_disadvantage(monkeypatch):
     text = DiceResolver().roll_rule_check(instance, "我有优势但也在黑暗中不利地射击", rule)
 
     assert "优势与劣势同时存在" in text
-    assert instance.last_check["advantage_mode"] == ""
-    assert instance.last_check["rolls"] == [11]
+    assert checks.last_check(instance)["advantage_mode"] == ""
+    assert checks.last_check(instance)["rolls"] == [11]
 
 
 def test_rule_abstraction_defaults_from_legacy_fields():

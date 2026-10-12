@@ -14,6 +14,7 @@ from src.commands.check_planner import _planner_context, normalize_check_specs
 from src.engine.checks import resolve_check_request
 from src.engine.game_instance import GameInstance
 from src.rules.rule_system import RuleSystem
+from src.engine.modules import ruleset_runtime
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -36,7 +37,7 @@ def make_instance() -> GameInstance:
         {"user_id": "p1", "text": "让米拉去推开沉重的石门"},
         {"user_id": "p2", "text": "我观察四周"},
     ]
-    instance.ruleset_state = {"party": {"companions": {
+    ruleset_runtime.replace_state(instance, {"party": {"companions": {
         "mira": {
             "id": "mira", "name": "米拉", "controller": "ai", "active": True,
             "ruleset_character": {
@@ -56,7 +57,7 @@ def make_instance() -> GameInstance:
                 "build": {"class_levels": [{"class_ref": "class:fighter", "level": 5}]},
             },
         },
-    }}}
+    }}})
     return instance
 
 

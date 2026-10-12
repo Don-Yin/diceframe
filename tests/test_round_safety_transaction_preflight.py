@@ -11,6 +11,7 @@ from src.engine import instance_lifecycle, round_recovery, round_snapshots, turn
 from src.engine.game_instance import GameRegistry, GameState
 from src.engine.module_state import ModuleStateError
 from src.engine.modules import round_safety
+from src.engine.modules import combat_extension_state
 from tests.test_game_instance_reset_characterization import _make_populated_instance
 
 
@@ -60,7 +61,7 @@ def test_preflight_rejects_unknown_schema_without_mutation(schema):
 @pytest.mark.asyncio
 async def test_transaction_rejection_preserves_all_live_state(operation, direct):
     instance = unsupported_instance()
-    instance.combat_extension["pending_summaries"] = ["must remain pending"]
+    combat_extension_state.current(instance)["pending_summaries"] = ["must remain pending"]
     args = ("new narration",) if operation == "finish_judgment" else ()
     before = deepcopy(live_state(instance))
     with pytest.raises(ModuleStateError, match="unsupported round_safety module schema"):

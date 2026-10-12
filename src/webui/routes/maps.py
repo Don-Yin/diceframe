@@ -5,10 +5,14 @@ from __future__ import annotations
 from aiohttp import web
 
 from src.webui.routes._common import _get_api
+from src.webui.viewer import viewer_for
 
 
 async def api_map_locations(request: web.Request) -> web.Response:
-    result = _get_api(request).get_map_locations(request.match_info["game_key"])
+    api = _get_api(request)
+    game_key = request.match_info["game_key"]
+    viewer = viewer_for(request, api.get_game_instance(game_key))
+    result = api.get_map_locations(game_key, viewer=viewer)
     return web.json_response(result)
 
 

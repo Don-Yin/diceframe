@@ -1,5 +1,5 @@
 import { expect, test } from './fixtures'
-import { accessToken, prepareAuthenticatedContext } from './support'
+import { accessToken, prepareAuthenticatedContext, seatTakeoverPath } from './support'
 
 // FIX-00：Play 页的 AdventurePanel 走的是 game-scoped 投影端点。owner 与分享
 // 玩家都必须能读到，且分享玩家只能看到公开部分（GM 秘密节点不得下发）。
@@ -30,9 +30,10 @@ test('owner and shared player both read the bound adventure projection', async (
   playerPage.on('response', response => {
     if (response.url().includes('/adventure')) playerAdventureStatuses.push(response.status())
   })
-  await playerPage.goto(
-    `/#/play?game=${encodeURIComponent(ADVENTURE_GAME)}&user=${encodeURIComponent(player.user_id)}&share=1`,
-  )
+  // A share player proves its seat with the seat token from a GM takeover link.
+  await playerPage.goto(await seatTakeoverPath(request, ADVENTURE_GAME, player.user_id))
+  // The rejoin may first wait out a short server rate limit (retried once).
+  await expect(playerPage).toHaveURL(/#\/play\?/, { timeout: 20_000 })
 
   const gmPanel = gmPage.getByTestId('game-adventure-panel')
   const playerPanel = playerPage.getByTestId('game-adventure-panel')

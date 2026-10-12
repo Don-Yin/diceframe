@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from src.engine import progression
 from src.engine.game_state import GameState
 from src.engine.player_control import get_control, submission_block
 
@@ -96,7 +97,7 @@ def check_run_unchanged(instance: Any, req: GateRequest) -> str:
 def check_round_unchanged(instance: Any, req: GateRequest) -> str:
     if req.expected_round_number is None:
         return ""
-    return "" if int(instance.round_number or 0) == req.expected_round_number else ROUND_CHANGED
+    return "" if progression.current_round(instance) == req.expected_round_number else ROUND_CHANGED
 
 
 def check_seat_present(instance: Any, req: GateRequest) -> str:

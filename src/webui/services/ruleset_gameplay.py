@@ -12,7 +12,7 @@ from typing import Any
 from src.webui.ruleset_draft_validation import validate_draft_shape
 from src.adventures import binding_matches
 from src.engine import progression
-from src.engine.modules import session_stats
+from src.engine.modules import adventure_runtime_state, economy_state, legacy_combat, progression_state, ruleset_runtime, seat_activity, session_stats
 from src.engine.action_gate import (
     GateRequest, ROUND_PROCESSING, SOURCE_INTENT, STRUCTURED_INTENT_POLICY,
     check_not_judging, check_seat_exists, evaluate,
@@ -26,6 +26,7 @@ from src.rulesets.contracts import (
     AdventureBindingMigrationRuntime,
     AuthoritativeIntentHooks,
     AutomaticIntentRuntime,
+    IntentResultProjectionRuntime,
     TemporaryEncounterPlannerRuntime,
 )
 from src.rulesets.registry import RulesetRuntimeRegistry
@@ -52,6 +53,12 @@ class RulesetGameplayDependencies:
 
 def _error(code: str, message: str) -> dict[str, Any]:
     return {"ok": False, "code": code, "error": message}
+
+
+def _gate_error(code: str, message: str) -> dict[str, Any]:
+    # Authority-gate rejections also carry ``error_code``, the field the
+    # frontend localizes (``apiErrors.<code>``), like the other gated writers.
+    return {**_error(code, message), "error_code": code}
 
 
 def _intent_write_error(
@@ -84,7 +91,7 @@ def _seat_actor_id(uid: str) -> str:
 
 
 def _active_combat(instance: Any) -> dict[str, Any] | None:
-    state = getattr(instance, "ruleset_state", None)
+    state = ruleset_runtime.state(instance)
     combat = state.get("combat") if isinstance(state, dict) else None
     if isinstance(combat, dict) and combat.get("status") == "active":
         return combat
@@ -132,7 +139,7 @@ async def _project_batch_memory(
         try:
             await dependencies.apply_memory_delta(
                 instance.memory_namespace, {"add": [memory]},
-                int(getattr(instance, "round_number", 0) or 0),
+                progression.current_round(instance),
             )
         except Exception:
             # Long-term memory is a derived projection of the persisted
@@ -181,7 +188,7 @@ def _context(
         return instance, rule, runtime, effective_requester, _error(
             "RULESET_INTENTS_UNAVAILABLE", "该规则继续使用自由文本回合流程",
         )
-    binding = dict(getattr(instance, "ruleset_runtime", {}) or {})
+    binding = dict(ruleset_runtime.binding(instance) or {})
     if binding.get("id") != runtime.runtime_id:
         return instance, rule, runtime, effective_requester, _error(
             "RULESET_BINDING_MISMATCH", "存档未绑定当前权威规则运行时",
@@ -210,8 +217,34 @@ def _response(
         "available_actions": actions,
     }
     if result is not None:
-        payload["result"] = result
+        payload["result"] = _viewer_result(
+            runtime, instance, result, requester_id, requester_is_gm,
+        )
     return payload
+
+
+def _viewer_result(
+    runtime: Any, instance: Any, result: dict[str, Any],
+    viewer_id: str, viewer_is_gm: bool,
+) -> dict[str, Any]:
+    """Let the ruleset decide what a viewer may see of a raw intent payload."""
+
+    if isinstance(runtime, IntentResultProjectionRuntime):
+        return runtime.project_intent_result(instance, result, viewer_id, viewer_is_gm)
+    return result
+
+
+def _restore_adventure_node_before_image(instance: Any, before: dict[str, Any]) -> None:
+    """Put back world truth, Adventure progress and economy in capture order."""
+    for field, value in before.items():
+        if value is None:
+            continue
+        if field == "adventure_progress":
+            adventure_runtime_state.replace_progress(instance, value)
+        elif field == "economy":
+            economy_state.replace_state(instance, value)
+        else:
+            setattr(instance, field, value)
 
 
 async def _ensure_compatible_adventure_binding(
@@ -405,10 +438,22 @@ async def submit_intent(
             return _error("INVALID_ADVENTURE_NODE", "node_id is required")
         if dependencies.complete_adventure_node is None:
             return _error("ADVENTURE_RUNTIME_UNAVAILABLE", "Adventure v2 runtime is unavailable")
-        async with instance._lock:
+        # Node completion mutates world_state / adventure_progress / economy:
+        # it is a live authoritative write, so it must not interleave with a
+        # historical rewrite nor land on a run that was replaced meanwhile.
+        async with instance.authoritative_write() as write_entered, instance._lock:
+            if not write_entered:
+                return _gate_error(
+                    "REWRITE_IN_PROGRESS", "GM 正在重写历史回合，请等待完成后重试",
+                )
+            if dependencies.get_instance(instance.game_key) is not instance:
+                return _gate_error("STALE_RUN", "对局已重开，请刷新后重试")
             admission_error = _intent_write_error(instance, requester_id, requester_is_gm)
             if admission_error:
                 return admission_error
+            # Reject an unsupported progress slot before the binding check can
+            # migrate the binding or the node transaction can touch the world.
+            adventure_runtime_state.require_writable(instance)
             binding_error = await _ensure_compatible_adventure_binding(
                 dependencies, runtime, instance,
             )
@@ -416,8 +461,8 @@ async def submit_intent(
                 return binding_error
             before = {
                 "world_state": deepcopy(getattr(instance, "world_state", None)),
-                "adventure_progress": deepcopy(getattr(instance, "adventure_progress", None)),
-                "economy": deepcopy(getattr(instance, "economy", None)),
+                "adventure_progress": deepcopy(adventure_runtime_state.progress(instance)),
+                "economy": deepcopy(economy_state.state(instance)),
             }
             try:
                 completed = dependencies.complete_adventure_node(
@@ -425,14 +470,10 @@ async def submit_intent(
                 )
                 await dependencies.save_instance(instance)
             except (ValueError, KeyError, TypeError) as exc:
-                for field, value in before.items():
-                    if value is not None:
-                        setattr(instance, field, value)
+                _restore_adventure_node_before_image(instance, before)
                 return _error("ADVENTURE_NODE_REJECTED", str(exc))
             except Exception:
-                for field, value in before.items():
-                    if value is not None:
-                        setattr(instance, field, value)
+                _restore_adventure_node_before_image(instance, before)
                 logger.exception("Adventure node transaction failed and was restored")
                 return _error(
                     "ADVENTURE_NODE_FAILED",
@@ -464,23 +505,30 @@ async def submit_intent(
             return admission_error
         progression.require_writable(instance)
         session_stats.require_writable(instance)
+        seat_activity.require_writable(instance)
         binding_error = await _ensure_compatible_adventure_binding(
             dependencies, runtime, instance,
         )
         if binding_error:
             return binding_error
         before = {
-            "ruleset_state": deepcopy(instance.ruleset_state),
-            "event_ledger": deepcopy(instance.event_ledger),
+            "ruleset_state": deepcopy(ruleset_runtime.state(instance)),
+            "event_ledger": deepcopy(ruleset_runtime.event_ledger(instance)),
             "players": deepcopy(instance.players),
-            "combat_state": instance.combat_state,
-            "combat_active": instance.combat_active,
-            "initiative_order": deepcopy(instance.initiative_order),
-            "initiative_current": instance.initiative_current,
-            "last_activity": instance.last_activity,
+            "combat_state": legacy_combat.combat_state(instance),
+            "combat_active": legacy_combat.combat_active(instance),
+            "initiative_order": deepcopy(legacy_combat.initiative_order(instance)),
+            "initiative_current": legacy_combat.initiative_current(instance),
+            "last_activity": session_stats.last_activity(instance),
             "log": deepcopy(instance.log),
-            "round_number": instance.round_number,
+            "round_number": progression_state.round_value(instance),
         }
+        # Only a first mark is undone if the transaction rolls back.
+        marks_seat = (
+            not requester_is_gm
+            and effective_requester in instance.players
+            and not seat_activity.has_acted(instance, effective_requester)
+        )
         try:
             rng = random.SystemRandom()
             resolved = runtime.resolve_intent(instance, intent, rng)
@@ -490,6 +538,10 @@ async def submit_intent(
             if not isinstance(batch, dict):
                 return _error("INVALID_EVENT_BATCH", "规则运行时没有返回有效事件批次")
             applied = runtime.apply_event_batch(instance, batch)
+            if marks_seat:
+                # A player-side intent applied for its own seat: the seat has
+                # acted, so card adoption / deletion become GM-only for it.
+                seat_activity.mark_acted(instance, effective_requester)
             _project_public_batch(runtime, instance, batch, applied)
             automatic_batches, automatic_results = _automatic_segment(
                 runtime, instance, rng,
@@ -498,9 +550,13 @@ async def submit_intent(
             await dependencies.save_instance(instance)
         except (ValueError, KeyError, TypeError) as exc:
             instance.restore_ruleset_transaction(before)
+            if marks_seat:
+                seat_activity.forget_seat(instance, effective_requester)
             return _error("INTENT_REJECTED", str(exc))
         except Exception:
             instance.restore_ruleset_transaction(before)
+            if marks_seat:
+                seat_activity.forget_seat(instance, effective_requester)
             raise
         await _project_batch_memory(
             dependencies, runtime, instance, [batch, *automatic_batches],
@@ -594,16 +650,16 @@ async def resume_authoritative_combat(
                 "reason": "not_this_seat",
             }
         before = {
-            "ruleset_state": deepcopy(instance.ruleset_state),
-            "event_ledger": deepcopy(instance.event_ledger),
+            "ruleset_state": deepcopy(ruleset_runtime.state(instance)),
+            "event_ledger": deepcopy(ruleset_runtime.event_ledger(instance)),
             "players": deepcopy(instance.players),
-            "combat_state": instance.combat_state,
-            "combat_active": instance.combat_active,
-            "initiative_order": deepcopy(instance.initiative_order),
-            "initiative_current": instance.initiative_current,
-            "last_activity": instance.last_activity,
+            "combat_state": legacy_combat.combat_state(instance),
+            "combat_active": legacy_combat.combat_active(instance),
+            "initiative_order": deepcopy(legacy_combat.initiative_order(instance)),
+            "initiative_current": legacy_combat.initiative_current(instance),
+            "last_activity": session_stats.last_activity(instance),
             "log": deepcopy(instance.log),
-            "round_number": instance.round_number,
+            "round_number": progression_state.round_value(instance),
         }
         try:
             rng = random.SystemRandom()
@@ -628,11 +684,18 @@ async def resume_authoritative_combat(
         await _project_batch_memory(
             dependencies, runtime, instance, automatic_batches,
         )
+    # Seat-control callers are not necessarily the GM: project as that seat.
     return {
         "ok": True,
         "handled": True,
         "resumed": True,
-        "automatic_event_batches": automatic_batches,
-        "automatic_results": automatic_results,
+        **_viewer_result(
+            runtime, instance,
+            {
+                "automatic_event_batches": automatic_batches,
+                "automatic_results": automatic_results,
+            },
+            seat_uid, False,
+        ),
     }
 

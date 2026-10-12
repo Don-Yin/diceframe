@@ -116,7 +116,8 @@ async def test_device_token_authenticates_as_owner_and_can_be_revoked(
     assert as_owner.status == 200
     assert [device["label"] for device in devices] == ["GM 的手机"]
     # 清单只用于展示与吊销，不得带出任何可用来鉴权的字段。
-    assert set(devices[0]) == {"id", "label", "created_at", "last_seen_at"}
+    # install_id 是内容同步的来源标识（客户端自报，非凭据），可以展示。
+    assert set(devices[0]) == {"id", "label", "created_at", "last_seen_at", "install_id"}
     assert revoked.status == 200
     assert after_revoke.status == 401
 

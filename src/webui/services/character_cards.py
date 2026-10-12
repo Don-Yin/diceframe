@@ -8,18 +8,53 @@ import io
 import json
 import logging
 import tempfile
+import threading
 import time
+import uuid
 import zipfile
+import functools
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from src.engine.character_utils import parse_character_card_document, parse_tavern_card
+from src.content_modules.refs import ContentDraft, collect_content_refs
 from src.lorebook.importer import commit_lorebook_import, draft_lorebook_import
-from src.webui.character_card_projection import card_signature, dedupe_cards
+from src.webui.character_card_projection import (
+    CARD_PROVENANCE_KEY,
+    card_provenance,
+    card_signature,
+    dedupe_cards,
+    has_card_provenance,
+    is_plugin_card,
+)
 
 logger = logging.getLogger("trpg")
+
+
+def character_content_draft(
+    card: dict[str, Any], *, source_id: str = "local-card",
+    kind: str = "character_template",
+) -> ContentDraft:
+    """Produce the shared, side-effect-free draft used by card adapters."""
+
+    safe_source = "".join(ch.lower() if ch.isascii() and (ch.isalnum() or ch in "_-") else "_" for ch in source_id).strip("_") or "local-card"
+    safe_external = "".join(
+        ch.lower() if ch.isascii() and (ch.isalnum() or ch in "_-") else "_"
+        for ch in str(card.get("id") or card.get("character_name") or "card")
+    ).strip("_").lower() or "card"
+    if not safe_external[0].isalpha() or not safe_external[0].isascii():
+        safe_external = f"card-{safe_external}"
+    return ContentDraft(
+        kind=kind,
+        source_kind="device",
+        source_id=safe_source[:120],
+        external_id=safe_external[:96],
+        payload=copy.deepcopy(card),
+        references=collect_content_refs(card, default_source=f"device:{safe_source[:120]}"),
+        provenance={"adapter": "character_card"},
+    )
 
 
 @dataclass(frozen=True)
@@ -30,6 +65,41 @@ class CharacterCardDependencies:
     is_ruleset_card: Callable[[dict[str, Any]], bool] | None = None
     lorebook: Any | None = None
     rebuild_lorebook_index: Callable[[str], None] | None = None
+
+
+_LIBRARY_LOCKS: dict[str, threading.RLock] = {}
+_LIBRARY_LOCKS_GUARD = threading.Lock()
+
+
+def library_lock(dependencies: CharacterCardDependencies) -> threading.RLock:
+    """The one lock every read-modify-write of a card library file holds.
+
+    ``cards.json`` has no storage-level invariant, so anything that checks the
+    library and then writes it (signature merge, import identity uniqueness)
+    must do both under this lock. It is re-entrant so a locked operation can
+    call another one.
+
+    It is a thread lock: it does not separate coroutines on the event loop
+    thread (re-entrancy lets them all in). A locked section must therefore
+    never ``await``; it stays atomic for coroutines only by running to
+    completion without yielding.
+    """
+
+    key = str(Path(dependencies.cards_path).resolve())
+    with _LIBRARY_LOCKS_GUARD:
+        lock = _LIBRARY_LOCKS.get(key)
+        if lock is None:
+            lock = _LIBRARY_LOCKS[key] = threading.RLock()
+        return lock
+
+
+def _locked(function: Callable[..., Any]) -> Callable[..., Any]:
+    @functools.wraps(function)
+    def wrapper(dependencies: CharacterCardDependencies, *args: Any, **kwargs: Any) -> Any:
+        with library_lock(dependencies):
+            return function(dependencies, *args, **kwargs)
+
+    return wrapper
 
 
 def _read_cards(dependencies: CharacterCardDependencies) -> list[dict[str, Any]]:
@@ -55,11 +125,37 @@ def _write_cards(
     tmp_path.replace(path)
 
 
+def read_library(dependencies: CharacterCardDependencies) -> list[dict[str, Any]]:
+    """Raw library rows; callers that write back must hold :func:`library_lock`."""
+
+    return _read_cards(dependencies)
+
+
+def write_library(dependencies: CharacterCardDependencies, cards: list[dict[str, Any]]) -> None:
+    _write_cards(dependencies, cards)
+
+
+def new_card_id(prefix: str = "card") -> str:
+    return _new_card_id(prefix)
+
+
+def to_library_card(character: dict, source: str = "") -> dict[str, Any]:
+    """Re-shape any character/card dict into the library card shape."""
+
+    return _to_character_card(character, source=source)
+
+
+def _new_card_id(prefix: str) -> str:
+    # time_ns() alone collides on coarse clocks (Windows), so two quick saves
+    # could share an id and the second would overwrite the first.
+    return f"{prefix}_{time.time_ns()}_{uuid.uuid4().hex[:8]}"
+
+
 def _to_character_card(character: dict, source: str = "") -> dict[str, Any]:
     cs = character.get("character_sheet", {}) if isinstance(character.get("character_sheet"), dict) else character
     name = character.get("character_name") or cs.get("character_name") or "冒险者"
     card: dict[str, Any] = {
-        "id": character.get("card_id") or character.get("id") or cs.get("card_id") or cs.get("id") or f"card_{int(time.time_ns())}",
+        "id": character.get("card_id") or character.get("id") or cs.get("card_id") or cs.get("id") or _new_card_id("card"),
         "schema_version": 2,
         "character_name": name,
         "race": cs.get("race", character.get("race", "人类")),
@@ -100,9 +196,16 @@ def _to_character_card(character: dict, source: str = "") -> dict[str, Any]:
         value = character.get(key, cs.get(key))
         if value not in (None, ""):
             card[key] = copy.deepcopy(value)
+    # Import provenance is server bookkeeping: it survives every re-shaping of
+    # a card, but only in its validated form. Whether a caller may *supply* it
+    # is decided at the write boundary (see save_character_card), not here.
+    provenance = card_provenance(character) or card_provenance(cs)
+    if provenance is not None:
+        card[CARD_PROVENANCE_KEY] = provenance
     return card
 
 
+@_locked
 def list_character_cards(
     dependencies: CharacterCardDependencies,
 ) -> dict[str, Any]:
@@ -125,10 +228,77 @@ def list_character_cards(
     return {"cards": visible_cards, "total": len(visible_cards)}
 
 
+def is_shareable_card(card: dict[str, Any]) -> bool:
+    """A card anyone at a table may see: content shipped by an installed plugin.
+
+    The library cannot tell a card the owner curated from a character saved
+    automatically when someone joined some game (neither records a game, a
+    session or an author), so every other card is owner-only.
+    """
+    return is_plugin_card(card)
+
+
+def list_shareable_character_cards(
+    dependencies: CharacterCardDependencies,
+) -> dict[str, Any]:
+    """The library as a non-owner at a table may see it (plugin cards only)."""
+    listed = list_character_cards(dependencies)
+    cards = [card for card in listed["cards"] if is_shareable_card(card)]
+    return {"cards": cards, "total": len(cards)}
+
+
+# Provenance only the plugin import path may set; a card carrying them is
+# shown at every table, so a game save must never forge them.
+PLUGIN_CARD_MARKERS = ("source_plugin", "plugin_content_id", "raw_sillytavern")
+# Identity a game save must not dictate: it would let a sheet overwrite an
+# existing library card by id.
+_CARD_IDENTITY_KEYS = ("id", "card_id")
+
+
+def _strip_keys(character: dict, keys: tuple[str, ...]) -> dict:
+    cleaned = copy.deepcopy(character)
+    sheets = [cleaned]
+    if isinstance(cleaned.get("character_sheet"), dict):
+        sheets.append(cleaned["character_sheet"])
+    for target in sheets:
+        for key in keys:
+            target.pop(key, None)
+    return cleaned
+
+
+def _strip_untrusted_card_fields(character: dict) -> dict:
+    return _strip_keys(
+        character, (*PLUGIN_CARD_MARKERS, *_CARD_IDENTITY_KEYS, CARD_PROVENANCE_KEY),
+    )
+
+
+def strip_card_provenance(character: dict) -> dict:
+    """Drop caller-supplied provenance: only server-side import code sets it."""
+
+    return _strip_keys(character, (CARD_PROVENANCE_KEY,))
+
+
+@_locked
 def save_character_card(
     dependencies: CharacterCardDependencies,
     character: dict,
+    *,
+    from_game: bool = False,
 ) -> dict[str, Any]:
+    """Save a card into the library.
+
+    ``from_game``: the auto-save of a table character (join, sheet edit).
+    Such a save never carries plugin provenance or a card id and never
+    replaces a plugin card or an imported (provenance) card; it is kept as a
+    separate card instead.
+
+    Import provenance is never taken from the caller. A save that replaces an
+    imported card by its id keeps that card's recorded provenance; signature
+    matching never merges into an imported card.
+    """
+    character = strip_card_provenance(character)
+    if from_game:
+        character = _strip_untrusted_card_fields(character)
     source = str(character.get("source") or "角色卡库")
     # Game creation passes a player wrapper with mechanics nested under
     # ``character_sheet``. Convert that wrapper to the reusable card shape
@@ -144,22 +314,41 @@ def save_character_card(
             "error": str(exc),
         }
     card = _to_character_card(candidate, source=source)
+    if from_game:
+        card = _strip_untrusted_card_fields(card)
+        card["id"] = _new_card_id("card")
     cards = _read_cards(dependencies)
     sig = card_signature(card)
+
+    def replaceable(existing: dict[str, Any]) -> bool:
+        return not (
+            from_game and (is_shareable_card(existing) or has_card_provenance(existing))
+        )
+
+    def mergeable(existing: dict[str, Any]) -> bool:
+        # Same-looking is not same-identity for an imported card.
+        return replaceable(existing) and not has_card_provenance(existing)
+
+    def same_card(existing: dict[str, Any]) -> bool:
+        if existing.get("id") == card["id"]:
+            return replaceable(existing)
+        return mergeable(existing) and card_signature(existing) == sig
+
     for existing in cards:
-        if existing.get("id") == card["id"] or card_signature(existing) == sig:
+        if same_card(existing):
             card["id"] = existing.get("id") or card["id"]
+            provenance = card_provenance(existing)
+            if provenance is not None:
+                card[CARD_PROVENANCE_KEY] = provenance
             break
-    cards = [
-        c for c in cards
-        if c.get("id") != card["id"] and card_signature(c) != sig
-    ]
+    cards = [c for c in cards if not same_card(c)]
     cards.append(card)
     cards = dedupe_cards(cards)
     _write_cards(dependencies, cards)
     return {"ok": True, "card": card}
 
 
+@_locked
 def update_character_card(
     dependencies: CharacterCardDependencies,
     card_id: str,
@@ -204,6 +393,7 @@ def update_character_card(
     return {"ok": False, "error": f"角色卡不存在: {card_id}"}
 
 
+@_locked
 def delete_character_card(
     dependencies: CharacterCardDependencies,
     card_id: str,
@@ -233,7 +423,7 @@ def _tavern_to_character_card(tavern: dict, file_name: str = "") -> dict[str, An
     if tavern.get("character_book"):
         source += f"（含 {len(tavern['character_book'])} 条角色世界书）"
     return {
-        "id": f"st_{int(time.time_ns())}",
+        "id": _new_card_id("st"),
         "schema_version": 2,
         "character_name": tavern.get("name") or "未命名",
         "race": "人类",
@@ -397,7 +587,13 @@ def _import_tavern_as_npc(
     if dependencies.rebuild_lorebook_index is not None:
         dependencies.rebuild_lorebook_index(world_id)
     logger.info("酒馆卡已导入为 NPC: %s -> world=%s（含 %d 条世界书）", name, world_id, book_imported)
-    result: dict[str, Any] = {"ok": True, "imported_as": "npc", "npc_name": name, "world_id": world_id, "lorebook_entries": book_imported}
+    result: dict[str, Any] = {
+        "ok": True, "imported_as": "npc", "npc_name": name,
+        "world_id": world_id, "lorebook_entries": book_imported,
+        "content_draft": character_content_draft(
+            npc_entry, source_id=f"{world_id}-{safe_name}", kind="npc"
+        ).to_portable_dict(),
+    }
     if _tavern_has_nsfw(tavern):
         result["nsfw_warning"] = True
     result["lorebook_book_id"] = embedded_book_id
@@ -454,6 +650,7 @@ async def import_character_card(
             "card": saved["card"],
             "imported_as": "character_card",
             "format": "diceframe",
+            "content_draft": character_content_draft(saved["card"], source_id=safe_name).to_portable_dict(),
         }
 
     tmp_path = Path(tempfile.gettempdir()) / f"trpg_card_import_{int(time.time_ns())}_{safe_name}"
@@ -472,10 +669,12 @@ async def import_character_card(
     if target == "npc":
         return _import_tavern_as_npc(dependencies, tavern, world_id, document=document)
     card = _tavern_to_character_card(tavern, safe_name)
-    cards = _read_cards(dependencies)
-    cards.append(card)
-    _write_cards(dependencies, cards)
-    result: dict[str, Any] = {"ok": True, "card": card, "imported_as": "character_card", "format": "tavern"}
+    with library_lock(dependencies):
+        cards = _read_cards(dependencies)
+        cards.append(card)
+        _write_cards(dependencies, cards)
+    result: dict[str, Any] = {"ok": True, "card": card, "imported_as": "character_card", "format": "tavern",
+                              "content_draft": character_content_draft(card, source_id=safe_name).to_portable_dict()}
     # A Character Card's embedded character_book is real lore, not a footnote:
     # when the user keeps it checked it must reach the canonical store through
     # the same adapter/preview/commit path as every other import. Unchecked means
@@ -533,9 +732,10 @@ def export_character_cards(
 
     # 仅去掉运行期插件来源标记；source（人类可读来源）和 raw_sillytavern（酒馆原始数据）
     # 是业务字段，保留以保证导出→导入无损往返（否则酒馆卡丢 raw_sillytavern 后无法还原）。
+    # 导入 provenance 是本服务器的同步记账，不属于可移植卡体。
     skip = {
         "source_plugin", "plugin_content_id",
-        "ruleset_revision", "ruleset_operation_log",
+        "ruleset_revision", "ruleset_operation_log", CARD_PROVENANCE_KEY,
     }
     payloads: list[tuple[str, str]] = []
     used_names: dict[str, int] = {}

@@ -15,9 +15,11 @@ from src.llm.client import LLMResponse
 from src.lorebook.matcher import KeywordMatcher
 from src.lorebook.store import LorebookStore
 from src.webui.api import WebAPI, can_modify_character
+from src.webui.services import character_cards
 from src.webui.session import SessionManager
 
 from webapi_harness import FakeLLMClient, web_api, write_world
+from src.engine.modules import room_access, ruleset_runtime
 
 def test_session_rebind_persists_restored_player_identity(tmp_path):
     manager = SessionManager(tmp_path)
@@ -78,7 +80,7 @@ async def test_professional_character_is_rederived_bound_and_saved_without_field
     assert sheet["attributes"]["str"] == canonical["abilities"]["str"] != 99
     assert isinstance(sheet["equipment"], list)
     assert isinstance(canonical["equipment"], dict)
-    assert instance.ruleset_runtime["id"] == "core:dnd2024"
+    assert ruleset_runtime.binding(instance)["id"] == "core:dnd2024"
     cards = api.list_character_cards()["cards"]
     assert cards[-1]["ruleset_character"]["rule_binding"]["content_version"] == (
         "srd-5.2.1+r5"
@@ -136,7 +138,7 @@ async def test_professional_seed_restart_keeps_rule_and_prevalidates_before_muta
     assert restarted["ok"] is True
     instance = registry.get(api._parse_key(restarted["game_key"]))
     assert instance.rule_id == "dnd2024_srd"
-    assert instance.ruleset_runtime["id"] == "core:dnd2024"
+    assert ruleset_runtime.binding(instance)["id"] == "core:dnd2024"
     assert instance.get_character_sheet("seed_gm")["hp"] != 999
 
 
@@ -236,7 +238,7 @@ async def test_coc_hp_has_rule_suggestion_but_can_be_manually_edited(web_api):
     assert cs["hp"] == 9
     assert cs["max_hp"] == 9
 
-    result = await api.update_character(created["game_key"], uid, {"hp": 99, "max_hp": 99})
+    result = await api.update_character(created["game_key"], uid, {"hp": 99, "max_hp": 99}, gm_authority=True)
 
     assert result["ok"] is True
     cs = inst.get_character_sheet(uid)
@@ -345,6 +347,19 @@ def test_character_cards_with_same_identity_can_bind_to_different_rules(web_api)
     assert {card["rule_id"] for card in result["cards"]} == {
         "freeform_fantasy", "freeform_coc",
     }
+
+
+def test_character_cards_saved_within_one_clock_tick_get_distinct_ids(web_api, monkeypatch):
+    api, _lorebook, _registry, _fake_llm, _worlds_dir = web_api
+    # Coarse clocks (Windows) can return the same time_ns() for back-to-back saves.
+    monkeypatch.setattr(character_cards.time, "time_ns", lambda: 1_700_000_000_000_000_000)
+
+    api.save_character_card({"character_name": "甲", "rule_id": "freeform_fantasy"})
+    api.save_character_card({"character_name": "乙", "rule_id": "freeform_fantasy"})
+
+    result = api.list_character_cards()
+    assert result["total"] == 2
+    assert len({card["id"] for card in result["cards"]}) == 2
 
 
 def test_legacy_character_card_remains_readable_as_unbound(web_api):
@@ -461,7 +476,7 @@ async def test_player_join_rejects_new_seat_when_game_is_full(web_api):
         players=[{"character_name": "艾琳", "attributes": {"str": 10}}],
     )
     inst = registry.get(api._parse_key(created["game_key"]))
-    inst.max_players = 1
+    room_access.replace_max_players(inst, 1)
 
     rejected = await api.create_player(created["game_key"], {"name": "洛恩"})
     restored = await api.create_player(created["game_key"], {
@@ -514,7 +529,7 @@ async def test_character_wizard_update_changes_display_name_and_sheet(web_api):
         "class": "游侠",
         "attributes": {"str": 12},
         "portrait": {"kind": "builtin", "id": "freeform_fantasy:3"},
-    })
+    }, gm_authority=True)
 
     inst = registry.get(api._parse_key(created["game_key"]))
     assert updated["ok"] is True
@@ -593,7 +608,7 @@ async def test_update_character_allows_values_outside_template_suggestion(web_ap
         "attributes": {"str": 999},
         "hp": 77,
         "max_hp": 88,
-    })
+    }, gm_authority=True)
     assert result["ok"] is True
     inst2 = registry.get(api._parse_key(created["game_key"]))
     sheet = inst2.players[uid]["character_sheet"]
@@ -754,7 +769,7 @@ async def test_character_skill_effect_round_trip(web_api):
             {"name": "火焰球", "value": 80, "effect": effect},
             {"name": "侦查", "value": 45},
         ],
-    })
+    }, gm_authority=True)
     assert saved["ok"] is True
     inst = registry.get(api._parse_key(created["game_key"]))
     assert inst.players[uid]["character_sheet"]["skills"] == [
@@ -763,7 +778,7 @@ async def test_character_skill_effect_round_trip(web_api):
     ]
 
     # 之后编辑其它字段（不提技能）也不能让 effect 消失或被清空。
-    again = await api.update_character(created["game_key"], uid, {"level": 2})
+    again = await api.update_character(created["game_key"], uid, {"level": 2}, gm_authority=True)
     assert again["ok"] is True
     skills = inst.players[uid]["character_sheet"]["skills"]
     assert skills[0]["effect"] == effect

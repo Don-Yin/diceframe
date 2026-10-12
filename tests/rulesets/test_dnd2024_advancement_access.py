@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from src.engine.game_instance import GameInstance
 from src.rulesets.dnd2024 import advancement_access
+from src.engine.modules import ruleset_runtime
 
 
 def _instance() -> GameInstance:
@@ -20,7 +21,7 @@ def _instance() -> GameInstance:
                 },
             },
         }
-    instance.ruleset_runtime = {"id": "core:dnd2024"}
+    ruleset_runtime.replace_binding(instance, {"id": "core:dnd2024"})
     return instance
 
 
@@ -34,13 +35,13 @@ def test_old_save_defaults_to_ai_milestone() -> None:
 
 def test_read_only_projection_does_not_normalize_old_save() -> None:
     instance = _instance()
-    instance.ruleset_state = {"unrelated": {"kept": True}}
+    ruleset_runtime.replace_state(instance, {"unrelated": {"kept": True}})
 
     status = advancement_access.project(instance)
 
     assert status["mode"] == "milestone"
     assert status["authority"] == "ai_gm"
-    assert instance.ruleset_state == {"unrelated": {"kept": True}}
+    assert ruleset_runtime.state(instance) == {"unrelated": {"kept": True}}
 
 
 def test_milestone_grants_only_one_next_level_entitlement() -> None:

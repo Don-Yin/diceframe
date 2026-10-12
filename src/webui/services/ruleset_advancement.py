@@ -7,6 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from src.engine.modules import ruleset_runtime
 from src.webui.character_card_projection import dedupe_cards
 from src.webui.ruleset_draft_validation import validate_draft_shape
 from src.rulesets.contracts import LiveAdvancementTransactionRuntime
@@ -475,6 +476,11 @@ async def _apply_live_authority(
             or "character cannot advance at this time",
             "revision": revision,
         }
+    # Live entitlement validation may materialize defaults in ruleset state.
+    try:
+        ruleset_runtime.require_binding(instance, runtime.runtime_id)
+    except ruleset_runtime.RulesetBindingError as exc:
+        return {"ok": False, "code": exc.code, "error": str(exc)}
     live_policy = (
         runtime if isinstance(runtime, LiveAdvancementTransactionRuntime) else None
     )
@@ -578,6 +584,10 @@ async def _control_live_authority(
     if not isinstance(runtime, LiveAdvancementTransactionRuntime):
         return {"ok": False, "code": "RULESET_ADVANCEMENT_UNAVAILABLE", "error": "当前规则不支持该升级控制"}
     parsed = validate_draft_shape(body)
+    try:
+        ruleset_runtime.require_binding(instance, runtime.runtime_id)
+    except ruleset_runtime.RulesetBindingError as exc:
+        return {"ok": False, "code": exc.code, "error": str(exc)}
     result = runtime.apply_live_advancement_control(instance, parsed)
     if not result.get("ok"):
         return result

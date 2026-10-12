@@ -138,12 +138,14 @@ async function onImportSave(e: Event) {
   try {
     const form = new FormData()
     form.append('file', file)
-    const r = await api<{ ok?: boolean; game_key?: string; error?: string }>('/games/import', {
+    const r = await api<{ ok?: boolean; game_key?: string; error?: string; player_access_closed?: boolean }>('/games/import', {
       method: 'POST',
       body: form,
     })
     if (!r.ok) throw new Error(r.error || t('importFailed'))
     toast.success(t('saveImported', { name: r.game_key || '' }))
+    // Room passwords never travel with a save: a protected game arrives closed.
+    if (r.player_access_closed) toast.warning(t('importClosedPlayerAccess'))
     await load()
   } catch (e: unknown) { setError(e) } finally { busy.value = false; input.value = '' }
 }

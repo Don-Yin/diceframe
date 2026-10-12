@@ -121,7 +121,7 @@ class PairingService:
             "expires_at": code.expires_at,
         }
 
-    def claim(self, code: str, ip: str, label: str = "") -> tuple[dict, int]:
+    def claim(self, code: str, ip: str, label: str = "", install_id: str = "") -> tuple[dict, int]:
         granted = self._store.consume(code)
         self._record(ip, granted)
         if not granted:
@@ -133,7 +133,18 @@ class PairingService:
                 },
                 401,
             )
-        token, device = self._devices.issue(label)
+        # A valid pairing code is the owner's own authorisation. If this
+        # install is already bound to an older pairing, that pairing is the
+        # same app install pairing again (e.g. after the old token was lost):
+        # revoke it so one install keeps exactly one live device token.
+        replaced = self._devices.install_id_holder(install_id) if install_id else ""
+        if replaced:
+            self._devices.revoke(replaced)
+            logger.warning(
+                "配对接管安装标识 install_id=%s：已吊销旧设备 %s（ip=%s）",
+                install_id, replaced, ip or "unknown",
+            )
+        token, device = self._devices.issue(label, install_id)
         return (
             {
                 "ok": True,
@@ -141,6 +152,8 @@ class PairingService:
                 "device_token": token,
                 "device_id": device["id"],
                 "label": device["label"],
+                "install_id": device.get("install_id", ""),
+                **({"replaced_device_id": replaced} if replaced else {}),
             },
             200,
         )

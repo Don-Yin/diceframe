@@ -7,6 +7,8 @@ import time
 from typing import Any
 
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
+from src.engine.module_state import ModuleStateError
+from src.engine.modules import adventure_runtime_state, content_binding, media, progression_state, table_settings
 from src.engine.narrative_perspective import validate_narrative_perspective
 from src.migrations import migrate_instance
 from src.rulesets.contracts import LiveAdvancementPolicyRuntime
@@ -46,7 +48,7 @@ async def create_from_seed(
         return config_error
     target_inst = None
     for inst in dependencies.registry.list_all():
-        if inst.seed_code == seed_code:
+        if table_settings.seed_code(inst) == seed_code:
             target_inst = inst
             break
     if not target_inst:
@@ -64,7 +66,7 @@ async def create_from_seed(
     rule_id = _instance_rule_id(dependencies, target_inst)
     resolved_narrative_perspective = (
         narrative_perspective
-        or getattr(target_inst, "narrative_perspective", "auto")
+        or table_settings.narrative_perspective(target_inst)
         or "auto"
     )
     try:
@@ -126,12 +128,29 @@ async def create_from_seed(
             scene_image
             if scene_image
             else (
-                getattr(target_inst, "scene_image", None)
+                media.scene_image(target_inst)
                 or dependencies.resolve_default_scene_image(world_id, rule_id)
             )
         )
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
+
+    # Read the original save's source-aware World ref before registering the
+    # new instance, so an unreadable slot cannot leave a half-created save.
+    try:
+        inherited_world_ref = content_binding.world_ref(target_inst) or {
+            "source_kind": "world",
+            "source_id": world_id,
+            "kind": "world",
+            "id": world_id,
+            "digest": "",
+        }
+    except ModuleStateError as exc:
+        return {"ok": False, "error_code": "INVALID_WORLD_REF", "error": str(exc)}
+    # Same for the original save's play mode: an unsupported adventure_runtime
+    # slot is rejected before anything is registered.
+    adventure_runtime_state.require_writable(target_inst)
+    source_play_mode = str(adventure_runtime_state.play_mode(target_inst) or "")
 
     unique_id = f"{world_id}_{time.time_ns()}"
     game_key = ("web", unique_id, "web_bot")
@@ -144,7 +163,7 @@ async def create_from_seed(
             world_name=world_name,
             group_name="Web端",
             seed_code=seed_code,
-            difficulty=target_inst.difficulty,
+            difficulty=table_settings.difficulty(target_inst),
             rule_id=rule_id,
             language=resolved_language,
         )
@@ -157,6 +176,11 @@ async def create_from_seed(
             "error": "重开失败，未留下半成品存档，请重试。",
         }
     transaction.advance(CreationPhase.INSTANCE_REGISTERED)
+    binding_error = game_creation_phases.bind_ruleset_runtime(
+        transaction, instance, runtime, selected_rule, resolved_language,
+    )
+    if binding_error is not None:
+        return binding_error
     instance.configure_session(
         solo_mode=solo,
         narrative_perspective=normalized_narrative_perspective,
@@ -175,8 +199,32 @@ async def create_from_seed(
             "error_code": "INVALID_ADVENTURE_BINDING",
             "error": "原存档的冒险绑定无效，未留下半成品存档。",
         }
+    content_error = game_creation_phases.bind_content_refs(
+        transaction,
+        instance,
+        inherited_world_ref,
+    )
+    if content_error is not None:
+        return content_error
+    # A seed restart is the same kind of game: keep its play mode (old saves
+    # without one derive it from the binding, as the save migration does) and
+    # run the same Adventure v2 initialization step as normal creation.
+    adventure_runtime_state.replace_play_mode(instance, source_play_mode or (
+        "adventure" if target_adventure_binding.get("adventure_id") else "free"
+    ))
+    if callable(getattr(dependencies, "initialize_adventure_run", None)):
+        try:
+            dependencies.initialize_adventure_run(instance)
+        except Exception as exc:
+            transaction.rollback()
+            logger.exception("按引用码初始化冒险运行时失败，已回滚: %s", game_key)
+            return {
+                "ok": False,
+                "error_code": "ADVENTURE_RUNTIME_INIT_FAILED",
+                "error": f"冒险初始化失败，未留下半成品存档：{exc}",
+            }
     instance.set_scene_image(selected_scene_image)
-    instance.set_map_background(dict(getattr(target_inst, "map_background", {}) or {}))
+    instance.set_map_background(dict(media.map_background(target_inst) or {}))
     transaction.advance(CreationPhase.INSTANCE_CONFIGURED)
     created_players, player_error = await game_creation_phases.create_players(
         dependencies,
@@ -226,7 +274,7 @@ async def create_from_seed(
         "narration": narration,
         "players": created_players,
         "seed_code": seed_code,
-        "round_number": instance.round_number,
+        "round_number": progression_state.round_value(instance),
         "state": instance.state.value,
         "adventure_binding": dict(instance.adventure_binding),
     }

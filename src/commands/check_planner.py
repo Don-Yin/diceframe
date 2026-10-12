@@ -27,6 +27,9 @@ from src.engine.dice import d20_dc_cap
 from src.engine.economy import MAX_ECONOMY_AMOUNT
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text
+from src.engine.modules import (
+    economy_state, narrative_notes, progression_state, ruleset_runtime, table_settings,
+)
 from src.engine.world_events import MAX_ADVANCE_MINUTES
 from src.engine.world_legality import (
     MAX_ROUTE_HOPS,
@@ -120,7 +123,7 @@ def _recent_purchases(instance: GameInstance) -> list[dict[str, Any]]:
     每回合重复弹窗（实际事故：round3 重复报价 round2 已成交的药水）。
     """
     rows: list[dict[str, Any]] = []
-    for proposal in reversed(instance.economy.get("proposals", [])):
+    for proposal in reversed(economy_state.state(instance).get("proposals", [])):
         if len(rows) >= 5:
             break
         if not isinstance(proposal, dict) or str(proposal.get("kind") or "") != "purchase":
@@ -151,7 +154,7 @@ def _companion_roster(instance: GameInstance) -> dict[str, dict[str, Any]]:
     只返回活跃且有 canonical 角色卡的队友；generic planner 不感知规则集差异，
     没有该状态时（CoC 等）自然为空。
     """
-    state = getattr(instance, "ruleset_state", None)
+    state = ruleset_runtime.state(instance)
     party = state.get("party") if isinstance(state, dict) else None
     companions = party.get("companions") if isinstance(party, dict) else None
     if not isinstance(companions, dict):
@@ -349,15 +352,11 @@ def _npc_context(
                 if any(query in name or name in query for name in names)
             }
     else:
-        # 同时提到其他玩家或敌人，也无法仅凭名字判断谁是受话者。
+        # 同时提到其他玩家，也无法仅凭名字判断谁是受话者。
         if any(
             _action_mentions_name(action, name)
             for player_id, player in instance.players.items() if player_id != uid
             for name in (player_id, player.get("character_name"))
-        ) or any(
-            _action_mentions_name(action, name)
-            for enemy in instance.combat_enemies
-            for name in (enemy.get("name"), enemy.get("character_name"))
         ):
             return None
         matches = {
@@ -454,14 +453,14 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
     if dice_system == "d20":
         ruleset["max_check_dc"] = d20_dc_cap(rule)
     payload = {
-        "round": instance.round_number,
-        "scene": str(instance.scene or "")[:500],
+        "round": progression_state.round_value(instance),
+        "scene": str(narrative_notes.scene(instance) or "")[:500],
         "recent_narration": [
             sanitize_narration(str(entry.get("gm_response") or ""))[:1000]
             for entry in instance.log[-2:]
             if entry.get("gm_response")
         ],
-        "difficulty": instance.difficulty,
+        "difficulty": table_settings.difficulty(instance),
         "ruleset": ruleset,
         "players": players,
         # AI 队友作为可选检定主体：模型只负责选"谁执行/什么检定"，
@@ -517,13 +516,6 @@ def _match_opponent(instance: GameInstance, value: object) -> str:
         }
         if query in names:
             return f"npc:{npc_id}"
-    for index, enemy in enumerate(instance.combat_enemies):
-        names = {
-            str(enemy.get("name") or "").strip().casefold(),
-            str(enemy.get("character_name") or "").strip().casefold(),
-        }
-        if query in names:
-            return f"enemy:{index}"
     # 模型常把“考古学系主任”简称为“系主任”。仅在唯一匹配时接受双向包含，
     # 避免同场景有多个主任/守卫时猜错目标。
     if len(query) >= 2:
@@ -730,7 +722,7 @@ def normalize_check_specs(
             target=target if dice_system == "d20" else None,
             modifier=modifier,
             advantage_mode=advantage_mode,
-            baseline_dc=rule.dc_for_difficulty(instance.difficulty, "normal") if rule else None,
+            baseline_dc=rule.dc_for_difficulty(table_settings.difficulty(instance), "normal") if rule else None,
             dc_cap=d20_dc_cap(rule),
             supports_advantage=rule is None or rule.supports_advantage_mode(advantage),
             dc_reason=str(raw.get("dc_reason") or ""),
@@ -838,12 +830,6 @@ def _safety_net_subjects(
         if not isinstance(npc, dict):
             continue
         for value in (npc_id, npc.get("name"), npc.get("character_name")):
-            if str(value or "").strip():
-                foreign.add(str(value).strip())
-    for enemy in getattr(instance, "combat_enemies", None) or []:
-        if not isinstance(enemy, dict):
-            continue
-        for value in (enemy.get("name"), enemy.get("character_name")):
             if str(value or "").strip():
                 foreign.add(str(value).strip())
     # 长名优先，避免「阿」这类短名先命中。
@@ -1213,7 +1199,7 @@ async def plan_round_checks(
             if isinstance(economy, list):
                 raw_economy_actions.extend(economy)
         except Exception:
-            logger.warning("economy_actions 解析失败，已忽略 (round=%d)", instance.round_number, exc_info=True)
+            logger.warning("economy_actions 解析失败，已忽略 (round=%d)", progression_state.round_value(instance), exc_info=True)
         # overreach 与 checks 独立解析：畸形/缺失只影响标注本身，绝不波及检定规划。
         try:
             over = arguments.get("overreach")
@@ -1226,7 +1212,7 @@ async def plan_round_checks(
                     if uid and reason:
                         overreach_notes.append({"player": uid, "reason": reason})
         except Exception:
-            logger.warning("overreach 标注解析失败，已忽略 (round=%d)", instance.round_number, exc_info=True)
+            logger.warning("overreach 标注解析失败，已忽略 (round=%d)", progression_state.round_value(instance), exc_info=True)
         # world_requirements 与 checks/overreach 独立解析：畸形/缺失只影响世界
         # 合法性判定本身，绝不波及检定规划。这里只做形状与花名册校验；「是否真的
         # 与世界真相矛盾」由 server 侧 world_legality 判定。
@@ -1259,7 +1245,7 @@ async def plan_round_checks(
         except Exception:
             logger.warning(
                 "world_requirements 解析失败，已忽略 (round=%d)",
-                instance.round_number, exc_info=True,
+                progression_state.round_value(instance), exc_info=True,
             )
         # world_time_advance 与 checks 独立解析：只报告本轮确实经过的逻辑时间，
         # 由 server 推进世界时钟并结算到期事件。
@@ -1279,7 +1265,7 @@ async def plan_round_checks(
         except Exception:
             logger.warning(
                 "world_time_advance 解析失败，已忽略 (round=%d)",
-                instance.round_number, exc_info=True,
+                progression_state.round_value(instance), exc_info=True,
             )
     planned, errors = normalize_check_specs(instance, rule, raw_checks)
     planned = _merge_safety_net_checks(instance, rule, planned)

@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any
 
+from src.content_modules.refs import ContentRefError
+from src.engine.modules import content_binding, room_access
 from src.engine.player_control import (
     DEFAULT_CONTROL_MODE,
     PlayerControlError,
@@ -13,6 +15,7 @@ from src.engine.player_control import (
     set_control,
 )
 from src.rules.rule_system import RuleSystem
+from src.rulesets.contracts import RulesetRuntime, VersionedStateRuntime
 from src.webui.services._common import _GAME_KEY_SEP
 from src.webui.game_lifecycle_context import (
     CreationTransaction,
@@ -20,6 +23,58 @@ from src.webui.game_lifecycle_context import (
 )
 
 logger = logging.getLogger("trpg")
+
+
+def bind_ruleset_runtime(
+    transaction: CreationTransaction,
+    instance: Any,
+    runtime: RulesetRuntime | None,
+    rule: RuleSystem | None,
+    language: str,
+) -> dict[str, Any] | None:
+    """Bind versioned state before configuration; compensate on failure."""
+
+    if runtime is None or not runtime.capabilities.versioned_state:
+        return None
+    try:
+        if not isinstance(runtime, VersionedStateRuntime):
+            raise ValueError("规则运行时未提供版本化状态绑定")
+        binding = runtime.game_binding(rule, language)
+        # The instance only validates the binding's shape, so prove it names
+        # the runtime that was actually resolved for this rule.
+        if str(binding.get("runtime_id") or "") != runtime.runtime_id:
+            raise ValueError("规则运行时绑定身份不一致")
+        if not instance.bind_ruleset_runtime(binding):
+            raise ValueError("规则运行时绑定无效或不兼容")
+    except Exception:
+        transaction.rollback()
+        logger.exception("创建游戏规则运行时绑定失败，已回滚: %s", transaction.game_key)
+        return {
+            "ok": False,
+            "error_code": "RULESET_BINDING_FAILED",
+            "error": "规则运行时绑定失败，未留下半成品存档。",
+        }
+    return None
+
+
+def bind_content_refs(
+    transaction: CreationTransaction,
+    instance: Any,
+    world_ref: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Persist the source-aware World ref; compensate on failure.
+
+    Shared by normal and seed creation so both persist the same binding
+    semantics.  ``world_ref`` keeps the caller's source identity and digest.
+    Adventure identity is owned by ``GameInstance.adventure_binding`` alone.
+    """
+
+    try:
+        content_binding.set_world_ref(instance, world_ref)
+    except ContentRefError as exc:
+        transaction.rollback()
+        return {"ok": False, "error_code": "INVALID_WORLD_REF", "error": str(exc)}
+    return None
 
 
 def materialize_world(
@@ -123,15 +178,37 @@ def copy_lorebook_entries(
     world_id: str,
     world_name: str,
     language: str,
-) -> None:
-    """Copy a requested external lorebook into the new world's namespace."""
+    game_key: tuple[str, ...] | None = None,
+    canonical: bool = False,
+) -> str | None:
+    """Bind a requested external Book to the new game; legacy stores still copy."""
 
     lorebook = dependencies.lorebook
     if not source_world_id or source_world_id == world_id or lorebook is None:
-        return
+        return None
+    bind_lorebook = getattr(lorebook, "bind_lorebook", None)
+    if callable(bind_lorebook) and game_key and canonical:
+        source_book_id = (
+            lorebook.primary_world_book_id(source_world_id)
+            if hasattr(lorebook, "primary_world_book_id")
+            else f"world:{source_world_id}"
+        )
+        if not lorebook.get_lorebook(source_book_id):
+            return None
+        scope_id = _GAME_KEY_SEP.join(str(part) for part in game_key)
+        binding_id = f"binding:game:{scope_id}:lorebook:{source_book_id}"
+        bind_lorebook({
+            "id": binding_id,
+            "book_id": source_book_id,
+            "scope_kind": "game",
+            "scope_id": scope_id,
+            "role": "runtime",
+            "order": 110,
+        })
+        return binding_id
     entries = lorebook.list_entries(source_world_id)
     if not entries:
-        return
+        return None
     if not lorebook.get_world(world_id):
         source_world = lorebook.get_world(source_world_id) or {}
         lorebook.create_world(
@@ -149,6 +226,7 @@ def copy_lorebook_entries(
             continue
         lorebook.add_entry(copied)
     dependencies.refresh_lorebook_index(world_id)
+    return None
 
 
 async def create_players(
@@ -215,6 +293,11 @@ async def create_players(
                     "error_code": "INVALID_PLAYER_CONTROL",
                     "error": str(exc),
                 }
+        if index == 0:
+            # The first created seat becomes the GM seat (configure_session);
+            # the GM seat never holds a share credential.
+            room_access.revoke_seat_token(instance, uid)
+            created.pop("seat_token", None)
         # 每张卡都回填控制记录（含默认 human），前端不必再猜自己拿到的是什么。
         created["control"] = get_control(instance, uid)
         created_players.append(created)

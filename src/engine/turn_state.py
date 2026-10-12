@@ -29,9 +29,11 @@ from typing import TYPE_CHECKING, Any
 from src.engine.contracts import ActionRecord
 from src.engine import progression
 from src.engine.game_state import GameState
+from src.engine.modules import progression_state, room_access, table_settings
 from src.engine.player_control import (
     ai_controlled_players,
     away_control_policy,
+    get_control,
     unclaimed_players,
 )
 from src.engine.round_snapshots import snapshot_players
@@ -94,10 +96,10 @@ def multiplayer_status(instance: GameInstance) -> dict:
 
     return {
         "state": instance.state.value,
-        "round_number": instance.round_number,
-        "solo_mode": instance.solo_mode,
+        "round_number": progression_state.round_value(instance),
+        "solo_mode": table_settings.solo_mode(instance),
         "player_count": len(instance.players),
-        "max_players": instance.max_players,
+        "max_players": room_access.max_players(instance),
         "ready_count": len(ready),
         "alive_count": len(alive),
         "active_count": len(active),
@@ -143,7 +145,7 @@ def multiplayer_status(instance: GameInstance) -> dict:
         ],
         "pending_action_count": len(instance.pending_actions),
         "gm_uid": instance.gm_uid,
-        "player_access_open": instance.player_access_open,
+        "player_access_open": room_access.player_access_open(instance),
         "away_control_policy": away_control_policy(instance),
     }
 
@@ -152,7 +154,7 @@ def should_advance(instance: GameInstance) -> bool:
     """任一满足即推进：所有存活玩家已就绪，或单人模式下任一玩家已行动。"""
     if instance.has_pending_dice():
         return False
-    if instance.solo_mode and instance.action_queue:
+    if table_settings.solo_mode(instance) and instance.action_queue:
         return True
     return instance.all_alive_ready()
 
@@ -241,14 +243,20 @@ def add_action_locked(
     单独抽出来是为了让需要「先复核再写入」的调用方能在**同一个** boundary
     内完成两件事：自己在锁内复核，再调用这里追加，而不是写两层加锁。
     """
-    from src.engine.modules import session_stats
+    from src.engine.modules import seat_activity, session_stats
 
     session_stats.require_writable(instance)
+    seat_activity.require_writable(instance)
     if user_id in instance.players:
         cs = instance.get_character_sheet(user_id)
         if cs.get("deceased"):
             return False  # 死亡玩家不能行动
         instance.away_players.discard(user_id)
+        # 真人控制（或玩家暂离、AI 临时托管）的席位声明行动（入队或延后到下一轮）
+        # 即视为已行动：之后只有 GM 能为它套用角色卡或删除它（见 seat_activity）。
+        # 永久交给 AI / 未认领的席位不算，玩家认领后仍可换成自己的卡。
+        if seat_activity.plays_for_its_player(get_control(instance, user_id)):
+            seat_activity.mark_acted(instance, user_id)
     action_entry: ActionRecord = {
         "user_id": user_id, "text": action_text,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -315,7 +323,7 @@ def start_round_locked(instance: GameInstance) -> None:
     checks.require_writable(instance)
     round_safety.require_writable(instance)
     progression.open_next_round(instance)
-    current = str(instance.round_number)
+    current = str(progression_state.round_value(instance))
     round_safety.keep_death_saves_for(instance, current)
     instance.state = GameState.ACTIVE_ACTION
     checks.invalidate_prepared(instance)
@@ -326,7 +334,7 @@ def start_round_locked(instance: GameInstance) -> None:
         instance.action_queue.extend(instance.pending_actions)
         instance.pending_actions.clear()
     session_stats.touch(instance)
-    logger.info("Round %d 开始 - game_key=%s", instance.round_number, instance.game_key)
+    logger.info("Round %d 开始 - game_key=%s", progression_state.round_value(instance), instance.game_key)
 
 
 def apply_action_roll_locked(
@@ -392,11 +400,11 @@ def do_advance_locked(instance: GameInstance) -> bool:
     """在锁内执行推进（调用方需持锁）。"""
     if instance.state != GameState.ACTIVE_ACTION:
         return False
-    from src.engine.modules import checks, legacy_combat, round_safety, ruleset_runtime
+    from src.engine.modules import adventure_runtime_state, checks, round_safety, ruleset_runtime
 
     checks.require_writable(instance)
     round_safety.require_writable(instance)
-    legacy_combat.require_writable(instance)
+    adventure_runtime_state.require_writable(instance)
     ruleset_runtime.require_writable(instance)
     for uid in instance.alive_players:
         instance.ready_players.add(uid)

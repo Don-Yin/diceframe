@@ -311,7 +311,9 @@ def apply_ops_to_state(
 
 
 def _source_round(instance: Any, source_round: int | None) -> int:
-    value = source_round if source_round is not None else getattr(instance, "round_number", 0)
+    from src.engine import progression
+
+    value = source_round if source_round is not None else progression.current_round(instance)
     return _source_round_value(value)
 
 

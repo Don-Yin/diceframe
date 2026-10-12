@@ -17,6 +17,7 @@ from src.engine.character_utils import (
     initial_special_stat_value,
     make_default_character,
     normalize_character_sheet,
+    set_hp,
 )
 from src.compat.characters import MAX_SKILL_EFFECT_CHARS
 from src.content.worlds import localize_lorebook_entries
@@ -38,11 +39,20 @@ from src.engine.memory_outbox import (
     queue_memory_delivery,
 )
 from src.engine.game_instance import GameInstance
+from src.engine.modules import progression_state, room_access, ruleset_runtime, seat_activity, table_settings
 from src.engine.player_control import claim_seat, is_human_controlled
+from src.content_modules.projection import ContentProjectionService
 from src.commands.economy_effects import pending_decision_notice
 from src.commands.state_items import grant_classified_item
 from src.rulesets.contracts import GameDetailProjectionRuntime, PlayerJoinRuntime
 from src.webui.character_contracts import MAX_BIO_CHARS
+from src.webui.character_sheet_authority import (
+    EDITABLE_SHEET_FIELDS,
+    adopt_requires_gm_failure,
+    delete_requires_gm_failure,
+    field_requires_gm_failure,
+    player_field_violations,
+)
 
 if TYPE_CHECKING:
     from src.rulesets.registry import RulesetRuntimeRegistry
@@ -101,7 +111,7 @@ def _record_economy_outcome_in_round(
     if (
         str(outcome.get("visibility") or "private") != "party"
         and not is_purchase
-        and not bool(getattr(instance, "solo_mode", False))
+        and not bool(table_settings.solo_mode(instance))
     ):
         recipients = {
             str(outcome.get("payer_uid") or ""),
@@ -175,6 +185,7 @@ class CharacterAssetDependencies:
     load_world_template: Callable[[str, str], dict[str, Any] | None]
     avatar_file: Callable[[str], Path | None]
     generated_image_file: Callable[[str], Path | None]
+    content_projection: ContentProjectionService | None = None
 
 
 @dataclass(frozen=True)
@@ -485,7 +496,11 @@ def list_characters(
     )
     if not inst:
         return {"players": [], "npcs": [], "rule_attrs": []}
-    players = [{"user_id": uid, **p} for uid, p in inst.players.items()]
+    players = [
+        # ``has_acted``: after its first action a seat's card / deletion is GM-only.
+        {"user_id": uid, **p, "has_acted": seat_activity.has_acted(inst, uid)}
+        for uid, p in inst.players.items()
+    ]
     rule_attrs = _get_rule_attrs_for_game(dependencies, inst)
     rule = dependencies.rules.load_rule_for_game(inst)
     for player in players:
@@ -498,7 +513,12 @@ def list_characters(
             name = npc.get("character_name") or npc.get("name") or nid
             npcs_by_name[name] = {"npc_id": nid, **npc, "name": name}
         if dependencies.assets.lorebook and inst.world_id:
-            entries = dependencies.assets.lorebook.list_entries(inst.world_id, "npc")
+            if dependencies.assets.content_projection is not None:
+                entries = dependencies.assets.content_projection.for_game(
+                    inst, viewer_kind="gm", entry_type="npc",
+                )
+            else:
+                entries = dependencies.assets.lorebook.list_entries(inst.world_id, "npc")
             world_data = dependencies.assets.load_world_template(
                 inst.world_id,
                 str(getattr(inst, "language", "") or ""),
@@ -629,7 +649,15 @@ async def update_character(
     game_key: str,
     user_id: str,
     updates: dict,
+    *,
+    gm_authority: bool = False,
 ) -> dict[str, Any]:
+    """Patch a classic character sheet.
+
+    ``gm_authority`` is the caller's right to change mechanics (the table GM
+    or the owner acting as itself).  Without it only profile fields and a
+    level-up point allocation are accepted (see ``character_sheet_authority``).
+    """
     inst = dependencies.games.get_instance(
         dependencies.games.parse_game_key(game_key),
     )
@@ -644,8 +672,74 @@ async def update_character(
         if dependencies.games.get_instance(inst.game_key) is not inst:
             return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
         return await _update_character_authority(
-            dependencies, inst, user_id, updates,
+            dependencies, inst, user_id, updates, gm_authority=gm_authority,
         )
+
+
+async def adopt_library_card(
+    dependencies: CharacterDependencies,
+    game_key: str,
+    user_id: str,
+    card: dict[str, Any],
+    *,
+    gm_authority: bool,
+) -> dict[str, Any]:
+    """Replace a classic character from a server-owned library card.
+
+    The card comes from the library, not from the request, so it is applied
+    with full sheet authority.  Who may adopt is still the caller's
+    ``gm_authority``: once the seat has acted (``seat_activity``) a
+    player-side caller may not swap its sheet (a free refill / re-roll); only
+    the GM may.  Before that -- a fresh seat, or one just claimed from the GM
+    or the AI -- the player may still switch to a card.  The check runs inside
+    the authoritative write so it cannot race the seat's first action.
+    A rules-aware game answers ``RULESET_CHARACTER_OPERATION_REQUIRED`` and
+    the caller uses the ruleset adoption instead.
+    """
+    inst = dependencies.games.get_instance(
+        dependencies.games.parse_game_key(game_key),
+    )
+    if not inst:
+        return {"ok": False, "error": "角色不存在"}
+    instance: GameInstance = inst
+    async with instance.authoritative_write() as write_entered:
+        if not write_entered:
+            return {
+                "ok": False, "error_code": "REWRITE_IN_PROGRESS",
+                "error": "GM 正在重写历史回合，请等待完成后重试",
+            }
+        player_side_after_acting = (
+            not gm_authority
+            and user_id in instance.players
+            and not _is_rules_aware_game(dependencies, instance)
+            and seat_activity.has_acted(instance, user_id)
+        )
+        if dependencies.games.get_instance(instance.game_key) is not instance:
+            return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
+        if player_side_after_acting:
+            return adopt_requires_gm_failure()
+        return await _update_character_authority(
+            dependencies, instance, user_id, deepcopy(card), gm_authority=True,
+        )
+
+
+def _is_rules_aware_game(dependencies: CharacterDependencies, inst: GameInstance) -> bool:
+    rule = dependencies.rules.load_rule_for_game(inst)
+    if rule is None:
+        return False
+    runtime = dependencies.rules.ruleset_registry.resolve(rule.template)
+    return getattr(runtime.capabilities, "character_lifecycle", "legacy") == "rules_aware"
+
+
+def _special_stat_fields(dependencies: CharacterDependencies, inst: GameInstance) -> set[str]:
+    """Rule-defined special stats (sanity, luck...) and their maxima."""
+    rule = dependencies.rules.load_rule_for_game(inst)
+    fields: set[str] = set()
+    for stat in getattr(rule, "special_stats", None) or []:
+        key = str(stat.get("key") or "") if isinstance(stat, dict) else ""
+        if key:
+            fields.update({key, f"max_{key}"})
+    return fields
 
 
 async def _update_character_authority(
@@ -653,20 +747,31 @@ async def _update_character_authority(
     instance: GameInstance,
     user_id: str,
     updates: dict,
+    *,
+    gm_authority: bool = False,
 ) -> dict[str, Any]:
     inst = instance
     if not inst or user_id not in inst.players:
         return {"ok": False, "error": "角色不存在"}
-    rule = dependencies.rules.load_rule_for_game(inst)
-    if rule is not None:
-        runtime = dependencies.rules.ruleset_registry.resolve(rule.template)
-        if getattr(runtime.capabilities, "character_lifecycle", "legacy") == "rules_aware":
-            return {
-                "ok": False,
-                "error_code": "RULESET_CHARACTER_OPERATION_REQUIRED",
-                "error": "专业规则角色不能使用旧版通用编辑接口",
-            }
-    updates = dict(updates)
+    if _is_rules_aware_game(dependencies, inst):
+        return {
+            "ok": False,
+            "error_code": "RULESET_CHARACTER_OPERATION_REQUIRED",
+            "error": "专业规则角色不能使用旧版通用编辑接口",
+        }
+    # Only player-editable sheet fields; anything else (card metadata, plugin
+    # provenance, server-owned state) is dropped instead of mass-assigned.
+    updates = {
+        key: value for key, value in dict(updates).items()
+        if key in EDITABLE_SHEET_FIELDS or key in _special_stat_fields(dependencies, inst)
+    }
+    if not gm_authority:
+        denied = player_field_violations(
+            inst.get_character_sheet(user_id), updates,
+            rule_attrs=_get_rule_attrs_for_game(dependencies, inst),
+        )
+        if denied:
+            return field_requires_gm_failure(denied)
     character_name = str(updates.pop("character_name", "")).strip()
     if character_name:
         inst.set_player_name(user_id, character_name)
@@ -719,23 +824,40 @@ async def _update_character_authority(
     # 属性变化后可按规则补算 HP；若用户明确手填 HP，则尊重手填值。
     new_attrs = updates.get("attributes")
     if isinstance(new_attrs, dict) and not explicit_hp_update:
-        try:
-            base_hp = (
-                rule.calculate_hp(new_attrs, cs.get("class", ""))
+        def formula_hp(attributes: dict) -> int:
+            return int(
+                rule.calculate_hp(attributes, cs.get("class", ""))
                 if rule
                 else calc_hp_from_rule(
-                    new_attrs,
+                    attributes,
                     rules_dir=dependencies.rules.rules_dir,
                     language=getattr(inst, "language", ""),
                 )
             )
-            lv_bonus = max(0, (cs.get("level", 1) - 1) * 5)
-            new_hp = base_hp + lv_bonus
-            curr_hp_ratio = cs.get("hp", 1) / max(1, cs.get("max_hp", 1))
-            cs["max_hp"] = new_hp
-            cs["hp"] = max(1, round(new_hp * curr_hp_ratio))
-            logger.info("HP 重算: con=%s HP=%d->%d",
-                new_attrs.get("con", "?"), cs.get("max_hp", 0), new_hp)
+
+        try:
+            current_hp = int(cs.get("hp", 0) or 0)
+            if gm_authority:
+                # GM editor: rebuild max HP from the rule formula and keep the
+                # HP ratio.  A downed character (HP <= 0) stays down.
+                lv_bonus = max(0, (cs.get("level", 1) - 1) * 5)
+                new_max = formula_hp(new_attrs) + lv_bonus
+                ratio = current_hp / max(1, int(cs.get("max_hp", 1) or 1))
+                new_current = max(1, round(new_max * ratio)) if current_hp > 0 else 0
+            else:
+                # Player level-up spend: apply only the formula delta the
+                # attribute change causes, so a GM-adjusted max HP survives
+                # and nothing is healed by rounding.  A downed character
+                # (HP <= 0) stays down.
+                old_formula = (
+                    formula_hp(old_attrs) if isinstance(old_attrs, dict) and old_attrs else None
+                )
+                delta = formula_hp(new_attrs) - old_formula if old_formula is not None else 0
+                new_max = max(0, int(cs.get("max_hp", 0) or 0) + delta)
+                new_current = max(1, current_hp + delta) if current_hp > 0 else 0
+            set_hp(cs, new_current, new_max)
+            logger.info("HP 重算: con=%s max_hp=%d hp=%d",
+                new_attrs.get("con", "?"), new_max, cs.get("hp", 0))
         except Exception as exc:
             logger.warning("属性变化后 HP 重算失败: %s", exc)
     normalize_character_sheet(cs, rule)
@@ -818,8 +940,17 @@ async def _update_npc_portrait_authority(
                 npc_key, npc = key, candidate
                 break
     if npc is None and dependencies.assets.lorebook and inst.world_id:
-        entry = dependencies.assets.lorebook.get_entry(npc_key)
-        if entry and entry.get("world_id") == inst.world_id and entry.get("type") == "npc":
+        if dependencies.assets.content_projection is not None:
+            entries = dependencies.assets.content_projection.for_game(
+                inst, viewer_kind="gm", entry_type="npc",
+            )
+            entry = next(
+                (candidate for candidate in entries if str(candidate.get("id") or "") == npc_key),
+                None,
+            )
+        else:
+            entry = dependencies.assets.lorebook.get_entry(npc_key)
+        if entry and ("world_id" not in entry or entry.get("world_id") == inst.world_id) and entry.get("type") == "npc":
             world_data = dependencies.assets.load_world_template(
                 inst.world_id,
                 str(getattr(inst, "language", "") or ""),
@@ -931,7 +1062,7 @@ async def resolve_payment(
                     staged,
                     effect_group_id=str(effect_group.get("id") or ""),
                     memory_delta=memory_delta,
-                    round_number=int(effect_group.get("round", staged.round_number) or 0),
+                    round_number=int(effect_group.get("round", progression_state.round_value(staged)) or 0),
                 )
             result["effects_committed"] = complete_effect_group(
                 staged, str(effect_group.get("id") or ""),
@@ -1052,7 +1183,7 @@ async def _deliver_memory_outbox_locked(
                     instance.memory_namespace,
                     str(delivery.get("id") or ""),
                     dict(delivery.get("payload") or {}),
-                    int(delivery.get("round", instance.round_number) or 0),
+                    int(delivery.get("round", progression_state.round_value(instance)) or 0),
                 )
             except Exception:
                 logger.exception(
@@ -1091,7 +1222,11 @@ async def delete_character(
     dependencies: CharacterDependencies,
     game_key: str,
     user_id: str,
+    *,
+    gm_authority: bool,
 ) -> dict[str, Any]:
+    """Remove a seat.  Once it has acted only the GM may (no delete-and-rejoin
+    reset); checked inside the authoritative write."""
     inst = dependencies.games.get_instance(
         dependencies.games.parse_game_key(game_key),
     )
@@ -1103,9 +1238,16 @@ async def delete_character(
                 "ok": False, "error_code": "REWRITE_IN_PROGRESS",
                 "error": "GM 正在重写历史回合，请等待完成后重试",
             }
+        player_side_after_acting = (
+            not gm_authority
+            and user_id in inst.players
+            and seat_activity.has_acted(inst, user_id)
+        )
         current = dependencies.games.get_instance(inst.game_key)
         if current is not inst:
             return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
+        if player_side_after_acting:
+            return delete_requires_gm_failure()
         return await _delete_character_authority(dependencies, inst, user_id)
 
 
@@ -1133,6 +1275,7 @@ async def _delete_character_authority(
 async def create_player(
     dependencies: CharacterDependencies, game_key: str, character: dict,
     force_uid: str = "", assign_new_id: bool = False,
+    *, seat_token_uid: str = "", require_seat_proof: bool = False,
 ) -> dict[str, Any]:
     inst = dependencies.games.get_instance(
         dependencies.games.parse_game_key(game_key),
@@ -1155,6 +1298,7 @@ async def create_player(
         async with state_lock:
             return await _create_player_authority(
                 dependencies, inst, character, force_uid, assign_new_id,
+                seat_token_uid=seat_token_uid, require_seat_proof=require_seat_proof,
             )
 
 
@@ -1176,9 +1320,35 @@ def _record_seat_claim(inst: GameInstance, uid: str) -> bool:
     return True
 
 
+def _seat_proof_missing(inst: GameInstance, uid: str, seat_token_uid: str, *, named: bool) -> bool:
+    """Re-joining an existing seat needs that seat's token.
+
+    Naming another seat's uid is never proof.  A session already bound to a
+    seat may rejoin it only while the seat has no credential yet (the
+    pre-token migration); once a credential exists only the token speaks.
+    """
+    if seat_token_uid == uid:
+        return False
+    return named or room_access.has_seat_token(inst, uid)
+
+
+_SEAT_PROOF_REQUIRED = {
+    "ok": False,
+    "error_code": "SEAT_TOKEN_REQUIRED",
+    "error": "加入已有席位需要该席位的链接",
+}
+
+
 async def _create_player_authority(dependencies: CharacterDependencies, inst: GameInstance, character: dict,
-                       force_uid: str = "", assign_new_id: bool = False) -> dict[str, Any]:
+                       force_uid: str = "", assign_new_id: bool = False,
+                       *, seat_token_uid: str = "", require_seat_proof: bool = False) -> dict[str, Any]:
     requested_uid = str(character.get("user_id") or "").strip()
+    if (
+        require_seat_proof
+        and requested_uid in inst.players
+        and _seat_proof_missing(inst, requested_uid, seat_token_uid, named=True)
+    ):
+        return dict(_SEAT_PROOF_REQUIRED)
     if requested_uid and requested_uid in inst.players:
         # 已有席位被重新加入：按控制权权威记录这次认领（已经是真人则是普通重连）。
         if _record_seat_claim(inst, requested_uid):
@@ -1193,6 +1363,12 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
     if assign_new_id:
         uid = "player_" + str(time.time_ns())[-12:]
     elif force_uid:
+        if (
+            require_seat_proof
+            and force_uid in inst.players
+            and _seat_proof_missing(inst, force_uid, seat_token_uid, named=False)
+        ):
+            return dict(_SEAT_PROOF_REQUIRED)
         if force_uid in inst.players:
             # 同上：session 身份命中的是已有席位，而不是新建席位。
             if _record_seat_claim(inst, force_uid):
@@ -1205,7 +1381,10 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
         uid = requested_uid
     else:
         uid = "player_" + str(time.time_ns())[-12:]
-    max_players = max(1, int(getattr(inst, "max_players", 6) or 6))
+    # A new seat is issued its token in the same write, so the slot must be
+    # writable before anything changes.
+    room_access.require_writable(inst)
+    max_players = max(1, int(room_access.max_players(inst) or 6))
     if uid not in inst.players and len(inst.players) >= max_players:
         return {
             "ok": False,
@@ -1232,7 +1411,14 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
                 }
             canonical = character.get("ruleset_character")
             binding = canonical.get("rule_binding") if isinstance(canonical, dict) else None
-            if not isinstance(binding, dict) or not inst.bind_ruleset_runtime(binding):
+            # 绑定由游戏在创建时决定；加入的角色只能匹配，不能反向建立绑定。
+            if not ruleset_runtime.binding(inst):
+                return {
+                    "ok": False,
+                    "error_code": "RULESET_BINDING_MISSING",
+                    "error": "这个存档没有绑定专业规则版本（旧版存档），无法加入专业角色，请新建一局游戏。",
+                }
+            if not isinstance(binding, dict) or not inst.ruleset_binding_matches(binding):
                 return {
                     "ok": False,
                     "error_code": "INCOMPATIBLE_RULESET_CHARACTER",
@@ -1322,6 +1508,10 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
             # combat actor if the optional live-state hook rejects the join.
             inst.players.pop(uid, None)
             raise
+    # The new seat's share credential; the plaintext leaves only in this
+    # response.  A GM-created seat's token lets the GM hand out its link.
+    # The GM seat itself never holds one (e.g. the GM recreating its character).
+    seat_token = "" if uid == str(inst.gm_uid or "") else room_access.issue_seat_token(inst, uid)
     dependencies.save_character_card({
         **player,
         "rule_id": rule_id,
@@ -1331,4 +1521,7 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
         "language": getattr(inst, "language", ""),
     })
     await dependencies.games.save_instance(inst)
-    return {"ok": True, "user_id": uid, "character_name": player["character_name"]}
+    created: dict[str, Any] = {"ok": True, "user_id": uid, "character_name": player["character_name"]}
+    if seat_token:
+        created["seat_token"] = seat_token
+    return created

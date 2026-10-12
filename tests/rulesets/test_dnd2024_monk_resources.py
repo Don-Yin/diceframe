@@ -25,6 +25,7 @@ from dnd2024_monk_common import (
     monk_sheet,
     start_combat,
 )
+from src.engine.modules import ruleset_runtime
 
 
 def _character(runtime: Dnd2024Runtime, level: int = 2) -> dict:
@@ -63,7 +64,7 @@ def test_focus_never_goes_below_zero() -> None:
         SequenceRng([15, 4, 15, 4]),
     )["event_batch"])
     assert focus_state(instance)["current"] == 1
-    instance.ruleset_state["combat"]["economy"]["bonus_action"] = 1
+    ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] = 1
     engine.apply_batch(instance, engine.resolve_intent(
         instance,
         capability_intent(
@@ -73,7 +74,7 @@ def test_focus_never_goes_below_zero() -> None:
     )["event_batch"])
     assert focus_state(instance)["current"] == 0
 
-    instance.ruleset_state["combat"]["economy"]["bonus_action"] = 1
+    ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] = 1
     rejected = engine.validate_intent(
         instance, capability_intent(engine, instance, "flurry_of_blows", intent_id="f-2"),
     )
@@ -99,7 +100,7 @@ def test_client_cannot_forge_focus() -> None:
     assert focus_state(instance) == {
         "current": 1, "maximum": 2, "source_ref": "srd-5.2.1:p50:monks-focus",
     }
-    assert instance.ruleset_state["combat"]["economy"]["bonus_action"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 0
 
 
 def test_advancement_preserves_a_legal_focus_current_without_refilling() -> None:

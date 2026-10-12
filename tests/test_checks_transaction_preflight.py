@@ -12,6 +12,7 @@ from src.engine.game_instance import GameRegistry, GameState
 from src.engine.module_state import ModuleStateError
 from src.engine.modules import checks
 from src.webui.services.manual_rolls import ManualRollDependencies, ManualRollService
+from src.engine.modules import combat_extension_state
 from tests.test_game_instance_reset_characterization import _make_populated_instance
 
 
@@ -62,7 +63,7 @@ def test_preflight_rejects_unknown_schema_without_mutation(schema):
 @pytest.mark.asyncio
 async def test_transaction_rejection_preserves_all_live_state(operation, direct):
     instance = unsupported_instance()
-    instance.combat_extension["pending_summaries"] = ["must remain pending"]
+    combat_extension_state.current(instance)["pending_summaries"] = ["must remain pending"]
     args = ("new narration",) if operation == "finish_judgment" else ()
     before = deepcopy(live_state(instance))
     with pytest.raises(ModuleStateError, match="unsupported checks module schema"):
@@ -130,14 +131,14 @@ def test_ruleset_restore_preflights_check_snapshot_keys_before_other_restoration
 @pytest.mark.asyncio
 async def test_manual_roll_rejection_preserves_requests_and_status(operation, attribute_double):
     instance = _make_populated_instance()
-    instance.manual_roll_requests.clear()
+    checks.manual_roll_requests(instance).clear()
     if attribute_double:
-        # Existing callers also use attribute-based doubles. Here getters
-        # cannot reject early, so these cases exercise service preflight itself.
+        # Non-aggregate doubles carry only module state; the service reads the
+        # checks slot directly, so rejection must not depend on GameInstance.
         instance = SimpleNamespace(
-            modules={}, manual_roll_requests=[], gm_uid=instance.gm_uid,
+            modules={}, gm_uid=instance.gm_uid,
             game_key=instance.game_key, run_id=instance.run_id,
-            round_number=instance.round_number, players=instance.players, last_activity="",
+            round_number=instance.round_number, players=instance.players,
         )
     save = AsyncMock()
     service = ManualRollService(ManualRollDependencies(
@@ -178,8 +179,8 @@ async def test_luck_rejection_preserves_resources_checks_and_timers(operation):
         "threshold": 50, "verdict": "失败", "luck_decision": "pending",
         "luck_spend_available": True,
     }
-    instance.last_checks = [check]
-    instance.last_check = dict(check)
+    checks.replace_last_checks(instance, [check])
+    checks.replace_last_check(instance, dict(check))
     # Retain the data inside the unsupported slot to detect accidental writes.
     instance.modules["checks"]["schema_version"] = 99
     timer = Mock()

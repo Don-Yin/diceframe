@@ -7,20 +7,33 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import combat_extension_state as combat
+from src.engine.modules import combat_extension_state as combat, table_settings
+from src.engine.modules import economy_state
 from src.migrations.instance import (
     CURRENT_INSTANCE_SCHEMA_VERSION,
     _migrate_v19_to_v20,
     migrate_game_state_payload,
 )
+from src.engine.modules import checks
+from src.engine.modules import adventure_runtime_state
+from src.engine.modules import lorebook_runtime
+from src.engine.modules import player_control_state
+from src.engine.modules import round_safety
+from src.engine.player_control import set_away_control_policy
 
 
 ATTRS = [
     ("combat_extension", "current"),
     ("combat_extension_round_snapshots", "round_snapshots"),
 ]
+# Module accessors per slot child: (read, replace).
+ACCESS = {
+    "current": (combat.current, combat.replace_current),
+    "round_snapshots": (combat.round_snapshots, combat.replace_round_snapshots),
+}
 
 
 def make_instance():
@@ -28,10 +41,10 @@ def make_instance():
 
 
 def populate(instance):
-    instance.combat_extension = {"schema_version": 1, "opaque": {"values": [1]}}
-    instance.combat_extension_round_snapshots = {
+    combat.replace_current(instance, {"schema_version": 1, "opaque": {"values": [1]}})
+    combat.replace_round_snapshots(instance, {
         "2": {"schema_version": 1, "combat_extension": {"opaque": [2]}, "entity_fields": {}},
-    }
+    })
 
 
 def malformed_snapshot():
@@ -54,48 +67,58 @@ def test_fresh_slots_and_instances_have_independent_mutable_children():
     assert not {name for name, _ in ATTRS}.intersection(field.name for field in fields(GameInstance))
 
 
-@pytest.mark.parametrize(("attribute", "child"), ATTRS)
+def test_deleted_combat_facades_are_not_game_instance_attributes():
+    instance = make_instance()
+    for name, _ in ATTRS:
+        assert not hasattr(GameInstance, name)
+        assert not hasattr(instance, name)
+
+
+@pytest.mark.parametrize("child", list(ACCESS))
 @pytest.mark.parametrize("value", [{}, {"opaque": {"items": [1]}}])
-def test_properties_retain_assigned_dict_identity_and_detach_old_value(attribute, child, value):
+def test_replace_api_retains_assigned_dict_identity_and_detach_old_value(child, value):
+    read, replace = ACCESS[child]
     instance = make_instance()
     slot = instance.modules[combat.MODULE_NAME]
     slot["extra"] = {"keep": True}
     sibling_key = "round_snapshots" if child == "current" else "current"
     sibling = slot[sibling_key]
-    old = getattr(instance, attribute)
+    old = read(instance)
     old["old"] = True
     assigned = deepcopy(value)
-    setattr(instance, attribute, assigned)
-    assert getattr(instance, attribute) is assigned is slot[child]
+    replace(instance, assigned)
+    assert read(instance) is assigned is slot[child]
     assert old == {"old": True}
     assigned.setdefault("opaque", {"items": []})["items"].append(2)
-    assert getattr(instance, attribute)["opaque"]["items"][-1] == 2
+    assert read(instance)["opaque"]["items"][-1] == 2
     assert slot[sibling_key] is sibling
     assert slot["extra"] == {"keep": True}
 
 
-@pytest.mark.parametrize(("attribute", "child"), ATTRS)
-def test_dict_subclass_assignment_keeps_identity(attribute, child):
+@pytest.mark.parametrize("child", list(ACCESS))
+def test_dict_subclass_assignment_keeps_identity(child):
     class Payload(dict):
         pass
 
+    read, replace = ACCESS[child]
     instance = make_instance()
     assigned = Payload()
-    setattr(instance, attribute, assigned)
-    assert getattr(instance, attribute) is assigned
+    replace(instance, assigned)
+    assert read(instance) is assigned
     assert instance.modules[combat.MODULE_NAME][child] is assigned
 
 
-@pytest.mark.parametrize(("attribute", "child"), ATTRS)
+@pytest.mark.parametrize("child", list(ACCESS))
 @pytest.mark.parametrize("value", [None, [], "bad", 0])
-def test_non_dict_assignment_repairs_only_the_assigned_container(attribute, child, value):
+def test_non_dict_assignment_repairs_only_the_assigned_container(child, value):
+    read, replace = ACCESS[child]
     instance = make_instance()
     populate(instance)
     slot = instance.modules[combat.MODULE_NAME]
     sibling_key = "round_snapshots" if child == "current" else "current"
     sibling = slot[sibling_key]
-    setattr(instance, attribute, value)
-    assert getattr(instance, attribute) == {}
+    replace(instance, value)
+    assert read(instance) == {}
     assert slot[sibling_key] is sibling
 
 
@@ -131,8 +154,8 @@ def test_legacy_corrupt_containers_load_empty(modules, legacy):
     payload.update(instance_schema_version=19, modules=modules,
                    combat_extension=legacy, combat_extension_round_snapshots=legacy)
     recovered = GameInstance.from_dict(payload)
-    assert recovered.combat_extension == {}
-    assert recovered.combat_extension_round_snapshots == {}
+    assert combat.current(recovered) == {}
+    assert combat.round_snapshots(recovered) == {}
 
 
 @pytest.mark.parametrize("slot", [
@@ -155,11 +178,11 @@ def test_full_prior_migration_chain_loads_combat(version):
                    combat_extension={"opaque": [1]}, combat_extension_round_snapshots={2: {"opaque": [3]}})
     restored = GameInstance.from_dict(payload)
     assert restored.instance_schema_version == CURRENT_INSTANCE_SCHEMA_VERSION
-    assert restored.combat_extension == {"opaque": [1]}
-    assert restored.combat_extension_round_snapshots == {"2": {"opaque": [3]}}
-    assert restored.away_control_policy == "pause"
-    assert restored.economy["run_id"] == restored.run_id
-    assert restored.lorebook_timed_state == {}
+    assert combat.current(restored) == {"opaque": [1]}
+    assert combat.round_snapshots(restored) == {"2": {"opaque": [3]}}
+    assert player_control_state.away_control_policy(restored) == "pause"
+    assert economy_state.state(restored)["run_id"] == restored.run_id
+    assert lorebook_runtime.timers(restored) == {}
 
 
 def test_future_instance_schema_rejected():
@@ -195,7 +218,7 @@ def test_current_schema_is_opaque_and_never_uses_stale_legacy_fallback():
     assert restored.modules[combat.MODULE_NAME] == slot
     payload["modules"].pop(combat.MODULE_NAME)
     restored = GameInstance.from_dict(payload)
-    assert restored.combat_extension == restored.combat_extension_round_snapshots == {}
+    assert combat.current(restored) == combat.round_snapshots(restored) == {}
 
 
 @pytest.mark.parametrize("version", [99, None, "1"])
@@ -206,11 +229,11 @@ def test_unknown_outer_schema_roundtrips_and_rejects_all_access_without_mutation
     encoded_slot = json.dumps(raw, sort_keys=True)
     restored = GameInstance.from_dict(json.loads(json.dumps(instance.to_dict())))
     assert json.dumps(restored.to_dict()["modules"][combat.MODULE_NAME], sort_keys=True) == encoded_slot
-    for attribute, _ in ATTRS:
+    for read, replace in ACCESS.values():
         with pytest.raises(ModuleStateError):
-            getattr(restored, attribute)
+            read(restored)
         with pytest.raises(ModuleStateError):
-            setattr(restored, attribute, {})
+            replace(restored, {})
     with pytest.raises(ModuleStateError):
         combat.reset(restored)
     assert json.dumps(restored.modules[combat.MODULE_NAME], sort_keys=True) == encoded_slot
@@ -221,23 +244,23 @@ def lifecycle_instance():
     populate(instance)
     instance.round_number = 2
     instance.state = GameState.ACTIVE_JUDGMENT
-    instance.seed_code = "keep-seed"
+    table_settings.replace_seed_code(instance, "keep-seed")
     instance.players = {"p": {"character_sheet": {"hp": 3, "max_hp": 20, "gold": 7}}}
     instance.npcs = {"guard": {"hp": 4}}
-    instance.scene = "gate"
+    narrative_notes.replace_scene(instance, "gate")
     instance.action_queue = [{"user_id": "p", "text": "attack"}]
     instance.pending_actions = [{"user_id": "p", "text": "wait"}]
     instance.ready_players = {"p"}
-    instance.round_start_snapshot = {"p": {"hp": 20, "gold": 10}}
+    round_safety.capture_players(instance, {"p": {"hp": 20, "gold": 10}})
     instance.capture_round_entity_snapshot()
     instance.log = [{
         "round": 1, "gm_response": "previous round", "swipes": [],
-        "round_start_snapshot": deepcopy(instance.round_start_snapshot),
+        "round_start_snapshot": deepcopy(round_safety.round_start_snapshot(instance)),
     }]
-    instance.last_checks = [{"id": "check"}]
-    instance.death_save_outcomes = {"2": {"p": {"outcome": "stable"}}}
-    instance.economy["next_sequence"] = 7
-    instance.lorebook_timed_state = {"entry": {"sticky": 2}}
+    checks.replace_last_checks(instance, [{"id": "check"}])
+    round_safety.replace_death_save_outcomes(instance, {"2": {"p": {"outcome": "stable"}}})
+    economy_state.state(instance)["next_sequence"] = 7
+    lorebook_runtime.replace_timers(instance, {"entry": {"sticky": 2}})
     return instance
 
 
@@ -312,19 +335,22 @@ def test_unknown_combat_invalid_snapshot_restore_remains_a_noop(snapshot):
 def test_roundtrip_projects_only_module_storage_and_clones_nested_data(json_roundtrip):
     instance = make_instance()
     populate(instance)
+    # A loaded save always carries an explicit play mode; set it so the
+    # whole-module comparison below is not about play-mode derivation.
+    adventure_runtime_state.replace_play_mode(instance, "free")
     payload = instance.to_dict()
     assert all(name not in payload for name, _ in ATTRS)
     # The module projection is live, not a detached snapshot (unlike the old
     # shallow combat-field copies). Reconstruction is the isolation boundary.
-    assert payload["modules"][combat.MODULE_NAME]["current"] is instance.combat_extension
-    assert payload["modules"][combat.MODULE_NAME]["round_snapshots"] is instance.combat_extension_round_snapshots
+    assert payload["modules"][combat.MODULE_NAME]["current"] is combat.current(instance)
+    assert payload["modules"][combat.MODULE_NAME]["round_snapshots"] is combat.round_snapshots(instance)
     saved = json.loads(json.dumps(payload)) if json_roundtrip else payload
     restored = GameInstance.from_dict(saved)
     assert restored.modules == instance.modules
-    restored.combat_extension["opaque"]["values"].append(9)
-    restored.combat_extension_round_snapshots["2"]["combat_extension"]["opaque"].append(9)
-    assert instance.combat_extension["opaque"]["values"] == [1]
-    assert instance.combat_extension_round_snapshots["2"]["combat_extension"]["opaque"] == [2]
+    combat.current(restored)["opaque"]["values"].append(9)
+    combat.round_snapshots(restored)["2"]["combat_extension"]["opaque"].append(9)
+    assert combat.current(instance)["opaque"]["values"] == [1]
+    assert combat.round_snapshots(instance)["2"]["combat_extension"]["opaque"] == [2]
 
 
 @pytest.mark.asyncio
@@ -332,11 +358,11 @@ def test_roundtrip_projects_only_module_storage_and_clones_nested_data(json_roun
 async def test_reset_replaces_current_clears_snapshots_in_place_and_retains_policy(use_lifecycle):
     instance = make_instance()
     populate(instance)
-    instance.away_control_policy = "ai_takeover"
+    set_away_control_policy(instance, "ai_takeover")
     instance.modules["other"] = {"schema_version": 77, "keep": [1]}
     slot = instance.modules[combat.MODULE_NAME]
     slot["extra"] = {"keep": True}
-    current, snapshots = instance.combat_extension, instance.combat_extension_round_snapshots
+    current, snapshots = combat.current(instance), combat.round_snapshots(instance)
     original_current = deepcopy(current)
     other = instance.modules["other"]
     run_id = instance.run_id
@@ -347,12 +373,12 @@ async def test_reset_replaces_current_clears_snapshots_in_place_and_retains_poli
         combat.reset(instance)
         assert instance.run_id == run_id
     assert instance.modules[combat.MODULE_NAME] is slot
-    assert instance.combat_extension == {} and instance.combat_extension is not current
+    assert combat.current(instance) == {} and combat.current(instance) is not current
     assert current == original_current
-    assert instance.combat_extension_round_snapshots is snapshots and snapshots == {}
+    assert combat.round_snapshots(instance) is snapshots and snapshots == {}
     assert slot["extra"] == {"keep": True}
     assert instance.modules["other"] is other
-    assert instance.away_control_policy == "ai_takeover"
+    assert player_control_state.away_control_policy(instance) == "ai_takeover"
 
 
 def test_staged_aggregate_commit_deepcopies_combat_and_retains_runtime_identity():
@@ -361,16 +387,16 @@ def test_staged_aggregate_commit_deepcopies_combat_and_retains_runtime_identity(
     locks = (instance._lock, instance._process_lock, instance._authority_lock)
     run_id = instance.run_id
     staged = GameInstance.from_dict(deepcopy(instance.to_dict()))
-    staged.combat_extension["opaque"]["values"].append(3)
-    staged.combat_extension_round_snapshots["2"]["combat_extension"]["opaque"].append(4)
-    assert instance.combat_extension["opaque"]["values"] == [1]
-    assert instance.combat_extension_round_snapshots["2"]["combat_extension"]["opaque"] == [2]
+    combat.current(staged)["opaque"]["values"].append(3)
+    combat.round_snapshots(staged)["2"]["combat_extension"]["opaque"].append(4)
+    assert combat.current(instance)["opaque"]["values"] == [1]
+    assert combat.round_snapshots(instance)["2"]["combat_extension"]["opaque"] == [2]
     instance.replace_persisted_state_from(staged)
     assert instance.modules == staged.modules
-    staged.combat_extension["opaque"]["values"].append(5)
-    staged.combat_extension_round_snapshots.clear()
-    assert instance.combat_extension["opaque"]["values"] == [1, 3]
-    assert instance.combat_extension_round_snapshots["2"]["combat_extension"]["opaque"] == [2, 4]
+    combat.current(staged)["opaque"]["values"].append(5)
+    combat.round_snapshots(staged).clear()
+    assert combat.current(instance)["opaque"]["values"] == [1, 3]
+    assert combat.round_snapshots(instance)["2"]["combat_extension"]["opaque"] == [2, 4]
     assert (instance._lock, instance._process_lock, instance._authority_lock) == locks
     assert instance.run_id == run_id
     assert all(name not in instance.__dict__ for name, _ in ATTRS)
@@ -384,8 +410,8 @@ async def test_disk_startup_recovery_preserves_both_combat_children(tmp_path, pe
     populate(instance)
     instance.state = GameState.ACTIVE_JUDGMENT
     if pending_luck:
-        instance.round_checks_prepared = True
-        instance.last_checks = [{"check_id": "c1", "actor_uid": "p", "luck_decision": "pending"}]
+        checks.replace_round_checks_prepared(instance, True)
+        checks.replace_last_checks(instance, [{"check_id": "c1", "actor_uid": "p", "luck_decision": "pending"}])
     registry.register(instance)
     await registry.save(instance)
     restored, = await GameRegistry(tmp_path / "saves").recover_all()
@@ -404,20 +430,20 @@ async def test_round_recovery_restores_or_clears_current_without_partial_entity_
     snapshot = malformed_snapshot()
     if not invalid:
         snapshot["entity_fields"].pop("npc:broken")
-    instance.combat_extension_round_snapshots["2"] = snapshot
+    combat.round_snapshots(instance)["2"] = snapshot
     slot = instance.modules[combat.MODULE_NAME]
-    old_current = instance.combat_extension
+    old_current = combat.current(instance)
     if operation == "abort":
         instance.state = GameState.ACTIVE_JUDGMENT
         assert await instance.abort_round_processing()
     else:
         instance.log = [{"round": 2, "combat_extension_round_start": snapshot}]
         assert await instance.rollback_last_round() == 2
-        assert instance.combat_extension_round_snapshots == {}
+        assert combat.round_snapshots(instance) == {}
     assert instance.state == GameState.ACTIVE_ACTION
     assert instance.modules[combat.MODULE_NAME] is slot
-    assert instance.combat_extension == ({} if invalid else snapshot["combat_extension"])
-    assert instance.combat_extension is not old_current
+    assert combat.current(instance) == ({} if invalid else snapshot["combat_extension"])
+    assert combat.current(instance) is not old_current
     assert old_current["opaque"]["values"] == [1]
     assert instance.get_character_sheet("p")["hp"] == (20 if invalid else 1)
 
@@ -428,23 +454,23 @@ def test_snapshot_first_touch_late_fields_and_summary_copy_survive_module_storag
     instance.round_number = 7
     instance.players["p"] = {"character_sheet": {"hp": 20, "inventory": ["old"]}}
     instance.capture_combat_extension_snapshot({"player:p": ("hp", "missing")})
-    first = instance.combat_extension_round_snapshots["7"]
+    first = combat.round_snapshots(instance)["7"]
     instance.get_character_sheet("p").update(hp=10, missing="added", qi=4)
     instance.capture_combat_extension_snapshot({"player:p": ("hp", "missing", "qi", "inventory")})
-    assert instance.combat_extension_round_snapshots["7"] is first
+    assert combat.round_snapshots(instance)["7"] is first
     tracked = first["entity_fields"]["player:p"]
     assert tracked == {"values": {"hp": 20, "qi": 4, "inventory": ["old"]}, "missing": ["missing"]}
     instance.get_character_sheet("p")["inventory"].append("new")
-    instance.combat_extension["pending_summaries"] = ["queued"]
+    combat.current(instance)["pending_summaries"] = ["queued"]
     now = instance.current_combat_extension_snapshot()
     assert "pending_summaries" not in now["combat_extension"]
-    assert instance.combat_extension["pending_summaries"] == ["queued"]
+    assert combat.current(instance)["pending_summaries"] == ["queued"]
     now["combat_extension"]["opaque"]["values"].append(9)
-    assert instance.combat_extension["opaque"]["values"] == [1]
+    assert combat.current(instance)["opaque"]["values"] == [1]
     assert instance.restore_combat_extension_snapshot(first)
     assert instance.get_character_sheet("p") == {"hp": 20, "qi": 4, "inventory": ["old"]}
     assert instance.restore_combat_extension_snapshot({"schema_version": 1, "opaque": [8]})
-    assert instance.combat_extension == {"schema_version": 1, "opaque": [8]}
+    assert combat.current(instance) == {"schema_version": 1, "opaque": [8]}
 
 
 @pytest.mark.asyncio
@@ -454,8 +480,8 @@ async def test_bounded_snapshots_and_finished_log_copies_remain_independent():
     for round_number in range(1, 103):
         instance.round_number = round_number
         instance.capture_combat_extension_snapshot()
-    assert set(instance.combat_extension_round_snapshots) == {str(n) for n in range(3, 103)}
-    first = instance.combat_extension_round_snapshots["102"]
+    assert set(combat.round_snapshots(instance)) == {str(n) for n in range(3, 103)}
+    first = combat.round_snapshots(instance)["102"]
     current = instance.current_combat_extension_snapshot()
     await instance.finish_judgment("done", pre_combat_extension_snapshot=current)
     entry = instance.log[-1]
@@ -465,7 +491,7 @@ async def test_bounded_snapshots_and_finished_log_copies_remain_independent():
     current["combat_extension"]["opaque"]["values"].append(9)
     assert entry["combat_extension_round_start"]["combat_extension"]["opaque"]["values"] == [1]
     assert entry["pre_combat_extension_snapshot"]["combat_extension"]["opaque"]["values"] == [1]
-    assert "102" not in instance.combat_extension_round_snapshots
+    assert "102" not in combat.round_snapshots(instance)
 
 
 @pytest.mark.asyncio
@@ -479,7 +505,7 @@ async def test_swipe_invalid_snapshot_clears_staged_current_without_leaking_on_f
     instance.players["p"] = {"character_sheet": {"hp": 20}}
     instance.log = [{"round": 2, "gm_response": "old", "pre_state_snapshot": {"p": {"hp": 20}}}]
     if invalid_at == "current":
-        instance.combat_extension_round_snapshots["3"] = malformed_snapshot()
+        combat.round_snapshots(instance)["3"] = malformed_snapshot()
     else:
         instance.log[0]["pre_combat_extension_snapshot"] = malformed_snapshot()
     before = deepcopy(instance.to_dict())
@@ -489,8 +515,8 @@ async def test_swipe_invalid_snapshot_clears_staged_current_without_leaking_on_f
 
     async def check_restored_stage(staged, *args, **kwargs):
         assert staged is not instance
-        assert staged.combat_extension == {}
-        assert staged.combat_extension_round_snapshots == {}
+        assert combat.current(staged) == {}
+        assert combat.round_snapshots(staged) == {}
         assert staged.get_character_sheet("p")["hp"] == 20
         assert instance.to_dict() == before
         raise GenerationStopped

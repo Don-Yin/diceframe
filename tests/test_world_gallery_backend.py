@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import src.commands.prompt_composer as prompt_composer_module
 from src.commands.prompt_composer import PromptComposer
+from src.engine.modules import ruleset_runtime
 from src.content.gm_style import normalize_gm_style, render_gm_style_section
 from src.webui.services import worlds as worlds_service
 
@@ -366,7 +367,7 @@ def test_compose_gm_prompt_order(tmp_path) -> None:
         language="zh-CN",
         plot_tracker=SimpleNamespace(format_for_context=lambda: "PLOT_MARKER"),
         players={},
-        ruleset_runtime={},
+        modules={"ruleset_runtime": ruleset_runtime.fresh()},
         narrative_perspective="third_person",
     )
     world_data = {"gm_style": {"tone": "dark", "verbosity": "normal", "custom_instructions": ""}}
@@ -386,7 +387,7 @@ def test_compose_gm_prompt_without_world_data_is_unchanged(tmp_path) -> None:
 
     composer = PromptComposer(prompts_dir, tmp_path / "rules")
     instance = SimpleNamespace(
-        language="zh-CN", plot_tracker=None, players={}, ruleset_runtime={},
+        language="zh-CN", plot_tracker=None, players={}, modules={"ruleset_runtime": ruleset_runtime.fresh()},
     )
 
     prompt = composer.compose_gm_prompt(instance)

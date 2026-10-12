@@ -13,6 +13,8 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+from src.engine.modules import economy_state
+
 MAX_EXTERNAL_EFFECT_DELIVERIES = 50
 
 
@@ -27,7 +29,7 @@ def queue_memory_delivery(
 
     if not effect_group_id or not memory_delta:
         return None
-    deliveries = instance.economy.setdefault("external_effects_outbox", [])
+    deliveries = economy_state.state(instance).setdefault("external_effects_outbox", [])
     delivery_id = f"memory:{effect_group_id}"
     existing = next(
         (
@@ -76,14 +78,14 @@ def queue_memory_delivery(
             )
         ]
         budget = max(0, MAX_EXTERNAL_EFFECT_DELIVERIES - len(active))
-        instance.economy["external_effects_outbox"] = (
+        economy_state.state(instance)["external_effects_outbox"] = (
             active + resolved[-budget:] if budget else active
         )
     return delivery
 
 
 def pending_memory_deliveries(instance: Any) -> list[dict[str, Any]]:
-    economy = getattr(instance, "economy", {})
+    economy = economy_state.state(instance)
     deliveries = (
         economy.get("external_effects_outbox", [])
         if isinstance(economy, dict) else []
@@ -102,7 +104,7 @@ def pending_memory_deliveries(instance: Any) -> list[dict[str, Any]]:
 def pending_memory_reversals(instance: Any) -> list[dict[str, Any]]:
     """Return delivered economy memories that must be undone after rollback."""
 
-    economy = getattr(instance, "economy", {})
+    economy = economy_state.state(instance)
     deliveries = (
         economy.get("external_effects_outbox", [])
         if isinstance(economy, dict) else []
@@ -121,7 +123,7 @@ def pending_memory_reversals(instance: Any) -> list[dict[str, Any]]:
 def complete_memory_delivery(instance: Any, delivery_id: str) -> bool:
     delivery = next(
         (
-            item for item in instance.economy.get("external_effects_outbox", [])
+            item for item in economy_state.state(instance).get("external_effects_outbox", [])
             if isinstance(item, dict) and item.get("id") == delivery_id
         ),
         None,
@@ -141,7 +143,7 @@ def complete_memory_delivery(instance: Any, delivery_id: str) -> bool:
 def complete_memory_reversal(instance: Any, delivery_id: str) -> bool:
     delivery = next(
         (
-            item for item in instance.economy.get("external_effects_outbox", [])
+            item for item in economy_state.state(instance).get("external_effects_outbox", [])
             if isinstance(item, dict) and item.get("id") == delivery_id
         ),
         None,

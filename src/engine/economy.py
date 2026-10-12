@@ -20,6 +20,7 @@ from src.engine.memory_outbox import (
     pending_memory_deliveries,
     pending_memory_reversals,
 )
+from src.engine.modules import economy_state
 
 # Technical limit in canonical base units.  With V2 currency systems the base
 # unit can be a minor denomination (e.g. CoC dollars → cents), so this cap must
@@ -99,7 +100,7 @@ def _record_outcome(
         "resolved_round": era_key(instance),
         "resolved_at": str(proposal.get("resolved_at") or datetime.now(timezone.utc).isoformat()),
     }
-    outcomes = instance.economy.setdefault("outcomes", [])
+    outcomes = economy_state.state(instance).setdefault("outcomes", [])
     outcomes.append(outcome)
     if len(outcomes) > MAX_ECONOMY_OUTCOMES:
         del outcomes[:-MAX_ECONOMY_OUTCOMES]
@@ -148,7 +149,7 @@ def queue_effect_group(
         "round": era_key(instance),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    groups = instance.economy.setdefault("effect_groups", [])
+    groups = economy_state.state(instance).setdefault("effect_groups", [])
     groups.append(group)
     if len(groups) > MAX_EFFECT_GROUPS:
         active = [
@@ -162,7 +163,7 @@ def queue_effect_group(
             and item.get("status") not in {"pending", "ready"}
         ]
         resolved_budget = max(0, MAX_EFFECT_GROUPS - len(active))
-        instance.economy["effect_groups"] = (
+        economy_state.state(instance)["effect_groups"] = (
             active + resolved[-resolved_budget:]
             if resolved_budget else active
         )
@@ -180,7 +181,7 @@ def _effect_group_for(
         return None
     return next(
         (
-            group for group in instance.economy.get("effect_groups", [])
+            group for group in economy_state.state(instance).get("effect_groups", [])
             if isinstance(group, dict) and group.get("id") == group_id
         ),
         None,
@@ -199,14 +200,14 @@ def _settle_effect_group(
         group["resolved_at"] = str(proposal.get("resolved_at") or "")
         group.pop("effects", None)
         group_id = str(group.get("id") or "")
-        for outcome in instance.economy.get("outcomes", []):
+        for outcome in economy_state.state(instance).get("outcomes", []):
             if str(outcome.get("effect_group_id") or "") == group_id:
                 outcome["effects_status"] = "discarded"
         return None
     proposal_ids = {str(item) for item in group.get("proposal_ids", []) if str(item)}
     states = {
         str(item.get("id") or ""): str(item.get("status") or "")
-        for item in instance.economy.get("proposals", [])
+        for item in economy_state.state(instance).get("proposals", [])
         if isinstance(item, dict) and str(item.get("id") or "") in proposal_ids
     }
     if proposal_ids and all(states.get(proposal_id) == "committed" for proposal_id in proposal_ids):
@@ -218,7 +219,7 @@ def _settle_effect_group(
 def complete_effect_group(instance: Any, group_id: str) -> bool:
     group = next(
         (
-            item for item in instance.economy.get("effect_groups", [])
+            item for item in economy_state.state(instance).get("effect_groups", [])
             if isinstance(item, dict) and item.get("id") == group_id
         ),
         None,
@@ -232,7 +233,7 @@ def complete_effect_group(instance: Any, group_id: str) -> bool:
     group["status"] = "committed"
     group["committed_at"] = datetime.now(timezone.utc).isoformat()
     group.pop("effects", None)
-    for outcome in instance.economy.get("outcomes", []):
+    for outcome in economy_state.state(instance).get("outcomes", []):
         if str(outcome.get("effect_group_id") or "") == group_id:
             outcome["effects_status"] = "committed"
     return True
@@ -248,7 +249,7 @@ def cancel_proposals_for_player(
 
     affected_ids: set[str] = set()
     now = datetime.now(timezone.utc).isoformat()
-    for proposal in instance.economy.get("proposals", []):
+    for proposal in economy_state.state(instance).get("proposals", []):
         if not isinstance(proposal, dict) or proposal.get("status") != "pending":
             continue
         participant_uids = {
@@ -278,7 +279,7 @@ def cancel_proposals_for_player(
 
 
 def pending_proposals(instance: Any) -> list[dict[str, Any]]:
-    economy = getattr(instance, "economy", {})
+    economy = economy_state.state(instance)
     proposals = economy.get("proposals") if isinstance(economy, dict) else []
     return [
         item for item in (proposals or [])
@@ -478,7 +479,7 @@ def blocking_economy_proposals(
 def pending_effect_groups(instance: Any) -> list[dict[str, Any]]:
     """Return unresolved effect groups owned by the current run."""
 
-    economy = getattr(instance, "economy", {})
+    economy = economy_state.state(instance)
     groups = economy.get("effect_groups") if isinstance(economy, dict) else []
     return [
         item for item in (groups or [])
@@ -502,7 +503,7 @@ def economy_fingerprint(instance: Any) -> dict[str, str]:
 
     return {
         str(item.get("id") or ""): str(item.get("status") or "")
-        for item in getattr(instance, "economy", {}).get("proposals", [])
+        for item in economy_state.state(instance).get("proposals", [])
         if isinstance(item, dict)
     }
 
@@ -568,7 +569,7 @@ def has_blocking_economy_decision(
 def _existing_by_source(instance: Any, source_ref: str) -> dict[str, Any] | None:
     if not source_ref:
         return None
-    economy = instance.economy
+    economy = economy_state.state(instance)
     record_id = economy.get("idempotency_records", {}).get(source_ref)
     for proposal in economy.get("proposals", []):
         if (
@@ -625,7 +626,7 @@ def queue_proposal(
     existing = _existing_by_source(instance, source_ref)
     if existing is not None:
         return existing
-    economy = instance.economy
+    economy = economy_state.state(instance)
     sequence = int(economy.get("next_sequence", 1) or 1)
     proposal = {
         "id": f"eco_{uuid4().hex}",
@@ -671,7 +672,7 @@ def has_pending_identical_purchase(instance: Any, payer_uid: str, target: str) -
     payer = str(payer_uid or "")
     if not key or not payer:
         return False
-    for proposal in instance.economy.get("proposals", []):
+    for proposal in economy_state.state(instance).get("proposals", []):
         if not isinstance(proposal, dict) or proposal.get("status") != "pending":
             continue
         if str(proposal.get("kind") or "") != "purchase":
@@ -773,7 +774,7 @@ def filter_unconfirmed_purchase_grants(
     # 第一层：待确认扣款提案（payment/purchase）。FREE_GRANT 无权绕过——
     # 否则物品先免费发放、付款人之后仍可能确认扣款，形成双重状态错误。
     pending_purchase_items: dict[str, set[str]] = {}
-    for proposal in instance.economy.get("proposals", []):
+    for proposal in economy_state.state(instance).get("proposals", []):
         if not isinstance(proposal, dict) or proposal.get("status") != "pending":
             continue
         if str(proposal.get("kind") or "") not in PAYER_ECONOMY_KINDS:
@@ -909,7 +910,7 @@ def resolve_proposal(
     """Resolve one proposal. Caller must hold the aggregate lock and persist."""
 
     proposal = next(
-        (item for item in instance.economy.get("proposals", []) if item.get("id") == proposal_id),
+        (item for item in economy_state.state(instance).get("proposals", []) if item.get("id") == proposal_id),
         None,
     )
     if proposal is None:
@@ -1053,7 +1054,7 @@ def resolve_proposal(
     }
     if reward_snapshots:
         transaction["reward_snapshots"] = reward_snapshots
-    instance.economy.setdefault("transactions", []).append(transaction)
+    economy_state.state(instance).setdefault("transactions", []).append(transaction)
     outcome = _record_outcome(
         instance, proposal, status="committed", actor_uid=actor_uid,
     )
@@ -1083,7 +1084,7 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
 
     rollback_round = int(round_number)
     proposals = [
-        item for item in instance.economy.get("proposals", [])
+        item for item in economy_state.state(instance).get("proposals", [])
         if isinstance(item, dict)
     ]
     origin_ids = {
@@ -1092,7 +1093,7 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
         if int(proposal.get("round", -1) or -1) >= rollback_round
     }
     transactions = [
-        item for item in instance.economy.get("transactions", [])
+        item for item in economy_state.state(instance).get("transactions", [])
         if isinstance(item, dict)
     ]
     settlement_transactions = [
@@ -1124,7 +1125,7 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
         proposal.pop("resolved_at", None)
         source_ref = str(proposal.get("source_ref") or "")
         if source_ref:
-            instance.economy.get("idempotency_records", {}).pop(source_ref, None)
+            economy_state.state(instance).get("idempotency_records", {}).pop(source_ref, None)
 
     for transaction in transactions:
         if (
@@ -1144,11 +1145,11 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
             set_proposal_status(proposal, "pending")
             proposal.pop("resolved_at", None)
             proposal.pop("resolution_code", None)
-    for group in instance.economy.get("effect_groups", []):
+    for group in economy_state.state(instance).get("effect_groups", []):
         if int(group.get("round", -1) or -1) >= rollback_round:
             group["status"] = "superseded"
             group.pop("effects", None)
-    for delivery in instance.economy.get("external_effects_outbox", []):
+    for delivery in economy_state.state(instance).get("external_effects_outbox", []):
         if int(delivery.get("round", -1) or -1) < rollback_round:
             continue
         if delivery.get("status") == "pending":
@@ -1157,8 +1158,8 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
         elif delivery.get("status") == "delivered":
             delivery["status"] = "reversal_pending"
             delivery["reversal_requested_at"] = datetime.now(timezone.utc).isoformat()
-    instance.economy["outcomes"] = [
-        item for item in instance.economy.get("outcomes", [])
+    economy_state.state(instance)["outcomes"] = [
+        item for item in economy_state.state(instance).get("outcomes", [])
         if not (
             isinstance(item, dict)
             and (
@@ -1242,7 +1243,7 @@ def reconcile_rollback_snapshot(
     # never entered this snapshot, so projecting them here would leak
     # later-round state into the old snapshot.
     transactions = [
-        item for item in instance.economy.get("transactions", [])
+        item for item in economy_state.state(instance).get("transactions", [])
         if isinstance(item, dict)
         and item.get("status") == "reversed"
         and int(item.get("round", -1) or -1) == rollback_round

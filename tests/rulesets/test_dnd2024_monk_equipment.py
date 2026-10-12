@@ -34,6 +34,7 @@ from dnd2024_monk_common import (
     start_combat,
     with_equipment,
 )
+from src.engine.modules import ruleset_runtime
 
 # 项目现有 catalog 里的真实武器 ref：
 # - quarterstaff / sickle：Simple Melee（sickle 带 Light，伤害骰 1d4）
@@ -158,12 +159,12 @@ def test_unarmed_strike_uses_the_martial_arts_die_and_the_higher_ability() -> No
 
     _apply(engine, instance, {
         "intent_id": "unarmed-1", "type": "attack",
-        "expected_version": instance.ruleset_state["version"], "submitted_by": "gm",
+        "expected_version": ruleset_runtime.state(instance)["version"], "submitted_by": "gm",
         "actor_id": "player:gm", "target_id": "enemy:goblin-1",
         "weapon_ref": "unarmed_strike",
     }, SequenceRng([15, 4]))
     check = next(
-        event for event in instance.event_ledger[-1]["events"]
+        event for event in ruleset_runtime.event_ledger(instance)[-1]["events"]
         if event["type"] == "check.resolved"
     )
 
@@ -182,12 +183,12 @@ def test_unarmed_strike_falls_back_to_canonical_damage_without_martial_arts() ->
 
     _apply(engine, instance, {
         "intent_id": "unarmed-1", "type": "attack",
-        "expected_version": instance.ruleset_state["version"], "submitted_by": "gm",
+        "expected_version": ruleset_runtime.state(instance)["version"], "submitted_by": "gm",
         "actor_id": "player:gm", "target_id": "enemy:goblin-1",
         "weapon_ref": "unarmed_strike",
     }, SequenceRng([15, 1]))
     damage = next(
-        event for event in instance.event_ledger[-1]["events"]
+        event for event in ruleset_runtime.event_ledger(instance)[-1]["events"]
         if event["type"] == "resource.changed"
     )
 
@@ -215,12 +216,12 @@ def test_a_simple_monk_weapon_keeps_its_identity_and_gains_the_ability_choice() 
 
     _apply(engine, instance, {
         "intent_id": "quarterstaff-1", "type": "attack",
-        "expected_version": instance.ruleset_state["version"], "submitted_by": "gm",
+        "expected_version": ruleset_runtime.state(instance)["version"], "submitted_by": "gm",
         "actor_id": "player:gm", "target_id": "enemy:goblin-1",
         "weapon_ref": "item:quarterstaff",
     }, SequenceRng([15, 3]))
     check = next(
-        event for event in instance.event_ledger[-1]["events"]
+        event for event in ruleset_runtime.event_ledger(instance)[-1]["events"]
         if event["type"] == "check.resolved"
     )
 
@@ -240,12 +241,12 @@ def test_the_martial_arts_die_replaces_a_weaker_monk_weapon_die() -> None:
 
     _apply(engine, instance, {
         "intent_id": "sickle-1", "type": "attack",
-        "expected_version": instance.ruleset_state["version"], "submitted_by": "gm",
+        "expected_version": ruleset_runtime.state(instance)["version"], "submitted_by": "gm",
         "actor_id": "player:gm", "target_id": "enemy:goblin-1",
         "weapon_ref": "item:sickle",
     }, SequenceRng([15, 4]))
     damage = next(
-        event for event in instance.event_ledger[-1]["events"]
+        event for event in ruleset_runtime.event_ledger(instance)[-1]["events"]
         if event["type"] == "resource.changed"
     )
 
@@ -277,12 +278,12 @@ def test_a_non_monk_weapon_gets_no_martial_arts_treatment() -> None:
 
     _apply(engine, instance, {
         "intent_id": "longsword-1", "type": "attack",
-        "expected_version": instance.ruleset_state["version"], "submitted_by": "gm",
+        "expected_version": ruleset_runtime.state(instance)["version"], "submitted_by": "gm",
         "actor_id": "player:gm", "target_id": "enemy:goblin-1",
         "weapon_ref": "item:longsword",
     }, SequenceRng([15, 3]))
     check = next(
-        event for event in instance.event_ledger[-1]["events"]
+        event for event in ruleset_runtime.event_ledger(instance)[-1]["events"]
         if event["type"] == "check.resolved"
     )
 
@@ -373,7 +374,7 @@ def test_flurry_still_works_and_falls_back_to_the_canonical_unarmed_profile() ->
         ("focus_points", 1),
     ]
     assert focus_state(instance)["current"] == 1
-    assert instance.ruleset_state["combat"]["economy"]["bonus_action"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 0
     # 底层档案回到普通徒手打击：1 点基础伤害 + STR 修正 1，而不是武艺骰。
     assert [event["amount"] for event in damage] == [2, 2]
     assert all(event["damage_type"] == "bludgeoning" for event in damage)
@@ -473,12 +474,12 @@ def _attack_check_modifier(engine, instance, ref: str, *, intent_id: str) -> int
 
     _apply(engine, instance, {
         "intent_id": intent_id, "type": "attack",
-        "expected_version": instance.ruleset_state["version"], "submitted_by": "gm",
+        "expected_version": ruleset_runtime.state(instance)["version"], "submitted_by": "gm",
         "actor_id": "player:gm", "target_id": "enemy:goblin-1",
         "weapon_ref": ref,
     }, SequenceRng([15, 4]))
     check = next(
-        event for event in instance.event_ledger[-1]["events"]
+        event for event in ruleset_runtime.event_ledger(instance)[-1]["events"]
         if event["type"] == "check.resolved"
     )
     return int(check["modifier"])

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 from src.commands.resource_triggers import check_resource_triggers
+from src.engine import progression
 from src.engine.character_utils import (
     apply_resource_delta,
     get_resource,
@@ -25,6 +26,7 @@ from src.engine.currency import (
 from src.engine.currency.models import CurrencySpec, CurrencyUnit
 from src.engine.game_instance import GameState
 from src.engine.health import record_health_event
+from src.engine.modules import progression_state
 from src.rules.rule_system import RuleSystem
 from src.rulesets.contracts import CharacterRevivalRuntime
 
@@ -539,7 +541,7 @@ class GameMasterService:
                 "kind": "revive",
             }
 
-        target_round = int(instance.round_number or 0)
+        target_round = progression.current_round(instance)
         if instance.state != GameState.ACTIVE_ACTION:
             target_round += 1
         instance.add_gm_directive({
@@ -589,7 +591,7 @@ class GameMasterService:
         if not text:
             return {"ok": False, "error": "请输入悄悄话内容"}
         instance.append_private_message(user_id, {
-            "round": instance.round_number,
+            "round": progression_state.round_value(instance),
             "text": text,
             "source": "gm",
             "timestamp": datetime.now(timezone.utc).isoformat(),

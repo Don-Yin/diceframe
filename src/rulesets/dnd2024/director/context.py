@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.engine.modules import narrative_notes, ruleset_runtime
+
 from .contracts import DirectorContext
 
 
@@ -14,7 +16,7 @@ def _text(value: Any, limit: int = 500) -> str:
 def build_director_context(instance: Any, campaign: dict[str, Any] | None = None) -> DirectorContext:
     """Copy only facts needed for a proposal; never expose mutable state."""
 
-    state = getattr(instance, "ruleset_state", {})
+    state = ruleset_runtime.state(instance)
     state = state if isinstance(state, dict) else {}
     combat = state.get("combat") if isinstance(state.get("combat"), dict) else {}
     campaign = campaign if isinstance(campaign, dict) else {}
@@ -30,7 +32,7 @@ def build_director_context(instance: Any, campaign: dict[str, Any] | None = None
             continue
         actions.append({"id": f"action:{index}", "user_id": uid, "text": text})
     return DirectorContext(
-        scene=_text(getattr(instance, "scene", ""), 200),
+        scene=_text(narrative_notes.scene(instance), 200),
         world_id=_text(getattr(instance, "world_id", ""), 120),
         actions=tuple(actions),
         combat_status=_text(combat.get("status"), 40) or "none",

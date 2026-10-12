@@ -19,6 +19,7 @@ const MUTATING_OPERATIONS = new Set<PeerGameOperation>([
   'ruleset.intent',
   'ruleset.decision',
   'luck.resolve',
+  'check.reveal',
   'payment.resolve',
   'character.update',
   'character.profile',
@@ -58,6 +59,12 @@ function lobbyDetail(current: Record<string, unknown>): Record<string, unknown> 
   const out: Record<string, unknown> = {}
   for (const key of LOBBY_DETAIL_FIELDS) if (key in current) out[key] = current[key]
   if ('multiplayer' in current) out.multiplayer = lobbyMultiplayer(current.multiplayer)
+  // The host cannot tell whether an unbound guest knows the room password, so
+  // story text stays hidden from it whenever the room has one (same rule as
+  // the server's visitor lobby view).
+  if (current.has_room_password) delete out.scene
+  // Same shape as the server's visitor lobby view (game_queries.lobby_detail).
+  out.viewer = { kind: 'outsider' }
   return out
 }
 
@@ -101,10 +108,12 @@ const OPERATION_FIELD_WHITELIST: Record<PeerGameOperation, readonly string[]> = 
     'response', 'comment', 'choice_id', 'enabled',
   ],
   'luck.resolve': ['check_id', 'spend'],
+  'check.reveal': ['check_id'],
   'payment.resolve': ['payment_id', 'accepted'],
+  // Guests edit only their profile and spend level-up points (attributes);
+  // HP / class / skills and other mechanics are GM authority on the server.
   'character.update': [
-    'character_name', 'race', 'class', 'background', 'hp',
-    'attributes', 'skills', 'identity', 'portrait',
+    'character_name', 'race', 'background', 'identity', 'portrait', 'attributes',
   ],
   'character.profile': ['character_name', 'portrait', 'profile'],
   'character.rest': [
@@ -231,7 +240,11 @@ export class PeerHostGameBridge {
       const actorId = typeof result.user_id === 'string' ? result.user_id : ''
       if (!actorId) throw new Error(String(result.error || 'player_creation_failed'))
       this.bindActor(peerId, actorId)
-      return result
+      // The seat's share credential stays on the host: a guest acts only
+      // through this bridge, never with its own HTTP identity.
+      const guestResult = { ...result }
+      delete guestResult.seat_token
+      return guestResult
     }
     if (operation === 'player.rebind') {
       // 邀请中指定的已有角色，或该 peer 此前创建并已持久化的角色，才允许恢复。
@@ -317,6 +330,10 @@ export class PeerHostGameBridge {
       return write(`/checks/${encodeURIComponent(checkId)}/luck`, {
         spend: Boolean(payload.spend),
       })
+    }
+    if (operation === 'check.reveal') {
+      const checkId = requiredIdentifier(payload.check_id, 'check_id')
+      return write(`/checks/${encodeURIComponent(checkId)}/reveal`, {})
     }
     if (operation === 'payment.resolve') {
       const paymentId = requiredIdentifier(payload.payment_id, 'payment_id')
@@ -427,6 +444,7 @@ export class PeerRemoteGameClient {
     else if (method === 'POST' && parsed.tail === '/intents') operation = 'ruleset.intent'
     else {
       const luck = /^\/checks\/([^/]+)\/luck$/u.exec(parsed.tail)
+      const reveal = /^\/checks\/([^/]+)\/reveal$/u.exec(parsed.tail)
       const payment = /^\/payments\/([^/]+)$/u.exec(parsed.tail)
       const away = /^\/players\/([^/]+)\/away$/u.exec(parsed.tail)
       const character = /^\/character\/([^/]+)$/u.exec(parsed.tail)
@@ -438,6 +456,9 @@ export class PeerRemoteGameClient {
       if (method === 'POST' && luck) {
         operation = 'luck.resolve'
         payload = { ...body, check_id: decodeURIComponent(luck[1]) }
+      } else if (method === 'POST' && reveal) {
+        operation = 'check.reveal'
+        payload = { check_id: decodeURIComponent(reveal[1]) }
       } else if (method === 'POST' && payment) {
         operation = 'payment.resolve'
         payload = { ...body, payment_id: decodeURIComponent(payment[1]) }

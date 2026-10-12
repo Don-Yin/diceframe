@@ -36,6 +36,7 @@ from src.rulesets.dnd2024.content.encounter import expand_encounter_enemies
 from src.rulesets.dnd2024.play.contracts import EncounterAccess
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.webui.api import WebAPI
+from src.engine.modules import ruleset_runtime
 
 MODULE_ID = "cellar-module"
 MODULE_LABEL = f"module:{MODULE_ID}"
@@ -368,7 +369,7 @@ def test_combat_start_uses_module_monster_profiles(tmp_path) -> None:
         resolved = runtime.resolve_intent(instance, {
             "intent_id": "intent-start-1",
             "type": "combat.start",
-            "expected_version": int(instance.ruleset_state.get("version", 0) or 0),
+            "expected_version": int(ruleset_runtime.state(instance).get("version", 0) or 0),
             "submitted_by": "gm",
             "encounter_preset_id": ENCOUNTER_ID,
             "mode": "sandbox",
@@ -398,7 +399,7 @@ def test_client_supplied_enemies_cannot_override_the_module_catalog(tmp_path) ->
         resolved = runtime.resolve_intent(instance, {
             "intent_id": "intent-start-2",
             "type": "combat.start",
-            "expected_version": int(instance.ruleset_state.get("version", 0) or 0),
+            "expected_version": int(ruleset_runtime.state(instance).get("version", 0) or 0),
             "submitted_by": "gm",
             "encounter_preset_id": ENCOUNTER_ID,
             "mode": "sandbox",

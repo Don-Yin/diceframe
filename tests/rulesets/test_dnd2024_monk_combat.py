@@ -24,6 +24,7 @@ from dnd2024_monk_common import (
     monk_sheet,
     start_combat,
 )
+from src.engine.modules import ruleset_runtime
 
 
 def _setup(level: int = 2, **kwargs):
@@ -80,12 +81,12 @@ def test_bonus_unarmed_strike_costs_the_bonus_action_and_reuses_canonical_resolu
 
     assert [(event["resource"], event["amount"]) for event in spent] == [("bonus_action", 1)]
     assert len(checks) == 1 and checks[0]["kind"] == "attack"
-    economy = instance.ruleset_state["combat"]["economy"]
+    economy = ruleset_runtime.state(instance)["combat"]["economy"]
     assert economy["bonus_action"] == 0
     # 附赠徒手打击不是 Attack action：动作与专注点都不受影响。
     assert economy["action"] == 1
     assert focus_state(instance)["current"] == 2
-    assert instance.ruleset_state["combat"]["enemies"]["goblin-1"]["hp"] == 40 - (4 + 2)
+    assert ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"] == 40 - (4 + 2)
 
 
 def test_bonus_unarmed_strike_disappears_once_the_bonus_action_is_spent() -> None:
@@ -104,7 +105,7 @@ def test_bonus_unarmed_strike_disappears_once_the_bonus_action_is_spent() -> Non
 
     assert forged["ok"] is False
     assert "bonus action" in forged["error"]
-    assert instance.ruleset_state["combat"]["economy"]["bonus_action"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 0
 
 
 def test_flurry_spends_one_focus_and_one_bonus_action_for_two_strikes() -> None:
@@ -136,9 +137,9 @@ def test_flurry_spends_one_focus_and_one_bonus_action_for_two_strikes() -> None:
     ]
     # 资源扣减与两次攻击在同一个 EventBatch 里一起生效。
     assert focus_state(instance)["current"] == 1
-    assert instance.ruleset_state["combat"]["economy"]["bonus_action"] == 0
-    assert instance.ruleset_state["combat"]["economy"]["action"] == 1
-    assert instance.ruleset_state["combat"]["enemies"]["goblin-1"]["hp"] == 40 - 13
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["action"] == 1
+    assert ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"] == 40 - 13
 
 
 def test_flurry_replay_is_idempotent() -> None:
@@ -150,7 +151,7 @@ def test_flurry_replay_is_idempotent() -> None:
 
     assert first["applied"] is True and second["duplicate"] is True
     assert focus_state(instance)["current"] == 1
-    assert instance.ruleset_state["combat"]["economy"]["bonus_action"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 0
 
 
 def test_flurry_is_rejected_without_focus() -> None:
@@ -166,12 +167,12 @@ def test_flurry_is_rejected_without_focus() -> None:
     assert result["ok"] is False
     assert "not enough Focus Points" in result["error"]
     assert focus_state(instance)["current"] == 0
-    assert instance.ruleset_state["combat"]["economy"]["bonus_action"] == 1
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 1
 
 
 def test_flurry_is_rejected_without_a_bonus_action() -> None:
     engine, instance = _setup(level=2)
-    instance.ruleset_state["combat"]["economy"]["bonus_action"] = 0
+    ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] = 0
 
     result = engine.validate_intent(
         instance, capability_intent(engine, instance, "flurry_of_blows", intent_id="f-1"),
@@ -218,13 +219,13 @@ def test_forged_payload_cannot_change_the_authoritative_cost() -> None:
     )
 
     assert focus_state(instance)["current"] == 1
-    assert instance.ruleset_state["combat"]["economy"]["bonus_action"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 0
 
 
 def test_a_rejected_resource_spend_rolls_the_whole_batch_back() -> None:
     engine, instance = _setup(level=2)
-    version = instance.ruleset_state["version"]
-    ledger_length = len(instance.event_ledger)
+    version = ruleset_runtime.state(instance)["version"]
+    ledger_length = len(ruleset_runtime.event_ledger(instance))
     batch = {
         "batch_id": "batch_forged_class_resource",
         "intent_id": "forged-spend",
@@ -244,8 +245,8 @@ def test_a_rejected_resource_spend_rolls_the_whole_batch_back() -> None:
         engine.apply_batch(instance, batch)
 
     assert focus_state(instance)["current"] == 2
-    assert instance.ruleset_state["version"] == version
-    assert len(instance.event_ledger) == ledger_length
+    assert ruleset_runtime.state(instance)["version"] == version
+    assert len(ruleset_runtime.event_ledger(instance)) == ledger_length
 
 
 def test_patient_defense_disengages_as_a_bonus_action() -> None:
@@ -264,7 +265,7 @@ def test_patient_defense_disengages_as_a_bonus_action() -> None:
     assert [event["condition"] for event in events if event["type"] == "condition.applied"] == [
         "disengaged",
     ]
-    assert instance.ruleset_state["combat"]["economy"]["bonus_action"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 0
     assert focus_state(instance)["current"] == 2
 
 
@@ -282,8 +283,8 @@ def test_step_of_the_wind_grants_dash_movement_as_a_bonus_action() -> None:
     )
 
     assert granted["amount"] == 30
-    assert instance.ruleset_state["combat"]["economy"]["movement"] == 60
-    assert instance.ruleset_state["combat"]["economy"]["bonus_action"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["movement"] == 60
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 0
 
 
 def test_focus_variants_spend_focus_and_resolve_both_actions() -> None:
@@ -305,7 +306,7 @@ def test_focus_variants_spend_focus_and_resolve_both_actions() -> None:
         if event["type"] == "condition.applied"
     ] == ["disengaged"]
     assert focus_state(instance)["current"] == 1
-    assert instance.ruleset_state["combat"]["economy"]["movement"] == 60
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["movement"] == 60
 
 
 def test_patient_defense_focus_also_dodges() -> None:
@@ -381,7 +382,7 @@ def test_ai_hosted_monk_uses_the_martial_arts_profile_and_ends_its_turn() -> Non
     attack = next(item for item in intents if item["type"] == "attack")
     assert attack["weapon_ref"] == "unarmed_strike"
     assert {item["type"] for item in intents} <= {"attack", "move", "dodge", "end_turn"}
-    assert instance.ruleset_state["combat"]["enemies"]["goblin-1"]["hp"] < 40
+    assert ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"] < 40
     # AI 回合没有绕过任何权威链：专注点仍然完整。
     assert focus_state(instance)["current"] == 2
 
@@ -391,13 +392,13 @@ def test_monk_companion_keeps_the_automatic_ladder_alive() -> None:
     engine, instance = monk_instance(runtime, monk_sheet(runtime, level=2))
     companion = deepcopy(instance.get_character_sheet("gm")["ruleset_character"])
     companion["resources"] = {"hp": 20, "max_hp": 20, "class": companion["resources"]["class"]}
-    party = instance.ruleset_state.setdefault("party", {"companions": {}})
+    party = ruleset_runtime.state(instance).setdefault("party", {"companions": {}})
     party.setdefault("companions", {})["mira"] = {
         "id": "mira", "name": "Mira", "controller": "ai", "active": True,
         "ruleset_character": companion,
     }
     start_combat(engine, instance, hp=200)
-    combat = instance.ruleset_state["combat"]
+    combat = ruleset_runtime.state(instance)["combat"]
     combat["turn_index"] = combat["initiative"].index("companion:mira")
     combat["economy"] = engine._fresh_economy(
         engine._actor_view(instance, combat, "companion:mira"),
@@ -410,7 +411,7 @@ def test_monk_companion_keeps_the_automatic_ladder_alive() -> None:
     resolved = engine.resolve_intent(instance, intent, SequenceRng([15, 4]))
     assert resolved["ok"] is True
     assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
-    assert instance.ruleset_state["combat"]["enemies"]["goblin-1"]["hp"] == 200 - 6
+    assert ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"] == 200 - 6
 
 
 def test_weaponless_monk_still_owns_the_plain_attack_action() -> None:
@@ -434,8 +435,8 @@ def test_class_capability_requires_the_current_actor() -> None:
         "character_name": "Other",
         "character_sheet": deepcopy(instance.get_character_sheet("gm")),
     }
-    instance.ruleset_state["combat"]["economy"] = engine._fresh_economy(
-        engine._actor_view(instance, instance.ruleset_state["combat"], "player:gm"),
+    ruleset_runtime.state(instance)["combat"]["economy"] = engine._fresh_economy(
+        engine._actor_view(instance, ruleset_runtime.state(instance)["combat"], "player:gm"),
     )
 
     result = engine.validate_intent(

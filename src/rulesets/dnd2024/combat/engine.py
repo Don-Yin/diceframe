@@ -8,7 +8,7 @@ from random import SystemRandom
 from typing import Any
 
 from src.engine.player_control import is_ai_controlled
-from src.engine.modules import legacy_combat, ruleset_runtime
+from src.engine.modules import ruleset_runtime
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.combat.catalog import Dnd2024CombatCatalog
@@ -57,7 +57,7 @@ class Dnd2024CombatEngine(
         self.features = Dnd2024ClassFeatureResolver(self.bundle)
 
     def initialize_state(self, instance: Any) -> dict[str, Any]:
-        state = instance.ruleset_state
+        state = ruleset_runtime.state(instance)
         if not isinstance(state, dict):
             raise CombatIntentError("ruleset_state must be an object")
         state.setdefault("state_schema_version", 1)
@@ -492,7 +492,7 @@ class Dnd2024CombatEngine(
         state = self.initialize_state(instance)
         intent_id = str(intent.get("intent_id") or "")
         prior = next(
-            (item for item in instance.event_ledger if item.get("intent_id") == intent_id),
+            (item for item in ruleset_runtime.event_ledger(instance) if item.get("intent_id") == intent_id),
             None,
         )
         if prior is not None:
@@ -695,10 +695,8 @@ class Dnd2024CombatEngine(
         return self.apply_batch(instance, batch)
 
     def apply_batch(self, instance: Any, batch: dict[str, Any]) -> dict[str, Any]:
-        # initialize_state may write ruleset defaults, even for a replayed
-        # batch, so reject an unsupported projection slot before it runs.
-        legacy_combat.require_writable(instance)
         ruleset_runtime.require_writable(instance)
+        ruleset_runtime.require_binding(instance, self.bundle.manifest.runtime_id)
         state = self.initialize_state(instance)
         snapshot = {
             "version": int(state.get("version", 0) or 0),
@@ -709,27 +707,25 @@ class Dnd2024CombatEngine(
             },
         }
         updated, ledger, duplicate = apply_event_batch(
-            snapshot, instance.event_ledger, batch, self._reduce_event,
+            snapshot, ruleset_runtime.event_ledger(instance), batch, self._reduce_event,
         )
         if not duplicate:
             ruleset_state = updated["ruleset_state"]
             ruleset_state["version"] = updated["version"]
-            instance.ruleset_state = ruleset_state
+            ruleset_runtime.replace_state(instance, ruleset_state)
             for uid, canonical in updated["characters"].items():
                 existing = deepcopy(instance.get_character_sheet(uid))
                 projection = self._project_character(canonical)
                 existing.update(projection)
                 instance.set_character_sheet(uid, existing)
-            instance.event_ledger = ledger
-            combat = ruleset_state["combat"]
-            legacy_combat.project_from_ruleset(instance, combat)
+            ruleset_runtime.replace_event_ledger(instance, ledger)
         return {
             "ok": True,
             "applied": not duplicate,
             "duplicate": duplicate,
-            "state_version": int(instance.ruleset_state.get("version", 0) or 0),
+            "state_version": int(ruleset_runtime.state(instance).get("version", 0) or 0),
             "event_batch": deepcopy(batch),
-            "combat": deepcopy(instance.ruleset_state.get("combat") or {}),
+            "combat": deepcopy(ruleset_runtime.state(instance).get("combat") or {}),
         }
 
     def gameplay_view(self, instance: Any) -> dict[str, Any]:

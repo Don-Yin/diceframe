@@ -21,6 +21,7 @@ from src.commands.dice_resolver import DiceResolver  # noqa: E402
 from src.engine.checks import build_check_request, roll_check_request  # noqa: E402
 from src.engine.dice import roll  # noqa: E402
 from src.engine.game_instance import GameInstance  # noqa: E402
+from src.engine.modules import checks as checks_module  # noqa: E402
 from src.rules.rule_system import RuleSystem  # noqa: E402
 
 
@@ -228,7 +229,7 @@ def _simulate_d20(
                 "dice_rolls": rolled["rolls"],
             }
             resolver.resolve_action_check(instance, action, rule)
-            check = instance.last_check or {}
+            check = checks_module.last_check(instance) or {}
             natural = int(rolled["value"])
             modifier = (attr_value - 10) // 2 + circumstance
             dc = max(1, min(cap, requested_dc))
@@ -286,7 +287,7 @@ def _simulate_d20(
                     "independently_verified": check.get("verdict") == verdict,
                 })
         result.expect(
-            len(instance.last_checks) == players_per_round,
+            len(checks_module.last_checks(instance)) == players_per_round,
             f"round={round_index}: 本轮检定数不是 {players_per_round}",
         )
 
@@ -338,7 +339,7 @@ def _simulate_d100(
                 "dice_rolls": rolled["rolls"],
             }
             resolver.resolve_action_check(instance, action, rule)
-            check = instance.last_check or {}
+            check = checks_module.last_check(instance) or {}
             natural = int(rolled["value"])
             verdict = _expected_coc(natural, threshold)
 
@@ -385,7 +386,7 @@ def _simulate_d100(
                     "independently_verified": check.get("verdict") == verdict,
                 })
         result.expect(
-            len(instance.last_checks) == players_per_round,
+            len(checks_module.last_checks(instance)) == players_per_round,
             f"round={round_index}: 本轮检定数不是 {players_per_round}",
         )
     return result

@@ -49,7 +49,9 @@ async def test_switch_world_uses_lore_fallback_and_saves_once() -> None:
     assert result == {
         "ok": True,
         "world_id": "custom_lore",
+        # No user title (empty) -> the title follows the selected world.
         "world_name": "Custom Lore World",
+        "world_display_name": "Custom Lore World",
     }
     assert context.saved == 1
     assert context.refreshed == ["custom_lore"]

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Literal, Protocol, TypedDict
 from uuid import uuid4
 
+from src.engine.modules import progression_state
 from src.engine.modules.private_channels import remove_table_talk_exchange
 
 logger = logging.getLogger("trpg")
@@ -128,7 +129,7 @@ async def ask(
             "actor_name": str(actor.get("character_name") or actor_uid),
             "question": question,
             "answer": answer,
-            "round": snapshot.round_number,
+            "round": progression_state.round_value(snapshot),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "visibility": "party",
         }
@@ -158,7 +159,7 @@ async def ask(
         "exchange": exchange,
         "advanced": False,
         "action_consumed": False,
-        "round_number": snapshot.round_number,
+        "round_number": progression_state.round_value(snapshot),
         "provider_used": str((generated or {}).get("provider_used") or ""),
         "total_tokens": int((generated or {}).get("total_tokens", 0) or 0),
     })

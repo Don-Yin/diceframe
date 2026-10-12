@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any
+from src.engine import progression
 
 
 XP_THRESHOLDS = (
@@ -28,14 +29,16 @@ def _level(character: dict[str, Any]) -> int:
         return 1
 
 
-def _state(instance: Any) -> dict[str, Any]:
+def _state(instance: Any, *, for_write: bool = False) -> dict[str, Any]:
     from src.engine.modules import ruleset_runtime
 
     ruleset_runtime.require_writable(instance)
-    ruleset_state = instance.ruleset_state
+    if for_write:
+        ruleset_runtime.require_binding(instance, "core:dnd2024")
+    ruleset_state = ruleset_runtime.state(instance)
     if not isinstance(ruleset_state, dict):
         ruleset_state = {}
-        instance.ruleset_state = ruleset_state
+        ruleset_runtime.replace_state(instance, ruleset_state)
     raw = ruleset_state.get("advancement")
     state = raw if isinstance(raw, dict) else {}
     mode = str(state.get("mode") or "milestone")
@@ -62,7 +65,7 @@ def configure(instance: Any, mode: str, authority: str) -> dict[str, Any]:
         raise ValueError("升级方式必须是 milestone 或 xp")
     if normalized_authority not in VALID_AUTHORITIES:
         raise ValueError("升级发放方必须是 ai_gm 或 gm")
-    state = _state(instance)
+    state = _state(instance, for_write=True)
     state["mode"] = normalized_mode
     state["authority"] = normalized_authority
     return view(instance)
@@ -79,7 +82,7 @@ def grant(instance: Any, user_id: str, *, source: str) -> bool:
     level = _level(character)
     if level >= 20:
         raise ValueError("20 级角色不能继续升级")
-    state = _state(instance)
+    state = _state(instance, for_write=True)
     entitlements = state["entitlements"]
     current = entitlements.get(user_id)
     if isinstance(current, dict) and int(current.get("target_level", 0) or 0) == level + 1:
@@ -87,11 +90,11 @@ def grant(instance: Any, user_id: str, *, source: str) -> bool:
     entitlements[user_id] = {
         "target_level": level + 1,
         "source": str(source or "gm"),
-        "granted_round": int(getattr(instance, "round_number", 0) or 0),
+        "granted_round": progression.current_round(instance),
     }
     _history(state, {
         "type": "granted", "user_id": user_id, "target_level": level + 1,
-        "source": str(source or "gm"), "round": int(getattr(instance, "round_number", 0) or 0),
+        "source": str(source or "gm"), "round": progression.current_round(instance),
     })
     return True
 
@@ -101,7 +104,7 @@ def award_xp(instance: Any, user_id: str, amount: int, *, source: str) -> dict[s
         raise ValueError("角色不存在")
     if isinstance(amount, bool) or not 1 <= int(amount) <= 1_000_000:
         raise ValueError("XP 奖励必须是 1 到 1000000 的整数")
-    state = _state(instance)
+    state = _state(instance, for_write=True)
     xp = state["xp"]
     xp[user_id] = max(0, int(xp.get(user_id, 0) or 0)) + int(amount)
     level = _level(instance.get_character_sheet(user_id))
@@ -111,7 +114,7 @@ def award_xp(instance: Any, user_id: str, amount: int, *, source: str) -> dict[s
     _history(state, {
         "type": "xp_awarded", "user_id": user_id, "amount": int(amount),
         "total": xp[user_id], "source": str(source or "gm"),
-        "round": int(getattr(instance, "round_number", 0) or 0),
+        "round": progression.current_round(instance),
     })
     return {"total": xp[user_id], "granted": granted}
 
@@ -124,20 +127,20 @@ def require_entitlement(instance: Any, user_id: str, target_level: int) -> dict[
 
 
 def consume(instance: Any, user_id: str, target_level: int) -> None:
-    state = _state(instance)
+    state = _state(instance, for_write=True)
     entitlement = require_entitlement(instance, user_id, target_level)
     del state["entitlements"][user_id]
     _history(state, {
         "type": "consumed", "user_id": user_id, "target_level": int(target_level),
         "source": str(entitlement.get("source") or ""),
-        "round": int(getattr(instance, "round_number", 0) or 0),
+        "round": progression.current_round(instance),
     })
 
 
 def reconcile_after_level_up(instance: Any, user_id: str) -> bool:
     """Issue the next XP entitlement when stored XP already crossed it."""
 
-    state = _state(instance)
+    state = _state(instance, for_write=True)
     if state["mode"] != "xp" or user_id not in instance.players:
         return False
     if user_id in state["entitlements"]:
@@ -159,7 +162,9 @@ def view(instance: Any) -> dict[str, Any]:
 def project(instance: Any) -> dict[str, Any]:
     """Return the public advancement view without normalizing stored state in place."""
 
-    ruleset_state = getattr(instance, "ruleset_state", None)
+    from src.engine.modules import ruleset_runtime
+
+    ruleset_state = ruleset_runtime.state(instance)
     raw = ruleset_state.get("advancement") if isinstance(ruleset_state, dict) else None
     saved = raw if isinstance(raw, dict) else {}
     mode = str(saved.get("mode") or "milestone")
@@ -204,7 +209,7 @@ def _project(instance: Any, state: dict[str, Any]) -> dict[str, Any]:
 
 
 def apply_ai_rewards(instance: Any, data: dict[str, Any]) -> list[str]:
-    state = _state(instance)
+    state = _state(instance, for_write=True)
     if state["authority"] != "ai_gm":
         return []
     messages: list[str] = []
@@ -276,16 +281,20 @@ def restore(instance: Any, saved: Any) -> None:
     from src.engine.modules import ruleset_runtime
 
     ruleset_runtime.require_writable(instance)
-    ruleset_state = instance.ruleset_state
+    ruleset_runtime.require_binding(instance, "core:dnd2024")
+    ruleset_state = ruleset_runtime.state(instance)
     if not isinstance(ruleset_state, dict):
         ruleset_state = {}
-        instance.ruleset_state = ruleset_state
+        ruleset_runtime.replace_state(instance, ruleset_state)
     ruleset_state["advancement"] = deepcopy(saved) if isinstance(saved, dict) else {}
 
 
 def control(instance: Any, command: dict[str, Any]) -> dict[str, Any]:
     """Apply one GM advancement command and return a transport-neutral result."""
+    from src.engine.modules import ruleset_runtime
 
+    ruleset_runtime.require_writable(instance)
+    ruleset_runtime.require_binding(instance, "core:dnd2024")
     action = str(command.get("action") or "").strip().casefold()
     try:
         if action == "configure":

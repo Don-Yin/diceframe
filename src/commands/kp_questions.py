@@ -133,14 +133,49 @@ class KPQuestionResponder:
         ensure_matcher_for_world: Callable[[str, str], None],
         max_tokens: int = 768,
         lore_retriever: Any | None = None,
+        content_projection: Any | None = None,
     ) -> None:
         self.llm_client = llm_client
+        self.content_projection = content_projection
         self.matcher = matcher
         self.lore_retriever = lore_retriever or LoreRetriever(matcher)
         self.prompt_composer = prompt_composer
         self.load_world_template = load_world_template
         self.ensure_matcher_for_world = ensure_matcher_for_world
         self.max_tokens = max(128, int(max_tokens or 768))
+
+    def _audience_lore(
+        self,
+        instance: GameInstance,
+        matches: list[dict],
+        actor_uid: str,
+        actor_name: str,
+        visibility: Literal["private", "party"],
+    ) -> list[dict]:
+        """Keep only matches the answer's audience may see (Track R6-b).
+
+        The content projection is the authority for what may reach a player:
+        a private answer may use the questioner's character projection, a
+        party answer only the party projection.  The shared retriever is a
+        relevance ranking, not a permission boundary (it is shared with GM
+        rounds), so its hits are intersected with the projection by id.
+        """
+
+        matches = (
+            filter_public_lorebook_entries(matches)
+            if visibility == "party"
+            else filter_player_visible_lorebook_entries(matches, actor_uid, actor_name)
+        )
+        projection = self.content_projection
+        if projection is None:
+            return matches
+        projected = (
+            projection.for_party(instance)
+            if visibility == "party"
+            else projection.for_character(instance, actor_uid, viewer_name=actor_name)
+        )
+        allowed = {str(entry.get("id") or "") for entry in projected} - {""}
+        return [entry for entry in matches if str(entry.get("id") or "") in allowed]
 
     async def answer(
         self,
@@ -165,11 +200,7 @@ class KPQuestionResponder:
             mutate_timers=False,
             action_actor_uids=[actor_uid] if visibility != "party" else [],
         )
-        matches = (
-            filter_public_lorebook_entries(matches)
-            if visibility == "party"
-            else filter_player_visible_lorebook_entries(matches, actor_uid, actor_name)
-        )
+        matches = self._audience_lore(instance, matches, actor_uid, actor_name, visibility)
         rule_ctx = self.prompt_composer.load_rule_context(instance, self.load_world_template)
         system_prompt = build_kp_question_prompt(
             instance, actor_name, rule_ctx.rule_appendix, visibility,

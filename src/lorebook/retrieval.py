@@ -25,7 +25,9 @@ import math
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from src.engine import progression
 from src.engine.language import DEFAULT_LANGUAGE
+from src.engine.modules import lorebook_runtime, narrative_notes
 from src.engine.world_legality import actor_location_fact_key
 from src.engine.world_state import project_visible_state
 from src.knowledge.visibility import entry_visible_to_viewer
@@ -214,7 +216,7 @@ def lore_query_anchors(
 ) -> dict[str, Any]:
     """本轮锚点：scene / canonical location / 在场 NPC。"""
 
-    scene = str(getattr(instance, "scene", "") or "").strip()
+    scene = str(narrative_notes.scene(instance) or "").strip()
     return {
         "scene": scene,
         "location": lore_query_location(
@@ -348,6 +350,7 @@ class LoreRetriever:
         *,
         store: Any | None = None,
         load_world_template: Callable[[str, str], Any] | None = None,
+        content_projection: Any | None = None,
         embedding_client_provider: Callable[[], Any] | None = None,
         semantic_top_k: int = DEFAULT_SEMANTIC_TOP_K,
         semantic_threshold: float = DEFAULT_SEMANTIC_THRESHOLD,
@@ -355,6 +358,7 @@ class LoreRetriever:
         self._matcher = matcher
         self._store = store
         self._load_world_template = load_world_template
+        self._content_projection = content_projection
         self._embedding_client_provider = embedding_client_provider
         self._semantic_top_k = max(0, int(semantic_top_k))
         self._semantic_threshold = float(semantic_threshold)
@@ -384,7 +388,10 @@ class LoreRetriever:
         scope = (str(world_id or ""), str(language or DEFAULT_LANGUAGE), str(revision))
         if scope == self._scope:
             return
-        entries = self._store.list_entries(str(world_id))
+        if self._content_projection is not None:
+            entries = self._content_projection.for_world_authoring(str(world_id))
+        else:
+            entries = self._store.list_entries(str(world_id))
         if self._load_world_template is not None:
             from src.content.worlds import localize_lorebook_entries
 
@@ -556,7 +563,7 @@ class LoreRetriever:
             is_visible=_visible,
             is_candidate=lambda entry: self._vector_mode(entry) != "vector_only",
             extra_candidates=semantic_ids,
-            current_tick=int(getattr(instance, "round_number", 0) or 0),
+            current_tick=progression.current_round(instance),
             max_activated=self._candidate_cap(overall_budget),
         )
         hits = []
@@ -629,7 +636,7 @@ class LoreRetriever:
 
     @staticmethod
     def _timed_state(instance: Any, *, mutate_timers: bool) -> dict[str, dict] | None:
-        state = getattr(instance, "lorebook_timed_state", None)
+        state = lorebook_runtime.timers(instance)
         if not isinstance(state, dict):
             return None
         return state if mutate_timers else copy.deepcopy(state)

@@ -16,6 +16,7 @@ from src.webui.services import ruleset_gameplay
 from src.webui.services._common import _parse_game_key
 
 from dnd2024_http_common import GameplayApiShim, quick_character
+from src.engine.modules import ruleset_runtime
 
 
 class _MemoryProbe:
@@ -141,8 +142,8 @@ async def test_m6_http_runs_confirmed_session_and_tutorial_into_memory(tmp_path)
     recovered_registry = GameRegistry(tmp_path / "saves")
     recovered = await recovered_registry.load(instance.game_key)
     assert recovered is not None
-    assert recovered.ruleset_state["campaign"]["tutorial"]["status"] == "completed"
-    assert len(recovered.ruleset_state["campaign"]["chapter_summaries"]) == 3
+    assert ruleset_runtime.state(recovered)["campaign"]["tutorial"]["status"] == "completed"
+    assert len(ruleset_runtime.state(recovered)["campaign"]["chapter_summaries"]) == 3
     assert len(recovered.log) == 8
     assert all(
         action.get("text") not in {"执行规则行动", "Resolve a rules action"}

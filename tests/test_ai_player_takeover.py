@@ -65,6 +65,8 @@ from src.webui.services.turns import (
     resume_after_control_change,
     submit_action,
 )
+from src.engine.modules import ruleset_runtime, table_settings
+from src.engine.player_control import set_away_control_policy
 
 GAME_KEY = "web|ai-takeover|bot"
 GAME_KEY_PARTS = ("web", "ai-takeover", "bot")
@@ -144,7 +146,7 @@ def make_instance(
     instance = GameInstance(game_key=GAME_KEY_PARTS, rule_id="test")
     instance.state = GameState.ACTIVE_ACTION
     instance.round_number = 1
-    instance.solo_mode = solo
+    table_settings.replace_solo_mode(instance, solo)
     for uid in (*humans, *ai):
         sheet = HUMAN_SHEET if uid in humans else AI_SHEET
         instance.put_player(uid, {
@@ -425,7 +427,7 @@ async def test_the_control_change_and_the_generated_action_are_both_saved() -> N
 @pytest.mark.asyncio
 async def test_away_takeover_resumes_immediately() -> None:
     instance = make_instance(humans=("h1", "h2"))
-    instance.away_control_policy = "ai_takeover"
+    set_away_control_policy(instance, "ai_takeover")
     await instance.add_action("h1", "我点亮提灯。")
     fixture = TakeoverFixture(instance, FakePlayerLLM(replies=["我先找个掩体。"]), SaveRecorder())
 
@@ -475,7 +477,7 @@ async def test_away_takeover_that_cannot_resume_is_refused_while_the_round_is_bu
     """进行中的回合里控制权切换仍然被拒——即时接管没有放松安全边界。"""
 
     instance = make_instance(humans=("h1", "h2"))
-    instance.away_control_policy = "ai_takeover"
+    set_away_control_policy(instance, "ai_takeover")
     instance.state = GameState.ACTIVE_JUDGMENT
     fixture = TakeoverFixture(instance, FakePlayerLLM(), SaveRecorder())
 
@@ -581,11 +583,11 @@ def _start_combat(engine: Dnd2024CombatEngine, instance: GameInstance) -> None:
     assert resolved["ok"] is True
     applied = engine.apply_batch(instance, resolved["event_batch"])
     assert applied["applied"] is True
-    assert instance.ruleset_state["combat"]["status"] == "active"
+    assert ruleset_runtime.state(instance)["combat"]["status"] == "active"
 
 
 def _set_turn(engine: Dnd2024CombatEngine, instance: GameInstance, actor_id: str) -> None:
-    combat = instance.ruleset_state["combat"]
+    combat = ruleset_runtime.state(instance)["combat"]
     combat["turn_index"] = combat["initiative"].index(actor_id)
     # 与既有战斗测试同一手法：手工摆到某个 actor 的回合并给它一份新经济。
     combat["economy"] = engine._fresh_economy(  # noqa: SLF001
@@ -594,7 +596,7 @@ def _set_turn(engine: Dnd2024CombatEngine, instance: GameInstance, actor_id: str
 
 
 def _current_actor(instance: GameInstance) -> str:
-    combat = instance.ruleset_state["combat"]
+    combat = ruleset_runtime.state(instance)["combat"]
     return str(combat["initiative"][combat["turn_index"]])
 
 
@@ -602,11 +604,11 @@ def _current_actor(instance: GameInstance) -> str:
 async def test_current_actor_switched_to_ai_is_played_immediately() -> None:
     runtime, engine, instance = _combat_setup()
     _start_combat(engine, instance)
-    assert instance.ruleset_state["combat"]["initiative"] == [
+    assert ruleset_runtime.state(instance)["combat"]["initiative"] == [
         "player:ai1", "player:gm", "player:u1", "enemy:goblin-1",
     ]
     _set_turn(engine, instance, "player:gm")
-    version_before = int(instance.ruleset_state["version"])
+    version_before = int(ruleset_runtime.state(instance)["version"])
     fixture = TakeoverFixture(instance, FakePlayerLLM(), SaveRecorder(), runtime=runtime)
 
     result = await fixture.controls.set_player_control(GAME_KEY, "gm", "ai")
@@ -616,14 +618,14 @@ async def test_current_actor_switched_to_ai_is_played_immediately() -> None:
     assert result["resume"]["handled"] is True
     assert result["resume"]["resumed"] is True
     # 服务器真的提交了合法的 structured intent，而不是等真人再点一次。
-    assert version_before < int(instance.ruleset_state["version"])
+    assert version_before < int(ruleset_runtime.state(instance)["version"])
     assert _current_actor(instance) != "player:gm"
     # 战斗没有引入 LLM 规则权威：一次模型调用都不该发生。
     assert fixture.llm.calls == []
     # B18：控制权与战斗推进一起落盘，重新读盘后仍然是推进后的状态。
     assert fixture.save.last["players"]["gm"]["control"]["mode"] == "ai"
     persisted = GameInstance.from_dict(fixture.save.last)
-    combat = persisted.ruleset_state["combat"]
+    combat = ruleset_runtime.state(persisted)["combat"]
     assert combat["initiative"][combat["turn_index"]] != "player:gm"
 
 
@@ -632,8 +634,8 @@ async def test_a_seat_that_is_not_the_current_actor_never_seizes_the_turn() -> N
     runtime, engine, instance = _combat_setup()
     _start_combat(engine, instance)
     _set_turn(engine, instance, "player:gm")  # 当前 actor 是另一个真人 PC
-    version_before = int(instance.ruleset_state["version"])
-    combat_before = deepcopy(instance.ruleset_state["combat"])
+    version_before = int(ruleset_runtime.state(instance)["version"])
+    combat_before = deepcopy(ruleset_runtime.state(instance)["combat"])
     fixture = TakeoverFixture(instance, FakePlayerLLM(), SaveRecorder(), runtime=runtime)
 
     result = await fixture.controls.set_player_control(GAME_KEY, "u1", "ai")
@@ -643,8 +645,8 @@ async def test_a_seat_that_is_not_the_current_actor_never_seizes_the_turn() -> N
     assert result["resume"]["handled"] is True
     assert result["resume"]["resumed"] is False
     assert result["resume"]["reason"] == "not_this_seat"
-    assert int(instance.ruleset_state["version"]) == version_before
-    assert instance.ruleset_state["combat"] == combat_before
+    assert int(ruleset_runtime.state(instance)["version"]) == version_before
+    assert ruleset_runtime.state(instance)["combat"] == combat_before
     assert _current_actor(instance) == "player:gm"
     assert fixture.llm.calls == []
 
@@ -672,8 +674,8 @@ async def test_a_failed_combat_takeover_rolls_back_instead_of_half_committing(
     runtime, engine, instance = _combat_setup()
     _start_combat(engine, instance)
     _set_turn(engine, instance, "player:gm")
-    state_before = deepcopy(instance.ruleset_state)
-    ledger_before = deepcopy(instance.event_ledger)
+    state_before = deepcopy(ruleset_runtime.state(instance))
+    ledger_before = deepcopy(ruleset_runtime.event_ledger(instance))
     fixture = TakeoverFixture(instance, FakePlayerLLM(), SaveRecorder(), runtime=runtime)
     saves_before = len(fixture.save.snapshots)
     monkeypatch.setattr(
@@ -688,7 +690,7 @@ async def test_a_failed_combat_takeover_rolls_back_instead_of_half_committing(
     assert result["resume"]["resumed"] is False
     assert result["resume"]["error_code"] == "AUTOMATIC_TURN_FAILED"
     # 状态回到失败之前，没有半提交，也没有多写一次存档。
-    assert instance.ruleset_state == state_before
-    assert instance.event_ledger == ledger_before
+    assert ruleset_runtime.state(instance) == state_before
+    assert ruleset_runtime.event_ledger(instance) == ledger_before
     assert len(fixture.save.snapshots) == saves_before + 1  # 只有控制权那一次
     assert fixture.save.last["players"]["gm"]["control"]["mode"] == "ai"

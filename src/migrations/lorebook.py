@@ -484,9 +484,55 @@ def _v9(conn: sqlite3.Connection) -> None:
     ensure_column(conn, "lorebook_entries", "regex_executable", "INTEGER NOT NULL DEFAULT 1")
 
 
+def _v10(conn: sqlite3.Connection) -> None:
+    """Separate a Book's external identity from its source.
+
+    A source such as one client install pushes many Books, so ``source_id``
+    alone cannot identify a Book any more: ``external_id`` is that source's own
+    id for it. Existing rows keep ``external_id = ''`` and with it their current
+    meaning (one Book per ``source_id``); they are never rewritten or guessed.
+
+    The partial unique index makes "at most one Book tracks a given external
+    identity" a storage invariant, while legacy rows (empty external id) stay
+    outside it.
+    """
+
+    ensure_column(conn, "lorebooks", "external_id", "TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_lorebooks_external_identity "
+        "ON lorebooks(source_kind, source_id, external_id) WHERE external_id <> ''"
+    )
+
+
+def _v11(conn: sqlite3.Connection) -> None:
+    """Record whether a Book still follows its import source.
+
+    ``import_link``: ``''`` for rows written before import plans existed (they
+    keep their legacy meaning), ``tracked`` for the one Book a source pushes
+    updates into, ``detached`` for a Book kept aside when the user chose "keep
+    both". ``import_state_digest`` is the Book's content digest right after
+    the last import, so a later preview can tell whether the server copy was
+    edited since.
+
+    A detached Book keeps its full provenance for display, so the uniqueness
+    invariant moves to tracked (non-detached) Books only. Nothing is detached
+    by this step: existing rows stay outside both the new and the old meaning
+    of "detached", so the replacement index accepts exactly what v10 accepted.
+    """
+
+    ensure_column(conn, "lorebooks", "import_link", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "lorebooks", "import_state_digest", "TEXT NOT NULL DEFAULT ''")
+    conn.execute("DROP INDEX IF EXISTS idx_lorebooks_external_identity")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_lorebooks_tracked_identity "
+        "ON lorebooks(source_kind, source_id, external_id) "
+        "WHERE external_id <> '' AND import_link <> 'detached'"
+    )
+
+
 MIGRATIONS: tuple[tuple[int, object], ...] = (
     (1, _v1), (2, _v2), (3, _v3), (4, _v4), (5, _v5), (6, _v6), (7, _v7), (8, _v8),
-    (9, _v9),
+    (9, _v9), (10, _v10), (11, _v11),
 )
 CURRENT_LOREBOOK_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

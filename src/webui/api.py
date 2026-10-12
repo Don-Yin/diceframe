@@ -16,6 +16,8 @@ from src.engine.game_instance import GameRegistry
 from src.engine import persistence
 from src.webui.services.adventure_materialization import materialize_world_seed
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
+from src.engine.modules import table_settings
+from src.engine.participant_view import Viewer
 from src.lorebook.store import LorebookStore
 from src.adventures import AdventureBundleLoader, AdventureResolver
 from src.adventures.registry import AdventureSource, AdventureSourceRegistry
@@ -28,10 +30,14 @@ from src.rulesets.builtin import (
 )
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.engine.world_template import load_world_template
-from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, lorebooks, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls
+from src.content_modules.projection import ContentProjectionService
+from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, lorebooks, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls, check_reveals, seat_tokens
 from src.webui.services import combat_extension as combat_extension_service
 from src.webui.services import adventure_runtime
 from src.webui.services import ruleset_characters
+from src.webui.services import character_card_import
+from src.webui.services import content_sync
+from src.lorebook.sync import LorebookSyncExporter, LorebookSyncImporter
 from src.webui.services import memory as memory_service
 from src.webui.services._common import _parse_game_key, _is_safe_world_id
 
@@ -210,9 +216,11 @@ class WebAPI:
                 generated_image_file=lambda asset_id: self.generated_image_file(
                     asset_id,
                 ),
+                content_projection=getattr(handler, "content_projection", None),
             ),
+            # Table characters auto-saved into the library: never plugin cards.
             save_character_card=lambda character: character_cards.save_character_card(
-                self._character_card_dependencies, character,
+                self._character_card_dependencies, character, from_game=True,
             ),
             apply_economy_effects=(
                 handler.commit_deferred_economy_effects
@@ -387,6 +395,8 @@ class WebAPI:
             )
         )
         self._manual_rolls = manual_rolls.ManualRollService(manual_rolls.ManualRollDependencies(_parse_game_key, self._reg.get, self._reg.save, self._load_rule_for_game))
+        self._check_reveals = check_reveals.CheckRevealService(check_reveals.CheckRevealDependencies(_parse_game_key, self._reg.get, self._reg.save))
+        self._seat_tokens = seat_tokens.SeatTokenService(seat_tokens.SeatTokenDependencies(_parse_game_key, self._reg.get, self._reg.save))
         self._game_master = game_master.GameMasterService(
             game_master.GameMasterDependencies(
                 parse_game_key=_parse_game_key,
@@ -432,6 +442,7 @@ class WebAPI:
         self._module_dependencies = modules.ModuleDependencies(
             plugin_host=self._plugins,
             adventure_registry=self._adventure_source_registry,
+            lorebook_store=self._lore,
             ruleset_registry=self._ruleset_registry,
             list_instances=self._reg.list_all,
             # FIX-01 §3.7：绑定存档保护必须覆盖所有持久化存档（paused / ended /
@@ -468,6 +479,15 @@ class WebAPI:
                     self._adventure_runtime_dependencies, instance,
                 )
             )
+        if self._handler is not None and hasattr(self._handler, "set_adventure_run_initializer"):
+            # Reset/restart build a new run of the same game: initialize v2
+            # progress + world seed like the creation transaction (v1 bindings
+            # are not re-resolved, preserving their previous restart path).
+            self._handler.set_adventure_run_initializer(
+                lambda instance: adventure_runtime.initialize_adventure_new_run(
+                    self._adventure_runtime_dependencies, instance,
+                )
+            )
         self._world_dependencies = worlds.WorldDependencies(
             lorebook=self._lore,
             worlds_dir=self._worlds_dir,
@@ -480,6 +500,7 @@ class WebAPI:
                 else None
             ),
             list_instances=self._reg.list_all,
+            content_projection=getattr(self._handler, "content_projection", None),
         )
         self._plugin_content_dependencies = plugins.PluginContentDependencies(
             plugin_host=self._plugins,
@@ -497,6 +518,9 @@ class WebAPI:
                 ),
                 save_entry=lambda entry: worlds.save_entry(
                     self._world_dependencies, entry,
+                ),
+                save_book_entry=lambda book_id, entry: lorebooks.save_lorebook_entry(
+                    self._lorebook_dependencies(), book_id, entry,
                 ),
             ),
             portraits=plugins.PluginPortraitDependencies(
@@ -626,6 +650,7 @@ class WebAPI:
             load_world_template=self._load_world_template,
             map_background_file=self.map_background_file,
             generated_image_file=self.generated_image_file,
+            content_projection=getattr(handler, "content_projection", None),
         )
         self._assistant_dependencies = assistant.AssistantDependencies(
             list_plugins=self.list_plugins,
@@ -725,6 +750,7 @@ class WebAPI:
                 lorebook=self._lore,
                 get_instance=self._reg.get,
                 parse_game_key=_parse_game_key,
+                content_projection=ContentProjectionService(self._lore),
             )
         )
         kp_answerer = (
@@ -863,6 +889,9 @@ class WebAPI:
 
     def module_adventures(self, module_id: str) -> dict[str, Any]:
         return modules.module_adventures(self._module_dependencies, module_id)
+
+    def module_lorebooks(self, module_id: str) -> dict[str, Any]:
+        return modules.module_lorebooks(self._module_dependencies, module_id)
 
     def module_content(
         self, module_id: str, kind: str, key: str, language: str = "",
@@ -1229,6 +1258,7 @@ class WebAPI:
         plugin_id: str = "",
         target_world_id: str = "",
         overwrite: bool = False,
+        target_book_id: str = "",
     ) -> dict[str, Any]:
         return plugins.import_plugin_content(
             self._plugin_content_dependencies,
@@ -1237,11 +1267,20 @@ class WebAPI:
             plugin_id,
             target_world_id,
             overwrite,
+            target_book_id=target_book_id,
         )
 
-    def import_all_plugin_content(self, plugin_id: str, target_world_id: str = "") -> dict[str, Any]:
+    def import_all_plugin_content(
+        self,
+        plugin_id: str,
+        target_world_id: str = "",
+        target_book_id: str = "",
+    ) -> dict[str, Any]:
         return plugins.import_all_plugin_content(
-            self._plugin_content_dependencies, plugin_id, target_world_id,
+            self._plugin_content_dependencies,
+            plugin_id,
+            target_world_id,
+            target_book_id=target_book_id,
         )
 
     def export_content_pack(
@@ -1486,6 +1525,21 @@ class WebAPI:
     async def cancel_manual_roll_request(self, game_key, user_id, request_id, body):
         return await self._manual_rolls.cancel(game_key, user_id, request_id, body)
 
+    async def reveal_check(self, game_key: str, check_id: str, user_id: str):
+        return await self._check_reveals.reveal(game_key, check_id, user_id)
+
+    async def issue_seat_token(
+        self, game_key: str, uid: str, *, requester_uid: str, owner: bool, rotate: bool = False,
+        bound_sessions: int = 0, check_token: str = "",
+    ) -> dict:
+        return await self._seat_tokens.issue_for_gm(
+            game_key, uid, requester_uid=requester_uid, owner=owner, rotate=rotate,
+            bound_sessions=bound_sessions, check_token=check_token,
+        )
+
+    async def claim_seat_token(self, game_key: str, *, session_uid: str) -> dict:
+        return await self._seat_tokens.claim(game_key, session_uid=session_uid)
+
     async def save_game_instance(self, instance) -> None:
         """Persist an already-authorized aggregate through the application facade."""
 
@@ -1688,6 +1742,9 @@ class WebAPI:
     def list_character_cards(self) -> dict[str, Any]:
         return character_cards.list_character_cards(self._character_card_dependencies)
 
+    def list_shareable_character_cards(self) -> dict[str, Any]:
+        return character_cards.list_shareable_character_cards(self._character_card_dependencies)
+
     def save_character_card(self, character: dict) -> dict[str, Any]:
         return character_cards.save_character_card(
             self._character_card_dependencies, character,
@@ -1720,6 +1777,70 @@ class WebAPI:
     def export_character_cards(self, card_ids: list[str]) -> dict[str, Any]:
         return character_cards.export_character_cards(
             self._character_card_dependencies, card_ids,
+        )
+
+    def _card_import_dependencies(self) -> character_card_import.CardImportDependencies:
+        deps = self._character_card_dependencies
+        return character_card_import.CardImportDependencies(
+            read_cards=lambda: character_cards.read_library(deps),
+            write_cards=lambda cards: character_cards.write_library(deps, cards),
+            lock=lambda: character_cards.library_lock(deps),
+            to_card=character_cards.to_library_card,
+            new_card_id=character_cards.new_card_id,
+            is_ruleset_card=deps.is_ruleset_card,
+            lorebook=deps.lorebook,
+        )
+
+    def _content_sync_dependencies(self) -> content_sync.ContentSyncDependencies:
+        def importers(pushed_by_device: str) -> dict[str, Any]:
+            found: dict[str, Any] = {
+                "character-card": character_card_import.CardSyncImporter(
+                    self._card_import_dependencies(), pushed_by_device=pushed_by_device,
+                ),
+            }
+            if self._lore is not None:
+                found["lorebook-v3"] = LorebookSyncImporter(self._lore)
+            return found
+
+        def exporters() -> dict[str, Any]:
+            found: dict[str, Any] = {
+                "character-card": character_card_import.CardSyncExporter(self._card_import_dependencies()),
+            }
+            if self._lore is not None:
+                found["lorebook-v3"] = LorebookSyncExporter(self._lore)
+            return found
+
+        return content_sync.ContentSyncDependencies(importers=importers, exporters=exporters)
+
+    def preview_content_import(self, body: dict[str, Any], *, pushed_by_device: str = "") -> dict[str, Any]:
+        return content_sync.preview_import(
+            self._content_sync_dependencies(), body, pushed_by_device=pushed_by_device,
+        )
+
+    def commit_content_import(self, body: dict[str, Any], *, pushed_by_device: str = "") -> dict[str, Any]:
+        return content_sync.commit_import(
+            self._content_sync_dependencies(), body, pushed_by_device=pushed_by_device,
+        )
+
+    def content_status(self, body: dict[str, Any]) -> dict[str, Any]:
+        return content_sync.content_status(self._content_sync_dependencies(), body)
+
+    def list_content(self, body: dict[str, Any], *, max_limit: int) -> dict[str, Any]:
+        return content_sync.list_content(self._content_sync_dependencies(), body, max_limit=max_limit)
+
+    def export_content(self, body: dict[str, Any], *, server_instance_id: str) -> dict[str, Any]:
+        return content_sync.export_content(
+            self._content_sync_dependencies(), body, server_instance_id=server_instance_id,
+        )
+
+    def preview_character_card_import(self, body: dict[str, Any]) -> dict[str, Any]:
+        return character_card_import.preview_card_import(self._card_import_dependencies(), body)
+
+    def commit_character_card_plan(
+        self, body: dict[str, Any], *, pushed_by_device: str = "",
+    ) -> dict[str, Any]:
+        return character_card_import.commit_card_import(
+            self._card_import_dependencies(), body, pushed_by_device=pushed_by_device,
         )
 
     def update_ruleset_character_card_profile(
@@ -1852,6 +1973,9 @@ class WebAPI:
     def commit_lorebook_import(self, payload: dict[str, Any], binding: dict[str, Any] | None = None, book_id: str | None = None) -> dict[str, Any]:
         return lorebooks.commit_lorebook_import(self._lorebook_dependencies(), payload, binding, book_id)
 
+    def commit_lorebook_plan(self, body: dict[str, Any]) -> dict[str, Any]:
+        return lorebooks.commit_lorebook_plan(self._lorebook_dependencies(), body)
+
     async def generate_lorebook_entries(self, world_id: str, prompt: str, language: str = "") -> dict[str, Any]:
         return await worlds.generate_lorebook_entries(
             self._world_dependencies, world_id, prompt, language,
@@ -1898,9 +2022,12 @@ class WebAPI:
             self._character_dependencies, game_key, user_id,
         )
 
-    async def update_character(self, game_key: str, user_id: str, updates: dict) -> dict[str, Any]:
+    async def update_character(
+        self, game_key: str, user_id: str, updates: dict, *, gm_authority: bool = False,
+    ) -> dict[str, Any]:
         return await characters.update_character(
             self._character_dependencies, game_key, user_id, updates,
+            gm_authority=gm_authority,
         )
 
     async def update_ruleset_character_profile(
@@ -1911,10 +2038,30 @@ class WebAPI:
         )
 
     async def adopt_ruleset_character_card(
-        self, game_key: str, user_id: str, card_id: str,
+        self, game_key: str, user_id: str, card_id: str, *, gm_authority: bool,
     ) -> dict[str, Any]:
+        """Adopt a library card by id; classic games apply it server-side.
+
+        ``gm_authority`` is the caller's: once the seat has acted a
+        player-side caller gets ``ADOPT_REQUIRES_GM`` on either path.
+        """
+        card = next(
+            (
+                item for item in self.list_character_cards()["cards"]
+                if card_id and card_id in {str(item.get("id") or ""), str(item.get("card_id") or "")}
+            ),
+            None,
+        )
+        if card is not None:
+            result = await characters.adopt_library_card(
+                self._character_dependencies, game_key, user_id, card,
+                gm_authority=gm_authority,
+            )
+            if result.get("error_code") != "RULESET_CHARACTER_OPERATION_REQUIRED":
+                return result
         return await ruleset_characters.adopt_character_card(
             self._ruleset_character_dependencies, game_key, user_id, card_id,
+            gm_authority=gm_authority,
         )
 
     def preview_live_character_advancement(
@@ -1970,7 +2117,7 @@ class WebAPI:
     def economy_auto_reward_settings(self, instance: Any = None) -> tuple[bool, int]:
         """按局解析奖励自动结算 (enabled, gold_cap)。
 
-        优先级：本局 GM 覆盖（instance.economy_reward_policy）→ 规则模板
+        优先级：本局 GM 覆盖（table_settings.economy_reward_policy）→ 规则模板
         economy_defaults（D&D 金币与 COC 美元的量级不同）→ 服务器全局配置
         兜底。规则模板读取失败时按无默认值处理，不影响本局覆盖与全局兜底。
         """
@@ -1987,7 +2134,7 @@ class WebAPI:
         except Exception:
             logger.warning("读取规则模板奖励默认值失败，回退全局配置", exc_info=True)
         return resolve_auto_reward_policy(
-            game_policy=getattr(instance, "economy_reward_policy", None),
+            game_policy=table_settings.economy_reward_policy(instance),
             rule_template=rule_template,
             global_enabled=global_enabled,
             global_cap=global_cap,
@@ -2004,7 +2151,7 @@ class WebAPI:
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
         await self.save_game_instance(instance)
-        return {"ok": True, "economy_reward_policy": instance.economy_reward_policy}
+        return {"ok": True, "economy_reward_policy": table_settings.economy_reward_policy(instance)}
 
     async def combat_extension_scheduler_advance(self, game_key: str) -> dict[str, Any]:
         """通用战斗扩展：GM 推进 ATB 时间（gauge 累积至有人就绪）。"""
@@ -2098,19 +2245,25 @@ class WebAPI:
                 recovered += 1
         return recovered
 
-    async def delete_character(self, game_key: str, user_id: str) -> dict[str, Any]:
+    async def delete_character(
+        self, game_key: str, user_id: str, *, gm_authority: bool,
+    ) -> dict[str, Any]:
         return await characters.delete_character(
             self._character_dependencies, game_key, user_id,
+            gm_authority=gm_authority,
         )
 
     async def create_player(self, game_key: str, character: dict,
-                           force_uid: str = "", assign_new_id: bool = False) -> dict[str, Any]:
+                           force_uid: str = "", assign_new_id: bool = False,
+                           *, seat_token_uid: str = "", require_seat_proof: bool = False) -> dict[str, Any]:
         return await characters.create_player(
             self._character_dependencies,
             game_key,
             character,
             force_uid,
             assign_new_id,
+            seat_token_uid=seat_token_uid,
+            require_seat_proof=require_seat_proof,
         )
 
     def save_avatar_upload(self, file_data: str, file_name: str = "") -> dict[str, Any]:
@@ -2153,10 +2306,10 @@ class WebAPI:
         )
 
     def list_game_generated_images(
-        self, game_key: str, user_id: str, *, purpose: str = "",
+        self, game_key: str, user_id: str, *, purpose: str = "", viewer_is_gm: bool = False,
     ) -> list[dict[str, Any]]:
         return self._generated_images.list_game_images(
-            game_key, user_id, purpose=purpose,
+            game_key, user_id, purpose=purpose, viewer_is_gm=viewer_is_gm,
         )
 
     async def use_generated_image_as_map_background(
@@ -2558,7 +2711,9 @@ class WebAPI:
                            gm_style_override: dict[str, Any] | None = None,
                            advancement_mode: str = "milestone",
                            advancement_authority: str = "ai_gm",
-                           unclaimed_control_default: str = "") -> dict[str, Any]:
+                           unclaimed_control_default: str = "",
+                           world_ref: dict[str, Any] | None = None,
+                           book_bindings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         return await self._game_lifecycle.create_game(
             world_id=world_id, game_name=game_name, group_name=group_name,
             rule_id=rule_id, solo=solo, lorebook_world_id=lorebook_world_id,
@@ -2577,6 +2732,8 @@ class WebAPI:
             advancement_mode=advancement_mode,
             advancement_authority=advancement_authority,
             unclaimed_control_default=unclaimed_control_default,
+            world_ref=world_ref,
+            book_bindings=book_bindings,
         )
 
     # ---- 重开引用码 ----
@@ -2706,8 +2863,8 @@ class WebAPI:
 
     # ----
 
-    def get_map_locations(self, game_key: str) -> dict[str, Any]:
-        return maps.get_map_locations(self._map_dependencies, game_key)
+    def get_map_locations(self, game_key: str, *, viewer: Viewer) -> dict[str, Any]:
+        return maps.get_map_locations(self._map_dependencies, game_key, viewer=viewer)
 
     def map_background_asset(self, game_key: str, asset_id: str) -> Path | None:
         return maps.map_background_asset(

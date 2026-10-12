@@ -27,6 +27,7 @@ import web_server
 from src.adventures.bundle import AdventureBundleLoader
 from src.adventures.graph_v2 import ADVENTURE_GRAPH_FORMAT_V2
 from src.engine.game_instance import GameInstance, GameRegistry
+from src.engine.modules import room_access, table_settings
 from src.lorebook.store import LorebookStore
 from src.webui.access_password import hash_access_password
 from src.webui.api import WebAPI
@@ -44,6 +45,8 @@ ADVENTURE_ID = "user:regression_quest"
 DIRECTORY_ID = "regression-quest"
 ROOM_PASSWORD = "room-password"
 ROOM_TOKEN = "room-token-ok"
+# Room tokens travel in a header, never in the URL (access logs).
+ROOM_HEADER = {"X-Room-Token": ROOM_TOKEN}
 
 
 def _install_v2_adventure(adventures_dir: Path) -> None:
@@ -156,7 +159,7 @@ def _make_game(
     instance.gm_uid = GM_UID
     instance.world_name = "template_world"
     instance.group_name = "回归局"
-    instance.gm_style_override = {"note": "gm secret"}
+    table_settings.replace_gm_style_override(instance, {"note": "gm secret"})
     instance.players = {PLAYER_UID: {"character_name": "甲", "character_sheet": {}}}
     if bind_adventure:
         bundle = AdventureBundleLoader(play_env.adventures_dir).resolve(
@@ -166,7 +169,7 @@ def _make_game(
     instance.set_player_access(open_access)
     if room_password:
         instance.set_room_password(room_password)
-        instance.set_room_token(ROOM_TOKEN)
+        room_access.issue_room_token(instance, token=ROOM_TOKEN)
     play_env.registry.register(instance)
     return "|".join(instance.game_key), instance
 
@@ -197,6 +200,12 @@ def _shared(uid: str = PLAYER_UID, **extra) -> dict[str, str]:
     return params
 
 
+def _seat(instance: GameInstance, uid: str = PLAYER_UID) -> dict[str, str]:
+    """A share-link player proves its seat with that seat's token."""
+
+    return {"X-Seat-Token": room_access.issue_seat_token(instance, uid)}
+
+
 def _player_url(path: str, **extra) -> str:
     from urllib.parse import urlencode
 
@@ -205,19 +214,22 @@ def _player_url(path: str, **extra) -> str:
 
 @pytest.mark.asyncio
 async def test_owner_and_shared_player_read_detail_and_adventure(play_env) -> None:
-    game_key, _instance = _make_game(play_env, "regression")
+    game_key, instance = _make_game(play_env, "regression")
     app = _make_app(play_env)
+    seat = _seat(instance)
 
     async with TestClient(TestServer(app)) as client:
         owner_detail = await client.get(
             f"/api/games/{game_key}", headers=_owner(),
         )
-        player_detail = await client.get(_player_url(f"/api/games/{game_key}"))
+        player_detail = await client.get(
+            _player_url(f"/api/games/{game_key}"), headers=seat,
+        )
         owner_adventure = await client.get(
             f"/api/games/{game_key}/adventure", headers=_owner(),
         )
         player_adventure = await client.get(
-            _player_url(f"/api/games/{game_key}/adventure"),
+            _player_url(f"/api/games/{game_key}/adventure"), headers=seat,
         )
         owner_body = await owner_detail.json()
         player_body = await player_detail.json()
@@ -269,12 +281,15 @@ async def test_missing_game_is_404_on_both_read_endpoints(play_env) -> None:
 
 @pytest.mark.asyncio
 async def test_closed_player_access_blocks_shared_reads(play_env) -> None:
-    game_key, _instance = _make_game(play_env, "closed", open_access=False)
+    game_key, instance = _make_game(play_env, "closed", open_access=False)
     app = _make_app(play_env)
+    seat = _seat(instance)
 
     async with TestClient(TestServer(app)) as client:
-        detail = await client.get(_player_url(f"/api/games/{game_key}"))
-        adventure = await client.get(_player_url(f"/api/games/{game_key}/adventure"))
+        detail = await client.get(_player_url(f"/api/games/{game_key}"), headers=seat)
+        adventure = await client.get(
+            _player_url(f"/api/games/{game_key}/adventure"), headers=seat,
+        )
         owner_adventure = await client.get(
             f"/api/games/{game_key}/adventure", headers=_owner(),
         )
@@ -287,17 +302,20 @@ async def test_closed_player_access_blocks_shared_reads(play_env) -> None:
 
 @pytest.mark.asyncio
 async def test_room_password_game_requires_matching_room_token(play_env) -> None:
-    game_key, _instance = _make_game(
+    game_key, instance = _make_game(
         play_env, "roomed", room_password=ROOM_PASSWORD,
     )
     app = _make_app(play_env)
+    seat = _seat(instance)
 
     async with TestClient(TestServer(app)) as client:
         wrong = await client.get(
-            _player_url(f"/api/games/{game_key}/adventure", room_token="wrong"),
+            _player_url(f"/api/games/{game_key}/adventure"),
+            headers={**seat, "X-Room-Token": "wrong"},
         )
         correct = await client.get(
-            _player_url(f"/api/games/{game_key}/adventure", room_token=ROOM_TOKEN),
+            _player_url(f"/api/games/{game_key}/adventure"),
+            headers={**seat, **ROOM_HEADER},
         )
         owner = await client.get(
             f"/api/games/{game_key}/adventure", headers=_owner(),

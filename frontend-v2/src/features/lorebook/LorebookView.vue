@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { api, errorMessage } from '@/api/client'
+import { api, ApiError, errorMessage } from '@/api/client'
 import type { CharacterListResponse, GameSummary, GamesResponse, LorebookResponse, LoreEntry, LoreGenerateResponse, Player, WorldCreateResponse, WorldListResponse, WorldSummary } from '@/api/types'
 import { readCurrentGame } from '@/stores/gameContext'
 import { activePeerGameClient } from '@/peer/game/bridge'
@@ -194,16 +194,31 @@ watch(worldLanguage, () => {
 })
 watch(locale, next => { if (!game.value) worldLanguage.value = next })
 
+// 只有旧服务端「没有这条 canonical 路由」才回退到 legacy adapter：aiohttp 的
+// 路由缺失是无 JSON 体的 404/405。网络故障、权限错误、资源 404 或写入失败
+// 都必须原样抛出，不能再发第二次 legacy 写入。
+function canonicalRouteMissing(error: unknown, bookId: string): boolean {
+  return bookId === `world:${currentWorldId.value}`
+    && error instanceof ApiError
+    && (error.status === 404 || error.status === 405)
+    && !error.code
+    && error.message === `HTTP ${error.status}`
+}
+
 async function loadLore() {
   if (!currentWorldId.value) { data.value = { entries: [] }; return }
   error.value = ''; data.value = { entries: [] }
   try {
     const bookId = activeBookId.value || `world:${currentWorldId.value}`
-    if (bookId === `world:${currentWorldId.value}`) {
-      data.value = await api<LorebookResponse>(`/lorebook/${encodeURIComponent(currentWorldId.value)}`)
-    } else {
+    try {
       const result = await api<{ entries: LoreEntry[] }>(`/lorebooks/${encodeURIComponent(bookId)}/entries`)
       data.value = { entries: result.entries || [] }
+    } catch (canonicalError) {
+      // Older deployments expose the primary-world adapter only.  Keep this
+      // fallback at the UI boundary while new servers use the canonical Book
+      // route above; the adapter can disappear once all clients migrate.
+      if (!canonicalRouteMissing(canonicalError, bookId)) throw canonicalError
+      data.value = await api<LorebookResponse>(`/lorebook/${encodeURIComponent(currentWorldId.value)}`)
     }
     // 换书/刷新后旧 id 不能再指向任何条目，否则批量操作会打向不存在的目标。
     const loaded = new Set((data.value.entries || []).map(entry => entry.id).filter(Boolean) as string[])
@@ -386,11 +401,17 @@ async function saveLore() {
   normalizeActivationModel(loreEdit.value)
   const entry: LoreEdit = { ...loreEdit.value, world_id: currentWorldId.value }
   const bookId = activeBookId.value || `world:${currentWorldId.value}`
-  const path = bookId === `world:${currentWorldId.value}`
-    ? (entry.id ? `/lorebook/${encodeURIComponent(entry.id)}` : '/lorebook')
-    : (entry.id ? `/lorebooks/${encodeURIComponent(bookId)}/entries/${encodeURIComponent(entry.id)}` : `/lorebooks/${encodeURIComponent(bookId)}/entries`)
+  const path = entry.id
+    ? `/lorebooks/${encodeURIComponent(bookId)}/entries/${encodeURIComponent(entry.id)}`
+    : `/lorebooks/${encodeURIComponent(bookId)}/entries`
   try {
-    await api<unknown>(path, { method: entry.id ? 'PUT' : 'POST', body: JSON.stringify(entry) })
+    try {
+      await api<unknown>(path, { method: entry.id ? 'PUT' : 'POST', body: JSON.stringify(entry) })
+    } catch (canonicalError) {
+      if (!canonicalRouteMissing(canonicalError, bookId)) throw canonicalError
+      const legacyPath = entry.id ? `/lorebook/${encodeURIComponent(entry.id)}` : '/lorebook'
+      await api<unknown>(legacyPath, { method: entry.id ? 'PUT' : 'POST', body: JSON.stringify(entry) })
+    }
     toast.success(entry.id ? t('updated') : t('created'))
     loreEdit.value = null
     await loadLore()
@@ -405,7 +426,12 @@ async function deleteLore(entry: LoreEntry) {
   if (!ok) return
   try {
     const bookId = activeBookId.value || `world:${currentWorldId.value}`
-    await api<unknown>(bookId === `world:${currentWorldId.value}` ? `/lorebook/${encodeURIComponent(entry.id)}` : `/lorebooks/${encodeURIComponent(bookId)}/entries/${encodeURIComponent(entry.id)}`, { method: 'DELETE' })
+    try {
+      await api<unknown>(`/lorebooks/${encodeURIComponent(bookId)}/entries/${encodeURIComponent(entry.id)}`, { method: 'DELETE' })
+    } catch (canonicalError) {
+      if (!canonicalRouteMissing(canonicalError, bookId)) throw canonicalError
+      await api<unknown>(`/lorebook/${encodeURIComponent(entry.id)}`, { method: 'DELETE' })
+    }
     toast.success(t('deleted'))
     if (selectedEntryId.value === entry.id) selectedEntryId.value = ''
     await loadLore()

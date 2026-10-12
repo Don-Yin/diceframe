@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 
 from src.commands.round_processor import RoundNotProcessed, RoundProcessingFailure
 from src.engine import progression
-from src.engine.modules import checks, legacy_combat, round_safety, ruleset_runtime, session_stats
+from src.engine.modules import adventure_runtime_state, checks, economy_state, round_safety, ruleset_runtime, session_stats, table_settings
 from src.engine.action_gate import (
     ACTOR_DECEASED,
     ECONOMY_DECISION_PENDING,
@@ -40,6 +40,7 @@ from src.engine.economy import (
 from src.engine.game_instance import GameState
 from src.engine.language import localized_text
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
+from src.engine.modules import progression_state, round_presentation
 from src.engine.player_control import SUBMISSION_BLOCK_CODES
 from src.engine.visibility_rules import proposal_visible_to
 from src.webui.services._common import MAX_ACTIONS_PER_TURN
@@ -209,8 +210,8 @@ def _pending_luck_payload(
         "phase": "luck",
         "advanced": False,
         "message": "检定已完成，请选择是否消耗幸运后再继续叙事",
-        "check_result": instance.last_check,
-        "check_results": list(instance.last_checks),
+        "check_result": checks.last_check(instance),
+        "check_results": list(checks.last_checks(instance)),
         "pending_luck_decisions": instance.pending_luck_checks(),
         "multiplayer": instance.multiplayer_status(),
     }
@@ -230,17 +231,17 @@ def _round_payload(
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "narration": narration,
-        "quick_actions": list(instance.quick_actions),
+        "quick_actions": list(round_presentation.quick_actions(instance)),
         "economy_proposals": _visible_economy_proposals(instance, viewer_uid),
-        "check_result": instance.last_check,
-        "check_results": list(instance.last_checks),
+        "check_result": checks.last_check(instance),
+        "check_results": list(checks.last_checks(instance)),
     }
     if phase is not None:
         payload["phase"] = phase
     if ok is not None:
         payload["ok"] = ok
     if include_recap:
-        payload["recap"] = instance.last_state_update
+        payload["recap"] = round_presentation.last_state_update(instance)
     return payload
 
 
@@ -303,12 +304,12 @@ async def _fill_ai_player_actions(
         rule = dependencies.load_rule_for_game(instance)
         if rule is None:
             # No rule is legacy narrative behavior only for an unbound instance.
-            return bool(instance.ruleset_runtime)
+            return bool(ruleset_runtime.binding(instance))
         try:
             runtime = dependencies.ruleset_registry.resolve(rule.template)
         except ValueError:
             return True  # Unknown/incompatible runtimes must not admit free text.
-        state = instance.ruleset_state
+        state = ruleset_runtime.state(instance)
         combat = state.get("combat") if isinstance(state, dict) else None
         combat_active = isinstance(combat, dict) and combat.get("status") == "active"
         return runtime.capabilities.authoritative_intents and (
@@ -518,7 +519,7 @@ async def _auto_settle_rewards(
         return
     if not enabled or gold_cap < 1:
         return
-    economy = getattr(instance, "economy", {})
+    economy = economy_state.state(instance)
     proposals = economy.get("proposals", []) if isinstance(economy, dict) else []
     for proposal in list(proposals):
         if run_changed is not None and run_changed():
@@ -584,7 +585,7 @@ async def _advance_progression(
     session_stats.require_writable(instance)
     checks.require_writable(instance)
     round_safety.require_writable(instance)
-    legacy_combat.require_writable(instance)
+    adventure_runtime_state.require_writable(instance)
     ruleset_runtime.require_writable(instance)
     wrote_ai_actions = await _fill_ai_player_actions(
         dependencies, instance, game_key=game_key,
@@ -717,7 +718,7 @@ async def submit_action(
                 "error_code": "RULESET_RUNTIME_UNAVAILABLE",
                 "error": str(exc),
             }, 409)
-        state = getattr(instance, "ruleset_state", {})
+        state = ruleset_runtime.state(instance)
         combat = state.get("combat") if isinstance(state, dict) else None
         combat_active = isinstance(combat, dict) and combat.get("status") == "active"
         requires_structured = runtime.capabilities.authoritative_intents and (
@@ -764,7 +765,7 @@ async def submit_action(
         session_stats.require_writable(instance)
         checks.require_writable(instance)
         round_safety.require_writable(instance)
-        legacy_combat.require_writable(instance)
+        adventure_runtime_state.require_writable(instance)
         ruleset_runtime.require_writable(instance)
         # Retry stays after the pre-retry guards, outside the pure gate.
         await _retry_external_economy_effects(dependencies, instance)
@@ -779,7 +780,7 @@ async def submit_action(
             None,
         )
         existing_pending_roll = bool(existing_action and existing_action.get("dice_pending"))
-        if instance.solo_mode:
+        if table_settings.solo_mode(instance):
             action_count = sum(1 for action in instance.action_queue if action.get("user_id") == actor_uid)
             if action_count >= MAX_ACTIONS_PER_TURN:
                 return _result({"error": f"本回合已达行动上限（{MAX_ACTIONS_PER_TURN} 条）"}, 400)
@@ -794,7 +795,7 @@ async def submit_action(
         # their original call shape. Aggregate checks run after its state lock.
         run_options = {"expected_run_id": expected_run_id} if expected_run_id else {}
         if instance.state == GameState.PAUSED:
-            if instance.round_number <= 0:
+            if progression_state.round_value(instance) <= 0:
                 await instance.start_round(**run_options)
             else:
                 await instance.resume(**run_options)
@@ -957,7 +958,7 @@ async def advance_round(
     session_stats.require_writable(instance)
     checks.require_writable(instance)
     round_safety.require_writable(instance)
-    legacy_combat.require_writable(instance)
+    adventure_runtime_state.require_writable(instance)
     ruleset_runtime.require_writable(instance)
     if force and _allow_preempt and instance.round_processing_in_flight():
         if await instance.cancel_round_processing():

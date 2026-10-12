@@ -45,16 +45,16 @@ vi.mock('@/composables/useToast', () => ({
 
 import InviteQrModal from '../src/features/play/InviteQrModal.vue'
 
-function mountModal(user?: string) {
+function mountModal(seatToken?: string) {
   return mount(InviteQrModal, {
     // 二维码本身与本文件无关（qrcode-generator 在 jsdom 下不可用），stub 掉。
     global: { plugins: [i18n], stubs: { Teleport: true, QrCode: true } },
-    props: { gameKey: 'web|room|bot', user, title: '邀请链接' },
+    props: { gameKey: 'web|room|bot', seatToken, title: '邀请链接' },
   })
 }
 
-async function render(user?: string) {
-  const wrapper = mountModal(user)
+async function render(seatToken?: string) {
+  const wrapper = mountModal(seatToken)
   await flushPromises()
   return wrapper
 }
@@ -167,10 +167,12 @@ describe('invite address guidance', () => {
     expect(decodeURIComponent(link)).toContain('server=http://192.168.1.20:10022')
   })
 
-  it('carries the player id for a takeover link', async () => {
-    const link = (await render('player_1')).get('.invite-link').text()
+  it('carries the seat token, never the player id, for a takeover link', async () => {
+    const link = (await render('seat-token-abc')).get('.invite-link').text()
 
-    expect(decodeURIComponent(link)).toContain('user=player_1')
+    expect(decodeURIComponent(link)).toContain('#/join?')
+    expect(decodeURIComponent(link)).toContain('seat=seat-token-abc')
+    expect(decodeURIComponent(link)).not.toContain('user=')
   })
 
   it('never blocks copying the link', async () => {

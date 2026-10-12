@@ -34,6 +34,7 @@ from src.webui.routes.game_control_routes import (
     api_set_narrative_perspective,
     api_set_gm_style,
     api_set_luck_timeout,
+    api_set_dice_reveal_mode,
     api_set_reward_policy,
     api_set_player_away,
     api_set_player_control,
@@ -60,6 +61,7 @@ from src.webui.routes.game_gameplay_routes import (
     api_ruleset_submit_intent,
     api_ruleset_resolve_decision,
     api_luck_decision,
+    api_check_reveal,
     api_advance,
     api_payment_create,
     api_payment_resolve,
@@ -77,6 +79,8 @@ from src.webui.routes.game_character_routes import (
     api_char_delete,
     api_npc_portrait_update,
     api_player_create,
+    api_seat_token_claim,
+    api_seat_token_issue,
 )
 from src.webui.routes.game_package_routes import (
     _SavePackageTooLarge,
@@ -138,6 +142,9 @@ def register_games(app: web.Application) -> None:
         "/api/games/{game_key}/settings/luck-timeout", api_set_luck_timeout
     )
     app.router.add_post(
+        "/api/games/{game_key}/settings/dice-reveal-mode", api_set_dice_reveal_mode
+    )
+    app.router.add_post(
         "/api/games/{game_key}/settings/reward-policy", api_set_reward_policy
     )
     app.router.add_post(
@@ -172,6 +179,9 @@ def register_games(app: web.Application) -> None:
     )
     app.router.add_post(
         "/api/games/{game_key}/checks/{check_id}/luck", api_luck_decision
+    )
+    app.router.add_post(
+        "/api/games/{game_key}/checks/{check_id}/reveal", api_check_reveal
     )
     app.router.add_post("/api/games/{game_key}/advance", api_advance)
     app.router.add_post("/api/games/{game_key}/gm-command", api_gm_command)
@@ -221,6 +231,10 @@ def register_games(app: web.Application) -> None:
         "PUT", "/api/games/{game_key}/npc/{npc_id}/portrait", api_npc_portrait_update
     )
     app.router.add_post("/api/games/{game_key}/players", api_player_create)
+    app.router.add_post(
+        "/api/games/{game_key}/players/{uid}/seat-token", api_seat_token_issue
+    )
+    app.router.add_post("/api/games/{game_key}/seat-token/claim", api_seat_token_claim)
     app.router.add_post(
         "/api/games/{game_key}/verify-room-password", api_verify_room_password
     )

@@ -180,7 +180,10 @@ def _ruleset_gameplay_status(result: dict) -> int:
         return 403
     if code in {"RULESET_INTENTS_UNAVAILABLE", "RULESET_RUNTIME_UNAVAILABLE"}:
         return 409
-    if code in {"SESSION_ZERO_REQUIRED", "COMBAT_ACTION_REQUIRED", "ROUND_PROCESSING"}:
+    if code in {
+        "SESSION_ZERO_REQUIRED", "COMBAT_ACTION_REQUIRED", "ROUND_PROCESSING",
+        "REWRITE_IN_PROGRESS", "STALE_RUN",
+    }:
         return 409
     if code == "LLM_NOT_CONFIGURED":
         return 503
@@ -319,6 +322,26 @@ async def api_luck_decision(request: web.Request) -> web.Response:
         on_reset=on_reset,
     )
     return web.json_response(result["payload"], status=result["status"])
+
+
+async def api_check_reveal(request: web.Request) -> web.Response:
+    """共享骰子揭示：提交揭示意图（只带 check_id，不带骰值），幂等。"""
+    api = _get_api(request)
+    gk = request.match_info["game_key"]
+    result = await api.reveal_check(
+        gk,
+        request.match_info["check_id"],
+        request.get("user_id", ""),
+    )
+    status = int(result.pop("status", 200))
+    if result.get("ok") and not result.get("already"):
+        pool = request.app.get("connection_pool")
+        if pool is not None:
+            await pool.broadcast(gk, {
+                "type": "check_revealed",
+                "check_id": result.get("check_id", ""),
+            })
+    return web.json_response(result, status=status)
 
 
 async def api_advance(request: web.Request) -> web.Response:

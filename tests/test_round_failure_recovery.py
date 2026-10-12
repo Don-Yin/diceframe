@@ -16,6 +16,7 @@ import pytest
 from src.commands.round_processor import RoundProcessingFailure
 from src.engine.game_instance import GameInstance, GameState
 from webapi_harness import web_api  # noqa: F401  # pytest fixture
+from src.engine.modules import checks
 
 
 async def _new_game(api, registry):
@@ -160,8 +161,8 @@ async def test_luck_timeout_failure_rolls_back_instead_of_sticking(web_api, monk
     await instance.add_action(uid, "我推开石门", selected_attribute="str")
     assert await instance.try_advance() is True
     await api._handler.prepare_round_checks_ai(instance)
-    assert instance.last_checks, "需要一条真实检定来模拟幸运超时"
-    check = instance.last_checks[-1]
+    assert checks.last_checks(instance), "需要一条真实检定来模拟幸运超时"
+    check = checks.last_checks(instance)[-1]
     check_id = str(check["check_id"])
     check["luck_spend_available"] = True
     check["luck_cost"] = 1
@@ -190,7 +191,7 @@ async def test_force_advance_preempts_in_flight_generation(web_api, monkeypatch)
     api, _lorebook, registry, llm, _worlds = web_api
     game_key, instance, gm_uid, player_uid = await _two_player_game(api, registry)
     await instance.add_action(gm_uid, "我警戒四周", "str")
-    instance.round_checks_prepared = True  # 跳过检定规划，把挂起点锁进叙事阶段
+    checks.replace_round_checks_prepared(instance, True)  # 跳过检定规划，把挂起点锁进叙事阶段
     round_before = instance.round_number
     log_before = len(instance.log)
 
@@ -226,7 +227,7 @@ async def test_external_cancellation_rolls_back_and_reraises(web_api, monkeypatc
     api, _lorebook, registry, llm, _worlds = web_api
     game_key, instance, gm_uid, player_uid = await _two_player_game(api, registry)
     await instance.add_action(gm_uid, "我警戒四周", "str")
-    instance.round_checks_prepared = True
+    checks.replace_round_checks_prepared(instance, True)
 
     entered = _block_first_llm_call(llm, monkeypatch)
     player_task = asyncio.create_task(

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from src.engine.modules import ruleset_runtime
+
 
 EncounterMode = Literal["blocked", "story", "sandbox"]
 EncounterStatus = Literal["blocked", "pending", "active", "resolved"]
@@ -106,7 +108,7 @@ def resolve_v2_encounter_access(
         encounter_id = v2_encounter_instance_id(
             str(progress.get("adventure_id") or adventure_id), node_id,
         )
-        state = getattr(instance, "ruleset_state", {})
+        state = ruleset_runtime.state(instance)
         combat = state.get("combat") if isinstance(state, dict) else None
         combat = combat if isinstance(combat, dict) else {}
         history = state.get("combat_history") if isinstance(state, dict) else []
@@ -164,7 +166,7 @@ def resolve_story_encounter_access(
         or ""
     )
     encounter_id = story_encounter_instance_id(adventure_id, step_id)
-    state = getattr(instance, "ruleset_state", {})
+    state = ruleset_runtime.state(instance)
     combat = state.get("combat") if isinstance(state, dict) else None
     combat = combat if isinstance(combat, dict) else {}
     history = state.get("combat_history") if isinstance(state, dict) else []

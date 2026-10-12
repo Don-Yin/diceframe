@@ -8,7 +8,7 @@ from src.engine.character_utils import apply_death_save
 from src.engine.dice import roll
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text
-from src.engine.modules import round_safety
+from src.engine.modules import progression_state, round_safety
 
 logger = logging.getLogger("trpg")
 
@@ -19,7 +19,7 @@ def resolve_round_death_saves(instance: GameInstance, rule) -> str:
         return ""
     round_safety.require_writable(instance)
     lines: list[str] = []
-    round_key = str(instance.round_number)
+    round_key = str(progression_state.round_value(instance))
     round_cache = round_safety.death_save_cache(instance, round_key)
     for uid, player in list(instance.players.items()):
         cs = instance.get_character_sheet(uid)
@@ -55,7 +55,7 @@ def resolve_round_death_saves(instance: GameInstance, rule) -> str:
             before_saves = cs.get("death_saves") if isinstance(cs.get("death_saves"), dict) else None
             before_status = cs.get("status")
             value = roll("d20").natural
-            event = apply_death_save(cs, value, instance.round_number)
+            event = apply_death_save(cs, value, progression_state.round_value(instance))
             round_cache[uid] = {
                 "roll": value,
                 "event": event,
@@ -101,5 +101,5 @@ def resolve_round_death_saves(instance: GameInstance, rule) -> str:
                 "de": f"Erfolge {int(saves.get('success', 0) or 0)}/Fehlschläge {int(saves.get('failure', 0) or 0)}",
             })
         lines.append(f"【{name}】{label} d20={value} → {detail}")
-        logger.info("死亡豁免: %s d20=%d event=%s (round=%d)", name, value, event, instance.round_number)
+        logger.info("死亡豁免: %s d20=%d event=%s (round=%d)", name, value, event, progression_state.round_value(instance))
     return "\n".join(lines)

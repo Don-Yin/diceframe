@@ -15,6 +15,7 @@ from src.compat.callbacks import load_world_template as load_world_template_comp
 from src.content.gm_style import render_gm_style_section
 from src.engine.game_instance import GameInstance
 from src.engine.language import DEFAULT_LANGUAGE, gm_language_instruction, localized_text
+from src.engine.modules import ruleset_runtime, table_settings
 from src.engine.narrative_perspective import narrative_perspective_instruction
 from src.llm.context_builder import (
     build_context,
@@ -61,7 +62,7 @@ class PromptComposer:
         self.auto_storyboard = bool(enabled)
 
     def _runtime(self, instance: GameInstance):
-        binding = dict(getattr(instance, "ruleset_runtime", {}) or {})
+        binding = dict(ruleset_runtime.binding(instance) or {})
         runtime_id = str(binding.get("id") or "")
         if self.ruleset_registry is None or not runtime_id:
             return None
@@ -155,7 +156,7 @@ class PromptComposer:
                     ctx.rule_appendix = rule.get_gm_prompt_appendix(language)
                     ctx.combat_model = rule.combat_model
                     ctx.dice_system = rule.dice_system
-                    difficulty_text = rule.get_difficulty_instructions(instance.difficulty, language)
+                    difficulty_text = rule.get_difficulty_instructions(table_settings.difficulty(instance), language)
                     if difficulty_text:
                         ctx.rule_appendix = ctx.rule_appendix + "\n\n" + difficulty_text
                     stat_appendix = rule.resource_tag_appendix(language)
@@ -193,7 +194,7 @@ class PromptComposer:
         style_section = render_gm_style_section(
             world_data,
             language,
-            override=getattr(instance, "gm_style_override", None),
+            override=table_settings.gm_style_override(instance),
         )
         if style_section:
             gm_prompt = gm_prompt + "\n\n" + style_section

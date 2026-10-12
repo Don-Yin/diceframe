@@ -15,9 +15,15 @@ describe('shareLink', () => {
   })
 
   it('carries the backend address for standalone frontend links', () => {
-    expect(buildJoinLink('game-1', 'https://play.example.com', 'u1', 'https://api.example.com/')).toBe(
-      'https://play.example.com/#/join?game=game-1&share=1&user=u1&server=https%3A%2F%2Fapi.example.com',
+    expect(buildJoinLink('game-1', 'https://play.example.com', 'tok-1', 'https://api.example.com/')).toBe(
+      'https://play.example.com/#/join?game=game-1&share=1&seat=tok-1&server=https%3A%2F%2Fapi.example.com',
     )
+  })
+
+  it('puts a takeover seat token only in the hash route', () => {
+    const link = new URL(buildJoinLink('game-1', 'https://play.example.com', 'tok-1'))
+    expect(link.search).toBe('')
+    expect(link.hash).toBe('#/join?game=game-1&share=1&seat=tok-1')
   })
 
   it('encodes the pairing payload with the app scheme', () => {

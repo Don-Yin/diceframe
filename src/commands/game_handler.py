@@ -35,7 +35,9 @@ from src.commands.state_recap import (
 from src.commands.story_recap import StoryRecapGenerator
 from src.commands.swipe_generator import SwipeGenerator
 from src.engine.language import DEFAULT_LANGUAGE
+from src.engine.modules import narrative_notes
 from src.lorebook.retrieval import LoreRetriever
+from src.content_modules.projection import ContentProjectionService
 from src.rulesets.builtin import build_default_ruleset_registry
 from src.rulesets.registry import RulesetRuntimeRegistry
 
@@ -77,6 +79,10 @@ class GameHandler:
         )
         self.worlds_dir = worlds_dir or (Path(__file__).parent.parent.parent / "templates" / "worlds")
         self._plugin_host = None
+        self.content_projection = ContentProjectionService(
+            self.lorebook_store,
+            load_world_template=self._load_world_template,
+        )
         # 通用 Lore 检索：所有走标准回合管线的 Ruleset 共用同一实例。embedding 客户端
         # 复用现有 MemoryStore.embedding_client（同一份 embedding_enabled /
         # embedding_provider_ref / embedding_model / embedding_max_input 配置），
@@ -85,6 +91,7 @@ class GameHandler:
             self.matcher,
             store=self.lorebook_store,
             load_world_template=self._load_world_template,
+            content_projection=self.content_projection,
             embedding_client_provider=self._embedding_client,
         )
         self._factory = GameFactory(self.registry, self.lorebook_store, self.worlds_dir)
@@ -111,6 +118,7 @@ class GameHandler:
             summary_max_tokens,
             analysis_max_tokens,
             lore_retriever=self.lore_retriever,
+            content_projection=self.content_projection,
         )
         self._swipe_generator = SwipeGenerator(
             self.llm_client,
@@ -145,6 +153,7 @@ class GameHandler:
             self._ensure_matcher_for_world,
             max_tokens=min(768, max(128, brief_max_tokens)),
             lore_retriever=self.lore_retriever,
+            content_projection=self.content_projection,
         )
         self.narrative_max_tokens = narrative_max_tokens
         self.summary_max_tokens = summary_max_tokens
@@ -218,6 +227,11 @@ class GameHandler:
         """Connect optional Adventure v2 gate reevaluation to round settlement."""
 
         self._round_processor.set_adventure_world_advance(callback)
+
+    def set_adventure_run_initializer(self, callback) -> None:
+        """Connect Adventure v2 run initialization to reset/restart candidates."""
+
+        self._lifecycle.set_adventure_run_initializer(callback)
 
     async def _init_world_from_template(self, world_id: str, template: dict) -> None:
         """兼容旧内部调用；实际逻辑已拆到 GameFactory。"""
@@ -313,6 +327,9 @@ class GameHandler:
 
     def _apply_state_update(self, instance: GameInstance, update: dict) -> None:
         """兼容旧内部调用；实际逻辑已拆到 StateUpdateApplier。"""
+        # The applier can write the scene after other state; reject an
+        # unsupported notes slot before any of it changes.
+        narrative_notes.require_writable(instance)
         self._state_applier.apply_state_update(instance, update)
 
     def load_item_categories(self, instance: GameInstance) -> dict[str, list[str]]:

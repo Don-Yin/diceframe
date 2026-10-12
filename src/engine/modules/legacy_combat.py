@@ -1,152 +1,92 @@
-"""Storage for a compatibility projection, NOT combat authority.
+"""Read-only combat turn view derived from the bound ruleset's authority.
 
-D&D 2024 authority remains in ruleset_state["combat"], projected here by its
-combat engine. Generic combat, round snapshots, automation and context
-projectors consume these compatibility fields.
+``combat_state`` / ``combat_active`` / ``initiative_order`` /
+``initiative_current`` are NOT stored anywhere. They are derived on every read
+from the bound ruleset's own encounter authority through a projector the
+ruleset registers with :func:`register_combat_projector` (D&D 2024 projects
+``ruleset_state["combat"]``). A game whose runtime has no registered projector
+(unbound, generic rulesets, unknown runtime ids) reads the neutral view:
+``"none"`` / ``False`` / ``[]`` / ``0``.
+
+``src/engine`` must not import ``src/rulesets``; the registry is the seam.
+Projectors are resolved through :func:`ruleset_runtime.bound_runtime_id`, a
+read that never materializes or repairs a module slot.
+
+This module owns no persisted state. The former ``modules["legacy_combat"]``
+slot (and its generic ``combat_enemies`` list) was retired; instance
+migration v42 -> v43 drops it from old saves. Generic hp_based /
+lethal_narrative combat targets players by uid and NPCs by ``npc:<id>``. A
+future generic encounter authority is a separate design, not this module.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from typing import Any
 
-from src.engine.module_state import (
-    ModuleStateError, ModuleStateSpec, get_module_state, register_module_state,
-)
+from src.engine.modules import ruleset_runtime
 
-MODULE_NAME = "legacy_combat"
-SCHEMA_VERSION = 1
+CombatProjector = Callable[[Any], "Mapping[str, Any] | None"]
+
+_PROJECTORS: dict[str, CombatProjector] = {}
 
 
-def fresh() -> dict[str, Any]:
+def register_combat_projector(runtime_id: str, projector: CombatProjector) -> None:
+    """Register the combat view projector for one ruleset runtime id.
+
+    ``projector(instance)`` returns a mapping with any of the four view keys,
+    or ``None`` for the neutral view. Re-registering a runtime id replaces it.
+    """
+    normalized = str(runtime_id or "").strip()
+    if not normalized:
+        raise ValueError("combat projector requires a runtime id")
+    if not callable(projector):
+        raise TypeError("combat projector must be callable")
+    _PROJECTORS[normalized] = projector
+
+
+def combat_projector_for(runtime_id: str) -> CombatProjector | None:
+    return _PROJECTORS.get(str(runtime_id or "").strip())
+
+
+def neutral_view() -> dict[str, Any]:
     return {
-        "schema_version": SCHEMA_VERSION,
-        "combat_active": False,
-        "combat_enemies": [],
         "combat_state": "none",
+        "combat_active": False,
         "initiative_order": [],
         "initiative_current": 0,
     }
 
 
-def ensure(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        return fresh()
-    if raw.get("schema_version") != SCHEMA_VERSION:
-        return raw
-    if not isinstance(raw.get("combat_active"), bool):
-        raw["combat_active"] = bool(raw.get("combat_active", False))
-    for key in ("combat_enemies", "initiative_order"):
-        if not isinstance(raw.get(key), list):
-            raw[key] = []
-    if not isinstance(raw.get("combat_state"), str):
-        raw["combat_state"] = "none"
-    if type(raw.get("initiative_current")) is not int:
-        raw["initiative_current"] = 0
-    return raw
-
-
-def require_writable(instance: Any) -> None:
-    """Read-only transaction preflight; never repair or materialize a slot."""
-    modules = getattr(instance, "modules", None)
-    if not isinstance(modules, dict):
-        raise ModuleStateError("instance has no module state container")
-    slot = modules.get(MODULE_NAME)
-    if not isinstance(slot, dict):
-        return
-    if slot.get("schema_version") != SCHEMA_VERSION:
-        raise ModuleStateError(f"unsupported legacy_combat module schema: {slot.get('schema_version')!r}")
-
-
-def combat_active(instance: Any) -> bool:
-    return get_module_state(instance, MODULE_NAME)["combat_active"]
-
-
-def replace_combat_active(instance: Any, value: bool) -> None:
-    get_module_state(instance, MODULE_NAME)["combat_active"] = value
-
-
-def combat_enemies(instance: Any) -> list:
-    return get_module_state(instance, MODULE_NAME)["combat_enemies"]
-
-
-def replace_combat_enemies(instance: Any, value: list) -> None:
-    get_module_state(instance, MODULE_NAME)["combat_enemies"] = value
+def view(instance: Any) -> dict[str, Any]:
+    """Return a fresh copy of the derived combat view (never live storage)."""
+    projector = combat_projector_for(ruleset_runtime.bound_runtime_id(instance))
+    raw = projector(instance) if projector is not None else None
+    result = neutral_view()
+    if not isinstance(raw, Mapping):
+        return result
+    state = raw.get("combat_state")
+    result["combat_state"] = state if isinstance(state, str) and state else "none"
+    result["combat_active"] = bool(raw.get("combat_active"))
+    order = raw.get("initiative_order")
+    result["initiative_order"] = deepcopy(list(order)) if isinstance(order, (list, tuple)) else []
+    current = raw.get("initiative_current")
+    result["initiative_current"] = current if type(current) is int else 0
+    return result
 
 
 def combat_state(instance: Any) -> str:
-    return get_module_state(instance, MODULE_NAME)["combat_state"]
+    return view(instance)["combat_state"]
 
 
-def replace_combat_state(instance: Any, value: str) -> None:
-    get_module_state(instance, MODULE_NAME)["combat_state"] = value
+def combat_active(instance: Any) -> bool:
+    return view(instance)["combat_active"]
 
 
-def initiative_order(instance: Any) -> list[str]:
-    return get_module_state(instance, MODULE_NAME)["initiative_order"]
-
-
-def replace_initiative_order(instance: Any, value: list[str]) -> None:
-    get_module_state(instance, MODULE_NAME)["initiative_order"] = value
+def initiative_order(instance: Any) -> list[Any]:
+    return view(instance)["initiative_order"]
 
 
 def initiative_current(instance: Any) -> int:
-    return get_module_state(instance, MODULE_NAME)["initiative_current"]
-
-
-def replace_initiative_current(instance: Any, value: int) -> None:
-    get_module_state(instance, MODULE_NAME)["initiative_current"] = value
-
-
-def begin(instance: Any, order: list[str]) -> None:
-    require_writable(instance)
-    instance.initiative_order = list(order)
-    instance.initiative_current = 0
-    instance.combat_state = "active"
-    instance.combat_active = True
-
-
-def end(instance: Any) -> None:
-    require_writable(instance)
-    instance.combat_state = "none"
-    instance.combat_active = False
-    instance.initiative_order.clear()
-    instance.initiative_current = 0
-
-
-def project_from_ruleset(instance: Any, combat: dict[str, Any]) -> None:
-    require_writable(instance)
-    instance.combat_state = "active" if combat.get("status") == "active" else "none"
-    instance.combat_active = instance.combat_state == "active"
-    instance.initiative_order = list(combat.get("initiative") or [])
-    instance.initiative_current = int(combat.get("turn_index", 0) or 0)
-
-
-def restore_from_entity_snapshot(instance: Any, snapshot: dict[str, Any]) -> None:
-    require_writable(instance)
-    instance.combat_enemies = deepcopy(snapshot.get("combat_enemies") or [])
-    instance.combat_state = str(snapshot.get("combat_state") or "none")
-    instance.combat_active = bool(snapshot.get("combat_active"))
-    instance.initiative_order = deepcopy(list(snapshot.get("initiative_order") or []))
-    instance.initiative_current = int(snapshot.get("initiative_current") or 0)
-
-
-def restore_from_transaction(instance: Any, snapshot: dict[str, Any]) -> None:
-    require_writable(instance)
-    instance.combat_state = str(snapshot["combat_state"])
-    instance.combat_active = bool(snapshot["combat_active"])
-    instance.initiative_order = deepcopy(snapshot["initiative_order"])
-    instance.initiative_current = int(snapshot["initiative_current"])
-
-
-def reset(instance: Any) -> None:
-    require_writable(instance)
-    instance.combat_active = False
-    instance.combat_enemies.clear()
-    instance.combat_state = "none"
-    instance.initiative_order.clear()
-    instance.initiative_current = 0
-
-
-SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)
-register_module_state(SPEC)
+    return view(instance)["initiative_current"]

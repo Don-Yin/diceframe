@@ -16,6 +16,7 @@ from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
+from src.engine.modules import ruleset_runtime
 
 
 @dataclass
@@ -180,7 +181,7 @@ def start_combat(
     }, SequenceRng([20, 1]))
     assert resolved["ok"] is True, resolved
     assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
-    assert instance.ruleset_state["combat"]["initiative"][0] == f"player:{uid}"
+    assert ruleset_runtime.state(instance)["combat"]["initiative"][0] == f"player:{uid}"
 
 
 def capability_actions(
@@ -213,7 +214,7 @@ def capability_intent(
     intent: dict[str, Any] = {
         "intent_id": intent_id,
         "type": "class_capability",
-        "expected_version": instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": uid,
         "actor_id": f"player:{uid}",
         "capability_id": capability_id,

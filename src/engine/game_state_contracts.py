@@ -90,7 +90,6 @@ class GameContextView(TypedDict, total=False):
     away_players: list[str]
     npcs: dict[str, OpaqueState]
     combat_state: str
-    combat_enemies: list[OpaqueState]
     initiative_order: list[str]
     initiative_current: int
     quick_actions: list[str]
@@ -110,8 +109,6 @@ class GamePersistedState(TypedDict, total=False):
     world_id: str | None
     rule_id: str
     adventure_binding: OpaqueState
-    adventure_progress: dict[str, Any]
-    play_mode: str
     world_name: str
     group_name: str
     state: str
@@ -121,7 +118,6 @@ class GamePersistedState(TypedDict, total=False):
     pending_actions: list[ActionRecord]
     ready_players: list[str]
     away_players: list[str]
-    scene: str
     log: list[RoundLogEntry]
     world_state: OpaqueState
     language: str

@@ -9,10 +9,13 @@ from aiohttp import web
 from src.webui.routes._common import (
     _get_api,
 )
+from src.webui.access_control import WebAccessControl
+from src.webui.services.game_queries import LOBBY_NARRATIVE_FIELDS, join_characters, lobby_detail
 from src.webui.viewer import viewer_for
 
 logger = logging.getLogger("trpg")
 from src.webui.routes.game_route_common import _gm_only_inst
+from src.engine.modules import media, room_access
 
 
 async def api_games(request: web.Request) -> web.Response:
@@ -25,11 +28,22 @@ async def api_detail(request: web.Request) -> web.Response:
     instance = api.get_game_instance(game_key)
     viewer = viewer_for(request, instance)
     d = api.game_detail(game_key, viewer.uid, viewer_is_gm=viewer.is_gm)
-    return (
-        web.json_response(d)
-        if d
-        else web.json_response({"error": "not found"}, status=404)
-    )
+    if not d:
+        return web.json_response({"error": "not found"}, status=404)
+    if not viewer.is_member:
+        # Visitors (no seat, revoked binding, or no valid seat token) get the
+        # lobby only: no uids, GM identity, plot, recap, luck or economy data.
+        lobby = lobby_detail(d)
+        if (
+            room_access.has_room_password(instance)
+            and not WebAccessControl.request_room_token_ok(instance, request)
+        ):
+            # Story text stays behind the room password.
+            for key in LOBBY_NARRATIVE_FIELDS:
+                lobby.pop(key, None)
+        return web.json_response(lobby)
+    d["viewer"] = {"kind": viewer.kind, "uid": viewer.uid}
+    return web.json_response(d)
 
 
 async def api_game_adventure_projection(request: web.Request) -> web.Response:
@@ -57,7 +71,7 @@ async def api_game_scene_image_file(request: web.Request) -> web.StreamResponse:
     reference = (
         api.resolve_default_scene_image(inst.world_id, inst.rule_id)
         if use_default
-        else inst.scene_image
+        else media.scene_image(inst)
         or api.resolve_default_scene_image(inst.world_id, inst.rule_id)
     )
     path = api.resolve_scene_image_file(reference)
@@ -92,7 +106,11 @@ async def api_chars(request: web.Request) -> web.Response:
     api = _get_api(request)
     game_key = request.match_info["game_key"]
     viewer = viewer_for(request, api.get_game_instance(game_key))
-    return web.json_response(api.list_characters(game_key, viewer_is_gm=viewer.is_gm))
+    characters = api.list_characters(game_key, viewer_is_gm=viewer.is_gm)
+    if not viewer.is_member:
+        # A visitor joining needs the public ruleset bootstrap, never the roster.
+        return web.json_response(join_characters(characters))
+    return web.json_response(characters)
 
 
 async def api_log(request: web.Request) -> web.Response:

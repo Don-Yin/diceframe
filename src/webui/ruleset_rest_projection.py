@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.engine.modules import ruleset_runtime
+
 
 def saved_rest_session(instance: Any) -> dict[str, Any]:
-    state = getattr(instance, "ruleset_state", None)
+    state = ruleset_runtime.state(instance)
     if not isinstance(state, dict):
         return {}
     session = state.get("rest_session")

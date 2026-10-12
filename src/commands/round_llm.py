@@ -13,6 +13,7 @@ from src.commands.tag_parser import parse_tag_state
 from src.engine.game_instance import GameInstance
 from src.engine.health import record_health_event
 from src.engine.language import localized_text, normalize_language
+from src.engine.modules import progression_state
 from src.llm.client import OutputTruncatedError, length_retry_budgets
 from src.llm.parser import (
     find_protocol_suffix_start,
@@ -401,7 +402,7 @@ async def _compress_long_narration(
         # 清空后由 update_quick_actions() 的默认动作兜底（#272）。
         logger.warning(
             "超长叙事压缩失败，正文硬截断并清空 QUICK_ACTIONS (round=%d)",
-            instance.round_number,
+            progression_state.round_value(instance),
         )
         data["quick_actions"] = []
         return
@@ -414,13 +415,13 @@ async def _compress_long_narration(
         # JSON 无效或空 narration 视同压缩失败：硬截断兜底，且不保留旧 QUICK_ACTIONS。
         logger.warning(
             "超长叙事压缩返回无效，正文硬截断并清空 QUICK_ACTIONS (round=%d)",
-            instance.round_number,
+            progression_state.round_value(instance),
         )
         _hard_truncate_narration(response, narration, target)
         data["quick_actions"] = []
         return
     if _narration_len(new_narration) >= _narration_len(narration):
-        logger.info("超长叙事压缩未变短，保留原文与原 QUICK_ACTIONS (round=%d)", instance.round_number)
+        logger.info("超长叙事压缩未变短，保留原文与原 QUICK_ACTIONS (round=%d)", progression_state.round_value(instance))
         return
     response.narration = sanitize_narration(new_narration)
     response.content = _replace_narration_in_content(str(response.content or ""), response.narration)
@@ -428,7 +429,7 @@ async def _compress_long_narration(
     if new_quick_actions != old_quick_actions:
         logger.info(
             "超长叙事压缩后同步 QUICK_ACTIONS (round=%d, before=%d, after=%d)",
-            instance.round_number,
+            progression_state.round_value(instance),
             len(old_quick_actions),
             len(new_quick_actions),
         )
@@ -447,7 +448,7 @@ async def append_multistep_analysis(
     started = time.perf_counter()
     if not should_multi_step(instance, actions_text):
         # 供验收日志证明：本轮没有额外局势分析调用。
-        logger.info("局势分析: 未触发，跳过 (round=%d)", instance.round_number)
+        logger.info("局势分析: 未触发，跳过 (round=%d)", progression_state.round_value(instance))
         return context
 
     try:
@@ -460,12 +461,12 @@ async def append_multistep_analysis(
         )
         analysis_text = analyze_res.content
         logger.info("局势分析: 完成 (round=%d, len=%d, 耗时=%dms)",
-                    instance.round_number,
+                    progression_state.round_value(instance),
                     len(analysis_text),
                     int((time.perf_counter() - started) * 1000))
         return context + "\n\n【局势分析（内部参考）】\n" + analysis_text[:400]
     except Exception:
-        logger.exception("局势分析: 失败，降级为单次调用 (round=%d)", instance.round_number)
+        logger.exception("局势分析: 失败，降级为单次调用 (round=%d)", progression_state.round_value(instance))
         return context
 
 
@@ -500,7 +501,7 @@ async def _call_stream_with_length_retry(
                 logger.warning(
                     "流式输出截断且已达放大上限 (max_tokens=%d, round=%d)",
                     current_max_tokens,
-                    instance.round_number,
+                    progression_state.round_value(instance),
                 )
                 raise
             bumped = budgets[budget_index + 1]
@@ -508,7 +509,7 @@ async def _call_stream_with_length_retry(
                 "叙事重试: 流式输出被截断，提高 max_tokens %d -> %d (round=%d, 本次耗时=%dms)",
                 current_max_tokens,
                 bumped,
-                instance.round_number,
+                progression_state.round_value(instance),
                 int((time.perf_counter() - attempt_started) * 1000),
             )
             if on_reset:
@@ -589,7 +590,7 @@ async def call_llm_with_tag_retry(
             retry_kind = "protocol"
             logger.warning(
                 "叙事重试: 检测到模型协议标签泄漏，按严格格式重试 (round=%d, 本次耗时=%dms)",
-                instance.round_number,
+                progression_state.round_value(instance),
                 int((time.perf_counter() - attempt_started) * 1000),
             )
             if on_reset:
@@ -606,7 +607,7 @@ async def call_llm_with_tag_retry(
             try:
                 json_data = safe_parse_json(response.content)
                 if json_data:
-                    logger.info("标签无结果，JSON 回退成功 (round=%d)", instance.round_number)
+                    logger.info("标签无结果，JSON 回退成功 (round=%d)", progression_state.round_value(instance))
                     data["state_update"] = json_data.get("state_update", {})
                     data["memory_delta"] = json_data.get("memory_delta", {})
                     data["info_asymmetry"] = json_data.get("info_asymmetry", {})
@@ -627,14 +628,14 @@ async def call_llm_with_tag_retry(
         if not dice_block or validate_dice_constraint(dice_block, narration):
             break
         if dice_retry >= 1:
-            logger.error("骰子约束连续2次矛盾，接受最后输出 (round=%d)", instance.round_number)
+            logger.error("骰子约束连续2次矛盾，接受最后输出 (round=%d)", progression_state.round_value(instance))
             break
         dice_retry += 1
         retry_kind = "dice"
         logger.warning(
             "叙事重试: 骰子约束矛盾，第%d次重试 (round=%d, 本次耗时=%dms)",
             dice_retry,
-            instance.round_number,
+            progression_state.round_value(instance),
             int((time.perf_counter() - attempt_started) * 1000),
         )
         if on_reset:
@@ -642,7 +643,7 @@ async def call_llm_with_tag_retry(
 
     logger.info(
         "GM 叙事: 完成 (round=%d, 总耗时=%dms)",
-        instance.round_number,
+        progression_state.round_value(instance),
         int((time.perf_counter() - started) * 1000),
     )
     await _compress_long_narration(
@@ -669,7 +670,7 @@ def apply_parsed_data_to_response(instance: GameInstance, response: Any, data: d
         loot = state_update.get("loot", [])
         logger.info(
             "标签解析成功 (round=%d): 玩家=%s, 场景=%s, 战利品=%d",
-            instance.round_number,
+            progression_state.round_value(instance),
             players_changed if players_changed else "无变化",
             scene or "不变",
             len(loot),
@@ -716,7 +717,7 @@ def apply_parsed_data_to_response(instance: GameInstance, response: Any, data: d
                 response.system_notices = system_notices
             system_notices.append(_sync_notice)
         else:
-            logger.warning("标签解析失败，本轮仅保留叙事 (round=%d, streak=%d)", instance.round_number, streak)
+            logger.warning("标签解析失败，本轮仅保留叙事 (round=%d, streak=%d)", progression_state.round_value(instance), streak)
             record_health_event(
                 instance,
                 component="llm_parser",

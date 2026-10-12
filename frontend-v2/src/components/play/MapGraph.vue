@@ -28,6 +28,12 @@ const assetCount = computed(() => {
 })
 const backgroundUrl = computed(() => props.map?.active_map?.background?.url || '')
 const mapName = computed(() => props.map?.active_map?.name || t('mapTitle'))
+const visibilityHint = computed(() => {
+  const hint = props.map?.visibility_hint
+  if (hint === 'no_visible_locations') return t('mapNoVisibleLocations')
+  if (hint === 'players_see_no_locations') return t('mapPlayersSeeNoLocations')
+  return ''
+})
 const locationIndex = computed(() => new Map(
   locations.value.map(location => [String(location.id ?? location.name ?? ''), location]),
 ))
@@ -256,7 +262,8 @@ onBeforeUnmount(() => {
       </g>
       </svg>
     </div>
-    <p v-else class="muted">{{ t('noMapData') }}</p>
+    <p v-else class="muted">{{ visibilityHint || t('noMapData') }}</p>
+    <p v-if="nodes.length && visibilityHint" class="map-visibility-hint muted">{{ visibilityHint }}</p>
     <p v-if="assetCount && variant === 'compact'" class="map-asset-note muted">{{ t('mapAssetsLoaded', { count: assetCount }) }}</p>
   </section>
 </template>

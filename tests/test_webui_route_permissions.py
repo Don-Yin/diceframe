@@ -606,3 +606,33 @@ async def test_gm_payment_create_reaches_service(tmp_path):
     assert len(api.calls) == 1
     assert api.calls[0][0] == "create-payment-proposal"
     assert api.calls[0][2]["payer_uid"] == "p1"
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("handler", "method", "error_code", "status"),
+    [
+        (games.api_switch_world, "switch_world", "ROUND_PROCESSING", 409),
+        (games.api_switch_world, "switch_world", "REWRITE_IN_PROGRESS", 409),
+        (games.api_switch_world, "switch_world", "WORLD_NOT_FOUND", 404),
+        (games.api_switch_world, "switch_world", "ADVENTURE_WORLD_LOCKED", 409),
+        (games.api_restart_game, "restart_game", "ADVENTURE_RUNTIME_INIT_FAILED", 422),
+        (games.api_reset_game, "reset_game", "ADVENTURE_RUNTIME_INIT_FAILED", 422),
+    ],
+)
+async def test_lifecycle_failures_are_not_reported_as_http_200(
+    tmp_path, handler, method, error_code, status,
+):
+    registry = FakeRegistry(tmp_path)
+    registry.items[("web", "room", "bot")] = SimpleNamespace(gm_uid="gm", players={})
+    req, api = make_request(registry, body={"world_id": "next_world"})
+
+    async def failing(*_args):
+        return {"ok": False, "error_code": error_code, "error": "rejected"}
+
+    setattr(api, method, failing)
+    response = await handler(req)
+
+    assert response.status == status
+    assert response_json(response)["error_code"] == error_code

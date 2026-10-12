@@ -33,8 +33,6 @@ class GameStateCodec:
             "world_id": instance.world_id,
             "rule_id": instance.rule_id,
             "adventure_binding": instance.adventure_binding,
-            "adventure_progress": instance.adventure_progress,
-            "play_mode": instance.play_mode,
             "world_name": instance.world_name,
             "group_name": instance.group_name,
             "state": instance.state.value,
@@ -44,7 +42,6 @@ class GameStateCodec:
             "pending_actions": instance.pending_actions,
             "ready_players": sorted(instance.ready_players),
             "away_players": sorted(instance.away_players),
-            "scene": instance.scene,
             "log": instance.log[-100:],
             "world_state": instance.world_state,
             "language": normalize_language(instance.language),
@@ -79,23 +76,6 @@ class GameStateCodec:
             # the world template on first read and persists the migrated value.
             rule_id=data.get("rule_id", ""),
             adventure_binding=data.get("adventure_binding") or {},
-            # FIX-04 §6.2/§6.3：旧存档没有这个键 → 空进度（不猜进度，不迁移 v1
-            # campaign 状态）；非 dict 的脏值同样降级为空进度。
-            adventure_progress=(
-                data.get("adventure_progress")
-                if isinstance(data.get("adventure_progress"), dict)
-                else {}
-            ),
-            play_mode=(
-                str(data.get("play_mode") or "")
-                if str(data.get("play_mode") or "").casefold() in {"free", "adventure"}
-                else (
-                    "adventure"
-                    if isinstance(data.get("adventure_binding"), dict)
-                    and data.get("adventure_binding", {}).get("adventure_id")
-                    else "free"
-                )
-            ),
             world_name=data.get("world_name", ""),
             group_name=data.get("group_name", ""),
             state=state_type(data["state"]),
@@ -103,7 +83,6 @@ class GameStateCodec:
             npcs=data.get("npcs", {}),
             action_queue=data.get("action_queue", []),
             pending_actions=data.get("pending_actions", []),
-            scene=data.get("scene", ""),
             log=data.get("log", []),
             # 旧存档没有这个键：空世界（不是"猜测世界事实"）。
             world_state=(
@@ -117,6 +96,11 @@ class GameStateCodec:
             ready_players=set(data.get("ready_players", [])),
             away_players=set(data.get("away_players", [])),
         )
+        from src.engine.modules import adventure_runtime_state
+
+        # An empty or unknown play mode (for example from an in-memory new run)
+        # is derived from the binding on every load, as before the slot existed.
+        adventure_runtime_state.normalize_decoded_play_mode(instance)
 
         puzzles_data = data.get("puzzles")
         if puzzles_data:

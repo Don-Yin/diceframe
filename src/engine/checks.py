@@ -21,6 +21,7 @@ from src.engine.dice import (
 )
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text, normalize_language
+from src.engine.modules import ruleset_runtime, table_settings
 from src.rules.rule_system import RuleSystem
 
 logger = logging.getLogger("trpg")
@@ -47,7 +48,6 @@ _EXPLICIT_ATTACK_WORD = re.compile(
     r"\b(?:attack|shoot|strike|slash|stab|kick|fire at)\b",
     flags=re.IGNORECASE,
 )
-_GENERIC_ENEMY_WORDS = ("敌人", "敌方", "怪物", "对手", "enemy", "foe", "target")
 
 # 只有这些规划器 note 才意味着“数值或渠道真的被改过”，需要在给玩家的说明里
 # 体现；``advantage_without_reason`` 仅是审计提示、不改写掷骰方式，因此不触发
@@ -152,9 +152,8 @@ def matched_action_phrases(
 def find_action_opponent(instance: GameInstance, actor_uid: str, text: object) -> str:
     """把行动中明确点名的目标转成稳定引用。
 
-    玩家沿用 uid，NPC 使用 ``npc:<id>``，战斗敌人使用
-    ``enemy:<index>``。同名目标不猜；只有活跃战斗中的泛称“敌人”才
-    会稳定落到第一个存活敌人。
+    玩家沿用 uid，NPC 使用 ``npc:<id>``。同名目标不猜；泛称“敌人”不会
+    落到任何目标（退役的 ``enemy:<index>`` 不再产生）。
     """
     normalized = _normalized(text)
     matches: list[tuple[int, str]] = []
@@ -172,20 +171,11 @@ def find_action_opponent(instance: GameInstance, actor_uid: str, text: object) -
         add(npc_id, reference)
         add(npc.get("name"), reference)
         add(npc.get("character_name"), reference)
-    for index, enemy in enumerate(instance.combat_enemies):
-        reference = f"enemy:{index}"
-        add(enemy.get("name"), reference)
-        add(enemy.get("character_name"), reference)
 
     if matches:
         longest = max(length for length, _ in matches)
         references = {reference for length, reference in matches if length == longest}
         return next(iter(references)) if len(references) == 1 else ""
-
-    if instance.combat_state != "none" and any(word in normalized for word in _GENERIC_ENEMY_WORDS):
-        for index, enemy in enumerate(instance.combat_enemies):
-            if int(enemy.get("hp", 1) or 0) > 0:
-                return f"enemy:{index}"
     return ""
 
 
@@ -538,17 +528,6 @@ def _opponent_details(instance: GameInstance, opponent_ref: str) -> tuple[str, d
         npc = instance.npcs.get(npc_id, {})
         name = str(npc.get("name") or npc.get("character_name") or npc_id)
         return name, npc
-    if opponent_ref.startswith("enemy:"):
-        try:
-            index = int(opponent_ref.split(":", 1)[1])
-            if index < 0:
-                return "", {}
-            enemy = instance.combat_enemies[index]
-        except (ValueError, IndexError):
-            return "", {}
-        name = str(enemy.get("name") or enemy.get("character_name") or f"敌人{index + 1}")
-        sheet = enemy.get("character_sheet") if isinstance(enemy.get("character_sheet"), dict) else enemy
-        return name, sheet
     if opponent_ref in instance.players:
         name = str(instance.players[opponent_ref].get("character_name") or opponent_ref)
         sheet = instance.get_character_sheet(opponent_ref)
@@ -654,7 +633,7 @@ def resolve_check_request(
     actor_ref = str(request.get("actor_ref") or "")
     actor_is_companion = actor_ref.startswith("companion:")
     if actor_is_companion:
-        companions = (instance.ruleset_state.get("party", {}) or {}).get("companions", {})
+        companions = (ruleset_runtime.state(instance).get("party", {}) or {}).get("companions", {})
         companion = companions.get(actor_ref.removeprefix("companion:")) or {}
         character_sheet = (
             companion.get("ruleset_character")
@@ -758,10 +737,10 @@ def resolve_check_request(
     total = roll_value + modifier
     try:
         raw_dc = int(request["target"]) if request.get("target") is not None else (
-            rule.dc_for_difficulty(instance.difficulty, "normal") if rule else 10
+            rule.dc_for_difficulty(table_settings.difficulty(instance), "normal") if rule else 10
         )
     except (TypeError, ValueError):
-        raw_dc = rule.dc_for_difficulty(instance.difficulty, "normal") if rule else 10
+        raw_dc = rule.dc_for_difficulty(table_settings.difficulty(instance), "normal") if rule else 10
     dc = max(1, min(d20_dc_cap(rule), raw_dc))
 
     trusted_attack_dc = (
@@ -815,7 +794,7 @@ def resolve_check_request(
         ])) or None,
         "total": total,
         "dc": dc,
-        "difficulty": instance.difficulty,
+        "difficulty": table_settings.difficulty(instance),
         "target_source": "server_armor_class" if trusted_attack_dc is not None else "request_dc",
         "opponent_name": opponent_name,
         "opponent_roll": opponent_roll,

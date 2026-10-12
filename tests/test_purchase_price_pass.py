@@ -23,6 +23,7 @@ from src.commands.check_planner import (
     normalize_economy_actions,
     plan_round_checks,
 )
+from src.engine.modules import economy_state
 from src.commands.state_items import (
     append_inventory_item,
     classify_item,
@@ -197,7 +198,7 @@ def test_unpriced_intents_are_never_persisted() -> None:
     assert "purchase_requests" not in encoded
     recovered = GameInstance.from_dict(instance.to_dict())
     assert recovered.round_unpriced_purchase_intents == []
-    assert "purchase_requests" not in recovered.economy
+    assert "purchase_requests" not in economy_state.state(recovered)
 
 
 def test_reset_round_checks_clears_unpriced_intents() -> None:
@@ -283,7 +284,7 @@ async def test_narrated_price_dialog_next_round_and_blocks_free_loot(web_api) ->
     assert "五瓶" in narration
 
     # 同轮不弹窗（价格复检已移除），但 GM 的 LOOT 白拿被拦：无脏行、分文未扣。
-    assert instance.economy["proposals"] == []
+    assert economy_state.state(instance)["proposals"] == []
     sheet = instance.get_character_sheet(uid)
     assert sheet["inventory"] == [{"name": "回复药水", "qty": 2, "effect": "恢复10点HP"}]
     assert sheet["gold"] == 5000
@@ -302,7 +303,7 @@ async def test_narrated_price_dialog_next_round_and_blocks_free_loot(web_api) ->
     await api._handler.process_round(instance)
 
     # 下一轮弹出支付窗口：50 金（10 金/瓶 ×5）。
-    pending = [p for p in instance.economy["proposals"] if p["status"] == "pending"]
+    pending = [p for p in economy_state.state(instance)["proposals"] if p["status"] == "pending"]
     assert len(pending) == 1
     assert pending[0]["kind"] == "purchase"
     assert pending[0]["amount"] == 50
@@ -347,7 +348,7 @@ async def test_unpriced_purchase_never_delivers_free_items(web_api) -> None:
     assert await instance.try_advance() is True
     await api._handler.process_round(instance)
 
-    assert instance.economy["proposals"] == []
+    assert economy_state.state(instance)["proposals"] == []
     sheet = instance.get_character_sheet(uid)
     assert sheet["inventory"] == [{"name": "回复药水", "qty": 2, "effect": "恢复10点HP"}]
     assert sheet["gold"] == 5000
@@ -371,7 +372,7 @@ def test_queue_purchase_offer_idempotent_for_planner_offers() -> None:
         source="table_offer", source_ref=source_ref,
     )
     assert first["id"] == second["id"]
-    assert len(instance.economy["proposals"]) == 1
+    assert len(economy_state.state(instance)["proposals"]) == 1
 
 
 # ---------- 4. 成交后不再每回合重复弹窗 ----------
@@ -420,7 +421,7 @@ def test_has_pending_identical_purchase_scope() -> None:
     # 其他付款人 / 已拒绝 / 已成交不算待确认重复。
     assert not has_pending_identical_purchase(instance, "p2", "治疗药水")
     assert not has_pending_identical_purchase(instance, "p1", "长剑")
-    instance.economy["proposals"][0]["status"] = "committed"
+    economy_state.state(instance)["proposals"][0]["status"] = "committed"
     assert not has_pending_identical_purchase(instance, "p1", "治疗药水")
 
 
@@ -458,14 +459,14 @@ async def test_duplicate_offer_not_queued_while_first_pending(web_api) -> None:
     await instance.activate()
     await instance.start_round()
     await play_round("买5瓶治疗药水")
-    pending = [p for p in instance.economy["proposals"] if p["status"] == "pending"]
+    pending = [p for p in economy_state.state(instance)["proposals"] if p["status"] == "pending"]
     assert len(pending) == 1
     first_offer = pending[0]
 
     # 第二轮（process_round 结束时已自动进入下一轮）玩家只是继续话题；
     # planner 仍输出同样的报价意图，但不得叠窗。
     await play_round("再看看货架")
-    pending = [p for p in instance.economy["proposals"] if p["status"] == "pending"]
+    pending = [p for p in economy_state.state(instance)["proposals"] if p["status"] == "pending"]
     assert len(pending) == 1
     assert pending[0]["id"] == first_offer["id"]
 

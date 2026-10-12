@@ -13,6 +13,7 @@ from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 from src.rulesets.dnd2024.exploration import Dnd2024ExplorationEngine
 from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
+from src.engine.modules import ruleset_runtime
 
 
 class SequenceRng:
@@ -82,7 +83,7 @@ def test_exploration_heal_consumes_slot_and_heals_party_target() -> None:
     """§37.11/37.12：扣法术位、写 cast 事件（context=exploration）、HP 恢复不超上限。"""
     runtime, instance, engine = _wizard_instance()
     # 队友受伤（hp 6 / max 20）
-    party = instance.ruleset_state.setdefault("party", {"companions": {}})
+    party = ruleset_runtime.state(instance).setdefault("party", {"companions": {}})
     party["companions"]["mira"] = {
         "id": "mira", "name": "Mira", "controller": "ai", "active": True,
         "ruleset_character": {
@@ -112,7 +113,7 @@ def test_exploration_heal_consumes_slot_and_heals_party_target() -> None:
     applied = engine.apply_batch(instance, resolved["event_batch"])
     assert applied["applied"] is True
 
-    mira = instance.ruleset_state["party"]["companions"]["mira"]["ruleset_character"]
+    mira = ruleset_runtime.state(instance)["party"]["companions"]["mira"]["ruleset_character"]
     assert mira["resources"]["hp"] > 6
     assert mira["resources"]["hp"] <= mira["resources"]["max_hp"]
     slots_after = (
@@ -213,7 +214,7 @@ def test_exploration_rejects_offensive_spells_and_forged_submitters() -> None:
     combat.apply_batch(instance, resolved["event_batch"])
     assert engine.validate_intent(instance, {
         "intent_id": "exp-in-combat", "type": "exploration.cast_spell",
-        "expected_version": instance.ruleset_state["version"],
+        "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": "gm", "actor_id": "player:gm",
         "spell_ref": "spell:cure_wounds", "slot_level": 1,
         "target_ids": ["player:gm"],

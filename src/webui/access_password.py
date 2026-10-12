@@ -1,12 +1,31 @@
 from __future__ import annotations
 
-import hashlib
 import hmac
-import secrets
 from pathlib import Path
 
-HASH_PREFIX = "pbkdf2_sha256"
-HASH_ITERATIONS = 210_000
+from src.password_hashing import (
+    HASH_ITERATIONS,
+    HASH_PREFIX,
+    hash_password,
+    is_password_hash,
+    parse_password_hash,
+    verify_password_hash,
+)
+
+__all__ = [
+    "HASH_ITERATIONS",
+    "HASH_PREFIX",
+    "RESET_FILENAME",
+    "consume_reset_password",
+    "hash_access_password",
+    "is_hashed_access_password",
+    "is_valid_access_password",
+    "mask_access_password",
+    "normalize_access_password",
+    "reset_file_path",
+    "verify_access_password",
+]
+
 RESET_FILENAME = "reset_access_password.txt"
 
 
@@ -16,13 +35,11 @@ def normalize_access_password(value: object) -> str:
 
 
 def hash_access_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("ascii"), HASH_ITERATIONS)
-    return f"{HASH_PREFIX}${HASH_ITERATIONS}${salt}${digest.hex()}"
+    return hash_password(password)
 
 
 def is_hashed_access_password(value: str) -> bool:
-    return str(value or "").startswith(f"{HASH_PREFIX}$")
+    return is_password_hash(str(value or ""))
 
 
 def is_valid_access_password(value: object) -> bool:
@@ -31,19 +48,7 @@ def is_valid_access_password(value: object) -> bool:
         return False
     if not is_hashed_access_password(stored):
         return True
-    try:
-        prefix, iterations_raw, salt, expected = stored.split("$", 3)
-        iterations = int(iterations_raw)
-        salt.encode("ascii")
-        digest = bytes.fromhex(expected)
-    except (UnicodeEncodeError, ValueError, TypeError):
-        return False
-    return (
-        prefix == HASH_PREFIX
-        and 1 <= iterations <= 10_000_000
-        and bool(salt)
-        and len(digest) == hashlib.sha256().digest_size
-    )
+    return parse_password_hash(stored) is not None
 
 
 def verify_access_password(candidate: str, stored: str) -> bool:
@@ -53,15 +58,7 @@ def verify_access_password(candidate: str, stored: str) -> bool:
         return False
     if not is_hashed_access_password(stored):
         return hmac.compare_digest(candidate, stored)
-    try:
-        prefix, iterations_raw, salt, expected = stored.split("$", 3)
-        iterations = int(iterations_raw)
-    except (ValueError, TypeError):
-        return False
-    if prefix != HASH_PREFIX or iterations < 1 or not salt or not expected:
-        return False
-    digest = hashlib.pbkdf2_hmac("sha256", candidate.encode("utf-8"), salt.encode("ascii"), iterations).hex()
-    return hmac.compare_digest(digest, expected)
+    return verify_password_hash(candidate, stored)
 
 
 def mask_access_password(value: str) -> dict[str, object]:

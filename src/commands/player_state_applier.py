@@ -27,6 +27,7 @@ from src.commands.state_items import (
     equip_owned_item,
     unequip_item,
 )
+from src.engine.modules import progression_state
 
 logger = logging.getLogger("trpg")
 
@@ -59,7 +60,7 @@ class PlayerStateApplier:
             # 挡住“玩家诱导 GM 修改他人状态”；None 表示不限制（单人局/离线路径）。
             if allowed_player_uids is not None and uid not in allowed_player_uids:
                 logger.warning(
-                    "多人局状态标签目标越权，已丢弃: uid=%s round=%d", uid, instance.round_number,
+                    "多人局状态标签目标越权，已丢弃: uid=%s round=%d", uid, progression_state.round_value(instance),
                 )
                 continue
             cs = instance.get_character_sheet(uid)
@@ -81,7 +82,7 @@ class PlayerStateApplier:
                 logger.warning(
                     "忽略未经经济事务授权的 gold_change: uid=%s round=%d",
                     uid,
-                    instance.round_number,
+                    progression_state.round_value(instance),
                 )
             if "status" in pud:
                 cs["status"] = pud["status"]
@@ -139,9 +140,9 @@ class PlayerStateApplier:
                         push_res, push_verdict = check_d100(sv)
                         pushed_key = f"_pushed_{push_skill}"
                         pushed_rounds = cs.get(pushed_key, 0)
-                        if pushed_rounds >= instance.round_number:
+                        if pushed_rounds >= progression_state.round_value(instance):
                             break  # 本轮已推动过此技能
-                        cs[pushed_key] = instance.round_number
+                        cs[pushed_key] = progression_state.round_value(instance)
                         # 推动失败：后果加倍
                         fail_suffix = ""
                         if push_verdict in ("失败", "大失败"):
@@ -176,10 +177,10 @@ class PlayerStateApplier:
                 check_resource_triggers(instance, uid, rule)
             # 死亡检测（治疗先苏醒，HP 归零再按规则落昏迷/死亡）
             wake_character(cs)
-            if sync_death_from_hp(cs, instance.round_number, rule):
+            if sync_death_from_hp(cs, progression_state.round_value(instance), rule):
                 logger.info("%s 已死亡 (round=%d, hp=%d)",
                             instance.players[uid].get("character_name", uid),
-                            instance.round_number, cs.get("hp", 0))
+                            progression_state.round_value(instance), cs.get("hp", 0))
             instance.set_character_sheet(uid, cs)
             if domains:
                 changed_domains[uid] = frozenset(domains)
@@ -300,6 +301,6 @@ class PlayerStateApplier:
             return True
         logger.warning(
             "忽略使用未拥有的物品: uid=%s item=%s round=%d",
-            uid, item_name, instance.round_number,
+            uid, item_name, progression_state.round_value(instance),
         )
         return False

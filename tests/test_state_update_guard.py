@@ -1,5 +1,6 @@
 from src.commands.state_update_applier import discard_unresolved_player_damage
 from src.engine.game_instance import GameInstance
+from src.engine.modules import checks
 
 
 def _instance(verdict: str | None = None) -> GameInstance:
@@ -11,7 +12,7 @@ def _instance(verdict: str | None = None) -> GameInstance:
             "character_sheet": {"hp": 10, "max_hp": 10, "deceased": False},
         }
     }
-    instance.last_checks = [] if verdict is None else [{"actor_uid": "p1", "verdict": verdict}]
+    checks.replace_last_checks(instance, [] if verdict is None else [{"actor_uid": "p1", "verdict": verdict}])
     return instance
 
 

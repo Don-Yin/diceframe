@@ -6,7 +6,7 @@
 
 - 客户端只提交 ``{"intent_id", "action_id", "target_ids", "actor_id"?}``；
 - 全部数值由服务端公式求值，客户端提供的伤害/资源/行动条值一律忽略；
-- 状态存于 ``instance.combat_extension``（调度器 + 实体资源池），角色卡
+- 状态存于 ``combat_extension_state.current(instance)``（调度器 + 实体资源池），角色卡
   承载的字段（HP、内力等 special_stat）在结算后写回角色卡保持单一权威；
 - 权限：玩家只能驱动 ``player:<自己uid>`` 实体；GM 可驱动任意实体。
 """
@@ -33,6 +33,7 @@ from src.engine.combat_scheduler import (
     scheduler_from_config,
 )
 from src.engine.game_instance import GameInstance, GameState
+from src.engine.modules import combat_extension_state, progression_state
 
 _COMBAT_EXTENSION_SCHEMA = 1
 
@@ -46,7 +47,7 @@ def _raw_extension_payload(instance: GameInstance) -> Mapping[str, Any]:
     readable because the absent version is the original shape.
     """
 
-    raw = getattr(instance, "combat_extension", None)
+    raw = combat_extension_state.current(instance)
     if not isinstance(raw, Mapping):
         return {}
     version = raw.get("schema_version")
@@ -60,7 +61,7 @@ def _raw_extension_payload(instance: GameInstance) -> Mapping[str, Any]:
 
 
 def _extension_schema_supported(instance: GameInstance) -> bool:
-    raw = getattr(instance, "combat_extension", None)
+    raw = combat_extension_state.current(instance)
     if not isinstance(raw, Mapping):
         return True
     version = raw.get("schema_version")
@@ -431,7 +432,7 @@ def _append_public_summary(
     })
     raw_log = instance.log if isinstance(instance.log, list) else []
     try:
-        current_round = int(instance.round_number)
+        current_round = int(progression_state.round_value(instance))
     except (TypeError, ValueError):
         current_round = 0
     for entry in reversed(raw_log):
@@ -449,7 +450,7 @@ def _append_public_summary(
             if summary not in changes:
                 changes.append(summary)
             return
-    payload = instance.combat_extension
+    payload = combat_extension_state.current(instance)
     if isinstance(payload, dict):
         pending = payload.setdefault("pending_summaries", [])
         if isinstance(pending, list) and summary not in pending:
@@ -656,7 +657,7 @@ def scheduler_advance(
     capture = getattr(instance, "capture_combat_extension_snapshot", None)
     if callable(capture):
         capture()
-    instance.combat_extension = payload
+    combat_extension_state.replace_current(instance, payload)
     events = [*events, *result.events]
     return {
         "ok": True,
@@ -1055,7 +1056,7 @@ def resolve_combat_action(
     capture = getattr(instance, "capture_combat_extension_snapshot", None)
     if callable(capture):
         capture(entity_fields)
-    instance.combat_extension = payload
+    combat_extension_state.replace_current(instance, payload)
     for entity_id, record in staged_records.items():
         if entity_id.startswith("player:"):
             instance.set_character_sheet(entity_id.removeprefix("player:"), record)

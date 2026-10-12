@@ -10,6 +10,7 @@ from src.engine.checks import roll_check_request
 from src.engine.dice import check_d100_bonus, coc_success_level, d20_critical_thresholds, d20_verdict, roll
 from src.engine.game_instance import GameInstance
 from src.rules.rule_system import RuleSystem
+from src.engine.modules import checks
 
 
 def _expected_coc(roll_value: int, threshold: int) -> str:
@@ -194,9 +195,9 @@ def test_builtin_custom_d20_genres_cap_runaway_dc_and_resolve_normally(rule_file
 
     DiceResolver().resolve_action_check(instance, action, rule)
 
-    assert instance.last_check["dc"] == 20
-    assert instance.last_check["total"] == 20
-    assert instance.last_check["verdict"] == "成功"
+    assert checks.last_check(instance)["dc"] == 20
+    assert checks.last_check(instance)["total"] == 20
+    assert checks.last_check(instance)["verdict"] == "成功"
 
 
 @pytest.mark.parametrize(
@@ -236,8 +237,8 @@ def test_custom_d100_resolver_uses_coc7e_fumble_threshold(
 
     DiceResolver().resolve_action_check(instance, action, rule)
 
-    assert instance.last_check["threshold"] == skill_value
-    assert instance.last_check["verdict"] == expected_verdict
+    assert checks.last_check(instance)["threshold"] == skill_value
+    assert checks.last_check(instance)["verdict"] == expected_verdict
 
 
 def test_unsupported_custom_dice_system_is_rejected_explicitly() -> None:

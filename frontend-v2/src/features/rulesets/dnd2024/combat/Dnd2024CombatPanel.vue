@@ -203,7 +203,7 @@ const currentActor = computed(() => combat.value?.actors.find(
 const selectableEncounterPresets = computed(() => (gameplay.value?.encounter_presets || []).filter(
   preset => String(preset.difficulty || '') !== 'tutorial',
 ))
-const selectedPreset = computed(() => gameplay.value?.encounter_presets.find(
+const selectedPreset = computed(() => gameplay.value?.encounter_presets?.find(
   preset => preset.id === selectedPresetId.value,
 ))
 const guidedCombatStep = computed(() => {
@@ -211,8 +211,16 @@ const guidedCombatStep = computed(() => {
   return step?.requires === 'combat_ended' && step.encounter_preset_id ? step : null
 })
 const guidedCombatPreset = computed(() => guidedCombatStep.value
-  ? gameplay.value?.encounter_presets.find(preset => preset.id === guidedCombatStep.value?.encounter_preset_id)
+  ? gameplay.value?.encounter_presets?.find(preset => preset.id === guidedCombatStep.value?.encounter_preset_id)
   : undefined)
+// 非 GM 视图没有预设目录（含怪物数据块，GM-only）；展示只用服务端的无数值摘要。
+function encounterSummary(presetId: string | undefined): { name?: string; description?: string } | undefined {
+  const preview = gameplay.value?.encounter_preview
+  return presetId && preview?.id === presetId ? preview : undefined
+}
+const guidedCombatSummary = computed(() => (
+  guidedCombatPreset.value || encounterSummary(guidedCombatStep.value?.encounter_preset_id)
+))
 const narrativeCombatPending = computed(() => gameplay.value?.encounter_request?.status === 'pending')
 const encounterReadiness = computed(() => gameplay.value?.encounter_request?.readiness)
 // 服务端权威模式：story=剧情绑定遭遇，sandbox=自由遭遇，
@@ -253,6 +261,9 @@ const requestedCombatPreset = computed(() => {
     ? selectableEncounterPresets.value.find(preset => preset.id === presetId)
     : undefined
 })
+const requestedCombatSummary = computed(() => (
+  requestedCombatPreset.value || encounterSummary(gameplay.value?.encounter_request?.encounter_preset_id)
+))
 const canPlanTemporaryEncounter = computed(() => Boolean(
   props.isGm
   && combat.value?.status !== 'active'
@@ -1030,10 +1041,10 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
         <p v-else>{{ combat?.status === 'ended' ? copy.ended : copy.noCombat }}</p>
         <div v-if="guidedCombatStep" class="guided-preset">
           <span>{{ copy.guidedEncounter }}</span>
-          <strong>{{ guidedCombatPreset?.name || guidedCombatStep.encounter_preset_id }}</strong>
+          <strong>{{ guidedCombatSummary?.name || guidedCombatStep.encounter_preset_id }}</strong>
           <small class="encounter-source">{{ copy.encounterSource }}：{{ guidedCombatStep.encounter_preset_id }}</small>
-          <p>{{ guidedCombatPreset?.description }}</p>
-          <p v-if="!guidedCombatPreset" class="combat-error" role="alert">{{ copy.missingPreset }}</p>
+          <p>{{ guidedCombatSummary?.description }}</p>
+          <p v-if="isGm && !guidedCombatPreset" class="combat-error" role="alert">{{ copy.missingPreset }}</p>
           <small v-else>{{ copy.guidedOnly }}</small>
         </div>
         <div v-else-if="storyUnprepared && !sandboxDeclared" class="guided-preset unprepared">
@@ -1052,10 +1063,10 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
           </div>
           <p v-if="isGm" class="combat-state">{{ copy.aiHint }}</p>
         </div>
-        <div v-else-if="requestedCombatPreset" class="guided-preset">
+        <div v-else-if="requestedCombatSummary" class="guided-preset">
           <span>{{ copy.recommendedEncounter }}</span>
-          <strong>{{ requestedCombatPreset.name }}</strong>
-          <p>{{ requestedCombatPreset.description }}</p>
+          <strong>{{ requestedCombatSummary.name }}</strong>
+          <p>{{ requestedCombatSummary.description }}</p>
           <details v-if="isGm && selectableEncounterPresets.length > 1" class="encounter-alternatives">
             <summary>{{ copy.changeEncounter }}</summary>
             <label>

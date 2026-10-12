@@ -50,7 +50,7 @@ def _apply_allowed_cors_headers(response: web.StreamResponse, origin: str) -> No
     response.headers["Access-Control-Allow-Origin"] = origin
     response.headers["Access-Control-Allow-Credentials"] = "true"
     response.headers["Access-Control-Allow-Headers"] = (
-        "Authorization, Content-Type, X-TRPG-Confirm, X-Bot-Token, X-Bot-Actor"
+        "Authorization, Content-Type, X-TRPG-Confirm, X-Bot-Token, X-Bot-Actor, X-Seat-Token, X-Room-Token"
     )
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
     response.headers["Access-Control-Max-Age"] = "600"

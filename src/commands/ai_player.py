@@ -43,12 +43,14 @@ import logging
 import re
 from typing import Any
 
+from src.engine import progression
 from src.engine.action_gate import (
     AI_SEAT_POLICY, GateRequest, SOURCE_AI_SEAT, StructuredIntentRequirement, evaluate,
 )
 from src.engine.game_instance import GameInstance, GameState
 from src.engine.language import DEFAULT_LANGUAGE, localized_text
 from src.engine.player_control import ai_controlled_players, get_control
+from src.engine.modules import room_access
 from src.llm.context_builder import build_player_safe_context
 from src.llm.parser import sanitize_narration
 
@@ -316,7 +318,7 @@ def _ai_seats(instance: GameInstance) -> list[str]:
     """AI-hosted seats in stable uid order, capped by the table's player limit."""
 
     uids = ai_controlled_players(instance)
-    limit = max(0, int(getattr(instance, "max_players", 0) or 0))
+    limit = max(0, int(room_access.max_players(instance) or 0))
     return uids[:limit] if limit else uids
 
 
@@ -334,7 +336,7 @@ async def _fill_one(
     if not instance.is_alive(uid):
         # 死亡席位不能行动（add_action 也会拒绝），不必浪费一次模型调用。
         return _outcome(uid, "skipped", "deceased")
-    round_number = int(instance.round_number or 0)
+    round_number = progression.current_round(instance)
     if _existing_ai_action(instance, uid, round_number) is not None:
         # 幂等：同一 (run, round, uid) 至多一条 AI 行动。重复服务调用、SSE 重连
         # 或重试都会走到这里，而不是产生第二条行动。

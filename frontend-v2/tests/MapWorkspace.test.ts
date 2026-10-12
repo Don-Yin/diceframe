@@ -36,4 +36,26 @@ describe('MapWorkspace', () => {
     await wrapper.get('button[aria-label="关闭"]').trigger('click')
     expect(wrapper.emitted('close')).toBeTruthy()
   })
+
+  it('shows the empty-view hint for players and the visibility hint for the GM', () => {
+    i18n.global.locale.value = 'en'
+    const player = mount(MapWorkspace, {
+      global: { plugins: [i18n], stubs: { Teleport: true } },
+      props: { map: { locations: [], visibility_hint: 'no_visible_locations' } },
+    })
+    expect(player.text()).toContain('No public locations yet. The GM can mark locations as visible.')
+
+    const gm = mount(MapWorkspace, {
+      global: { plugins: [i18n], stubs: { Teleport: true } },
+      props: { map: { ...map, visibility_hint: 'players_see_no_locations' } },
+    })
+    expect(gm.text()).toContain("Players can't see any locations; set visibility in the lorebook.")
+
+    const plain = mount(MapWorkspace, {
+      global: { plugins: [i18n], stubs: { Teleport: true } },
+      props: { map },
+    })
+    expect(plain.find('.map-visibility-hint').exists()).toBe(false)
+    i18n.global.locale.value = 'zh-CN'
+  })
 })

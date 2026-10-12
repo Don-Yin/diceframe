@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
 
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import media
+from src.engine.modules import media, room_access
 
 logger = logging.getLogger("trpg")
 
@@ -94,6 +94,9 @@ class GamePackageService:
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             try:
                 state_data = json.loads(state_path.read_text(encoding="utf-8-sig"))
+                # Access credentials stay on this host; never export them
+                # (room password hash, room/seat tokens, bot bind token).
+                room_access.scrub_access_credentials(state_data)
                 container = media.payload_container(state_data)
                 reference = container.get("scene_image")
                 image_path = self._dependencies.resolve_scene_image_file(reference)

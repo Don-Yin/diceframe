@@ -13,6 +13,7 @@ import pytest
 
 from src.engine.game_instance import GameState
 from src.engine.memory_outbox import queue_memory_delivery
+from src.engine.modules import economy_state
 from src.engine.player_control import set_control
 from src.webui.api import WebAPI
 from src.webui.services import characters, turns
@@ -277,7 +278,7 @@ async def test_existing_pre_retry_errors_keep_priority_over_run_guard(failure, t
 async def test_run_precedes_economy_and_phase_without_exposing_private_proposals(token) -> None:
     instance = instance_with_seats()
     instance.state = GameState.ACTIVE_JUDGMENT
-    instance.economy["proposals"].append({
+    economy_state.state(instance)["proposals"].append({
         "id": "secret", "run_id": instance.run_id, "status": "pending", "kind": "payment",
         "payer_uid": "human", "visibility": "private", "reason": "private details",
     })

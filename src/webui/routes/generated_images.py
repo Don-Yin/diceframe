@@ -6,6 +6,7 @@ from aiohttp import web
 
 from src.imagegen import IMAGE_PURPOSES, ImageGenerationError, game_image_owner_id
 from src.webui.routes._common import _get_api, _require_confirmed_request
+from src.webui.viewer import viewer_for
 from src.webui.routes.auth import ACCESS_PASSWORD_CONFIGURED_KEY
 
 
@@ -107,11 +108,15 @@ async def api_generated_image_file(request: web.Request) -> web.StreamResponse:
 
 
 async def api_game_generated_images(request: web.Request) -> web.Response:
+    api = _get_api(request)
+    game_key = request.match_info["game_key"]
+    viewer = viewer_for(request, api.get_game_instance(game_key))
     try:
-        images = _get_api(request).list_game_generated_images(
-            request.match_info["game_key"],
+        images = api.list_game_generated_images(
+            game_key,
             str(request.get("user_id", "") or ""),
             purpose=str(request.query.get("purpose") or "").strip().lower(),
+            viewer_is_gm=viewer.is_gm,
         )
     except KeyError:
         return web.json_response({"error": "游戏不存在"}, status=404)

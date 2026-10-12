@@ -8,8 +8,10 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
 
+from src.engine import progression
 from src.engine.language import normalize_language
-from src.engine.modules.media import replace_scene_image
+from src.engine.modules import narrative_notes
+from src.engine.modules.media import replace_scene_image, scene_image
 from src.imagegen import (
     ImageGenerationError,
     ImageGenerationRequest,
@@ -135,7 +137,7 @@ class GeneratedImageService:
                     self._dependencies.llm_client,
                     narration=str(entry.get("gm_response") or ""),
                     actions=entry.get("actions") or [],
-                    current_scene=str(getattr(instance, "scene", "") or ""),
+                    current_scene=str(narrative_notes.scene(instance) or ""),
                     players=getattr(instance, "players", {}),
                     global_prompt="",
                     declared_panels=[],
@@ -165,7 +167,7 @@ class GeneratedImageService:
         if user_id != instance.gm_uid:
             return {"ok": False, "error": "仅 GM 可预览提示词"}
         normalized, compressed = normalize_scene_panels(panels, merge_same_location=False)
-        context = {"manual": True, "scene": str(getattr(instance, "scene", "") or ""), "panels": normalized, "storyboard": {"panels": normalized, "compressed_count": compressed}}
+        context = {"manual": True, "scene": str(narrative_notes.scene(instance) or ""), "panels": normalized, "storyboard": {"panels": normalized, "compressed_count": compressed}}
         try:
             composed, budget = backend.preview_prompt(str(prompt or "").strip(), "scene", context)
         except Exception as exc:
@@ -279,7 +281,13 @@ class GeneratedImageService:
         user_id: str,
         *,
         purpose: str = "",
+        viewer_is_gm: bool = False,
     ) -> list[dict[str, Any]]:
+        """List the game's generated images; non-GM viewers get the public view.
+
+        Prompts and the raw narration/action context are written from GM
+        context and may name unrevealed lore, so only the GM receives them.
+        """
         instance = self._dependencies.get_instance(game_key)
         if instance is None:
             raise KeyError("游戏不存在")
@@ -303,7 +311,9 @@ class GeneratedImageService:
             )
             if context.get("round") is not None:
                 record["round"] = int(context.get("round") or 0)
-        return records
+        if viewer_is_gm:
+            return records
+        return [_public_image_record(record) for record in records]
 
     async def use_as_map_background(
         self,
@@ -334,9 +344,9 @@ class GeneratedImageService:
         if not user_id or user_id != instance.gm_uid:
             return {"ok": False, "error": "仅 GM 可生成当前轮场景图"}
         try:
-            requested_round = int(round_number) if round_number is not None else int(getattr(instance, "round_number", 0) or 0)
+            requested_round = int(round_number) if round_number is not None else progression.current_round(instance)
         except (TypeError, ValueError):
-            requested_round = int(getattr(instance, "round_number", 0) or 0)
+            requested_round = progression.current_round(instance)
         prompt = str(prompt or "").strip()
         if not prompt:
             return {"ok": False, "error": "请填写画面描述"}
@@ -369,7 +379,7 @@ class GeneratedImageService:
                 self._dependencies.llm_client,
                 narration=str(entry.get("gm_response") or ""),
                 actions=entry.get("actions") or [],
-                current_scene=str(getattr(instance, "scene", "") or ""),
+                current_scene=str(narrative_notes.scene(instance) or ""),
                 players=getattr(instance, "players", {}),
                 global_prompt=prompt,
                 declared_panels=declared_panels,
@@ -379,7 +389,7 @@ class GeneratedImageService:
         else:
             normalized_panels, compressed_count = [], 0
         appearances = public_character_appearances(getattr(instance, "players", {}))
-        context: dict[str, Any] = {"round": target_round, "requested_round": requested_round, "run_id": expected_run_id, "source_revision": source_revision, "target": "current-round", "manual": True, "scene": str(getattr(instance, "scene", "") or ""), "narration": str(entry.get("gm_response") or "")[:1600], "actions": str(entry.get("actions") or "")[:1200], "panels": normalized_panels, "character_appearances": dict(appearances)}
+        context: dict[str, Any] = {"round": target_round, "requested_round": requested_round, "run_id": expected_run_id, "source_revision": source_revision, "target": "current-round", "manual": True, "scene": str(narrative_notes.scene(instance) or ""), "narration": str(entry.get("gm_response") or "")[:1600], "actions": str(entry.get("actions") or "")[:1200], "panels": normalized_panels, "character_appearances": dict(appearances)}
         if normalized_panels:
             context["storyboard"] = {"panels": normalized_panels, "compressed_count": compressed_count}
             if appearances:
@@ -415,7 +425,7 @@ class GeneratedImageService:
         if storyboard_source_revision(entry) != source_revision:
             return {"ok": False, "error": "目标剧情已变化，生成图片未写入旧版本存档"}
         reference = {"kind": "generated", "asset_id": result.asset_id}
-        old_entry = deepcopy(entry.get("scene_image")); old_top = deepcopy(current.scene_image)
+        old_entry = deepcopy(entry.get("scene_image")); old_top = deepcopy(scene_image(current))
         entry["scene_image"] = {"reference": reference, "generation_id": result.generation_id, "prompt": prompt, "revised_prompt": result.revised_prompt, "status": "ready", "swipe_index": int(entry.get("current_swipe") or 0)}
         if refs:
             entry["scene_image"].update({"reference_character_ids": list(context.get("reference_character_ids", [])), "reference_count": int(context.get("reference_count") or 0)})
@@ -492,3 +502,28 @@ class GeneratedImageService:
                 seen_assets.add(asset_id)
                 references.append(ImageReference(character_id=uid, content=content, content_type="image/webp", file_name=f"{uid[:48] or 'character'}.webp"))
         return tuple(references)
+
+
+# Fields of a generation record a non-GM viewer may receive.  Everything else
+# (prompt, revised_prompt, provider internals, future fields) stays GM-only.
+PUBLIC_IMAGE_RECORD_FIELDS = frozenset({
+    "generation_id", "asset_id", "purpose", "created_at", "owner_type", "round",
+})
+# Public storyboard context; raw narration/actions are pre-sanitization GM data.
+PUBLIC_IMAGE_CONTEXT_FIELDS = frozenset({
+    "round", "scene", "panels", "storyboard", "avatar_reference_names",
+})
+
+
+def _public_image_record(record: dict[str, Any]) -> dict[str, Any]:
+    public = {
+        key: deepcopy(value) for key, value in record.items()
+        if key in PUBLIC_IMAGE_RECORD_FIELDS
+    }
+    context = record.get("context")
+    if isinstance(context, dict):
+        public["context"] = {
+            key: deepcopy(value) for key, value in context.items()
+            if key in PUBLIC_IMAGE_CONTEXT_FIELDS
+        }
+    return public

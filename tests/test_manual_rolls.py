@@ -1,6 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
+from src.engine.modules import checks
 from src.llm.context_builder import format_manual_roll_context
 from src.webui.services.manual_rolls import ManualRollDependencies, ManualRollService
 
@@ -21,8 +22,6 @@ def test_manual_roll_create_resolve_is_idempotent_and_bound_to_target():
         run_id="run-1",
         round_number=2,
         players={"p1": {"character_name": "Alice"}},
-        manual_roll_requests=[],
-        last_activity="",
     )
     saves = []
 
@@ -63,7 +62,6 @@ def test_manual_roll_purpose_check_and_contest_are_evaluated_without_state_effec
         modules={},
         gm_uid="gm", run_id="run-1", round_number=1,
         players={"p1": {"character_name": "Alice"}, "p2": {"character_name": "Bob"}},
-        manual_roll_requests=[], last_activity="",
     )
     saves = []
 
@@ -105,7 +103,6 @@ def test_manual_roll_create_normalizes_include_in_ai_context():
         modules={},
         gm_uid="gm", run_id="run-1", round_number=1,
         players={"p1": {"character_name": "Alice"}},
-        manual_roll_requests=[], last_activity="",
     )
     saves: list = []
     service = _make_service(instance, saves)
@@ -205,11 +202,13 @@ def _resolved_free(**overrides):
 
 
 def _context_instance(requests, run_id="run-1", language="zh-CN"):
-    return SimpleNamespace(
+    instance = SimpleNamespace(
+        modules={},
         gm_uid="gm", run_id=run_id, round_number=6, language=language,
         players={"p1": {"character_name": "Alice"}, "p2": {"character_name": "Bob"}},
-        manual_roll_requests=list(requests), last_activity="",
     )
+    checks.replace_manual_roll_requests(instance, list(requests))
+    return instance
 
 
 def test_resolved_service_requests_flow_into_ai_context():
@@ -217,7 +216,6 @@ def test_resolved_service_requests_flow_into_ai_context():
         modules={},
         gm_uid="gm", run_id="run-1", round_number=1,
         players={"p1": {"character_name": "Alice"}, "p2": {"character_name": "Bob"}},
-        manual_roll_requests=[], last_activity="",
     )
     saves: list = []
     service = _make_service(instance, saves)

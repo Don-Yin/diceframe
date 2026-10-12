@@ -49,6 +49,18 @@ def sanitize_label(value: object) -> str:
     return text
 
 
+class InstallIdInUse(ValueError):
+    """Another paired device is already bound to this install id."""
+
+
+def normalize_install_id(value: object) -> str:
+    """A client install id (canonical id) or ``""``; never a guess."""
+    from src.engine.world.contracts import CANONICAL_ID_PATTERN
+
+    text = value if isinstance(value, str) else ""
+    return text if CANONICAL_ID_PATTERN.fullmatch(text) else ""
+
+
 class DeviceTokenStore:
     """已配对设备清单；令牌只以摘要形式落盘，明文只在签发响应里出现一次。"""
 
@@ -68,6 +80,7 @@ class DeviceTokenStore:
                 "label": device["label"],
                 "created_at": device["created_at"],
                 "last_seen_at": device["last_seen_at"],
+                "install_id": device.get("install_id", ""),
             }
             for device in sorted(
                 self._devices,
@@ -90,7 +103,9 @@ class DeviceTokenStore:
 
     # ---- 变更 ----
 
-    def issue(self, label: str = "") -> tuple[str, dict]:
+    def issue(self, label: str = "", install_id: str = "") -> tuple[str, dict]:
+        if self.install_id_holder(install_id):
+            raise InstallIdInUse(install_id)
         token = secrets.token_urlsafe(32)
         device = {
             "id": secrets.token_hex(8),
@@ -98,6 +113,7 @@ class DeviceTokenStore:
             "digest": _digest(token),
             "created_at": _now_iso(),
             "last_seen_at": "",
+            "install_id": normalize_install_id(install_id),
         }
         self._devices.append(device)
         # 超额时淘汰最久未活跃的设备，避免清单被无限撑大。
@@ -110,6 +126,48 @@ class DeviceTokenStore:
             )
         self._save()
         return token, device
+
+    # ---- 内容同步身份 ----
+
+    def bind_install_id(self, device_id: str, install_id: str) -> str:
+        """Return the install id this device is bound to, binding it on first use.
+
+        A device paired before install ids existed has none; its first
+        declared content push binds the id it declares. Afterwards the device
+        may only declare that id. Returns ``""`` for an unknown device.
+        """
+        target = str(device_id or "").strip()
+        wanted = normalize_install_id(install_id)
+        for device in self._devices:
+            if device["id"] != target:
+                continue
+            if not device.get("install_id") and wanted:
+                if self.install_id_holder(wanted, excluding=target):
+                    raise InstallIdInUse(wanted)
+                device["install_id"] = wanted
+                self._save()
+            return str(device.get("install_id") or "")
+        return ""
+
+    def install_id_holder(self, install_id: str, *, excluding: str = "") -> str:
+        """The paired device already bound to ``install_id`` (``""`` if none)."""
+        wanted = normalize_install_id(install_id)
+        if not wanted:
+            return ""
+        for device in self._devices:
+            if device["id"] != excluding and device.get("install_id") == wanted:
+                return str(device["id"])
+        return ""
+
+    def clear_install_id(self, device_id: str) -> bool:
+        """Owner action: let the device bind a new install id (e.g. after a reinstall)."""
+        target = str(device_id or "").strip()
+        for device in self._devices:
+            if device["id"] == target:
+                device["install_id"] = ""
+                self._save()
+                return True
+        return False
 
     def revoke(self, device_id: str) -> bool:
         target = str(device_id or "").strip()
@@ -164,6 +222,7 @@ class DeviceTokenStore:
                     "digest": digest,
                     "created_at": str(entry.get("created_at") or ""),
                     "last_seen_at": str(entry.get("last_seen_at") or ""),
+                    "install_id": normalize_install_id(entry.get("install_id")),
                 }
             )
         return devices[-self.max_devices:]

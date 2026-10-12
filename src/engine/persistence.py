@@ -8,6 +8,7 @@ GameRegistry 保留薄委托（公共方法 + 被外部调用的 _save_path）�
 
 from __future__ import annotations
 
+import copy
 import io
 import json
 import logging
@@ -21,7 +22,7 @@ from src.engine import game_instance
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.health import record_health_event
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import media
+from src.engine.modules import checks, media, room_access
 from src.compat.saves import normalize_save_payload
 from src.compat.save_paths import save_path
 
@@ -169,10 +170,67 @@ async def load(registry: GameRegistry, game_key: tuple) -> GameInstance | None:
             repair_hint="建议检查 data/saves 目录权限、磁盘空间和 state.json 格式。",
         )
     _restore_chatlog(registry, instance, sp)
+    _rewrite_plaintext_credentials(
+        sp.with_name("state.json"),
+        instance,
+        state_has_plaintext=room_access.payload_has_plaintext_credentials(data),
+    )
     registry.register(instance)
     # Loading opaque future module data must not require runtime interpretation.
     logger.info("存档已加载: %s", game_key)
     return instance
+
+
+def _write_state(path: Path, data: dict[str, Any]) -> None:
+    tmp = path.with_name(f"{path.stem}.tmp{path.suffix}")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _rewrite_plaintext_credentials(
+    state_path: Path, instance: GameInstance, *, state_has_plaintext: bool,
+) -> None:
+    """Persist upgraded (hashed) room credentials right after loading.
+
+    The schema upgrade only happens in memory; without this an idle game would
+    keep its plaintext room password and token on disk indefinitely, and the
+    upgraded token's expiry would be recomputed on every load. The state file
+    and the backup are checked independently (a current state can sit next to
+    an older plaintext backup); the backup is upgraded in place and stays the
+    older state.
+    """
+    if state_has_plaintext:
+        try:
+            _write_state(state_path, instance.to_dict())
+        except OSError:
+            logger.exception("升级房间凭据后写回存档失败: %s", state_path)
+            return
+    backup = state_path.with_name("state.backup.json")
+    if not backup.exists():
+        return
+    try:
+        raw = json.loads(backup.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        raw = None
+    if raw is not None and not room_access.payload_has_plaintext_credentials(raw):
+        return
+    try:
+        upgraded = GameInstance.from_dict(normalize_save_payload(raw)).to_dict()
+    except Exception as exc:
+        # An unreadable backup must not keep plaintext either: fall back to
+        # the state that was just loaded. Name the game, never the content
+        # (no traceback: exception text could quote stored values).
+        logger.warning(
+            "备份存档无法解析或升级，已用当前存档覆盖以清除可能的明文房间凭据: game=%s file=%s (%s)",
+            "|".join(str(part) for part in instance.game_key),
+            backup,
+            type(exc).__name__,
+        )
+        upgraded = instance.to_dict()
+    try:
+        _write_state(backup, upgraded)
+    except OSError:
+        logger.exception("升级房间凭据后写回备份失败: %s", backup)
 
 
 def _restore_chatlog(registry: GameRegistry, instance: GameInstance, sp: Path) -> None:
@@ -249,7 +307,7 @@ async def recover_all(registry: GameRegistry) -> list[GameInstance]:
             if instance and instance.state != GameState.ENDED:
                 kept_luck_pending = (
                     instance.state == GameState.ACTIVE_JUDGMENT
-                    and instance.round_checks_prepared
+                    and checks.round_checks_prepared(instance)
                     and instance.pending_luck_checks()
                 )
                 if not kept_luck_pending:
@@ -443,6 +501,9 @@ async def import_save_zip(
     # 身份，避免同机导入后与原局共享长期记忆或接受原局异步结果。
     from src.migrations.instance import rebind_imported_game_state_payload
 
+    # Rebinding scrubs every access credential; a password-protected save
+    # arrives with its player entrance closed, which the GM is told about.
+    access_closed = room_access.scrub_access_credentials(copy.deepcopy(state_json))
     state_json = rebind_imported_game_state_payload(
         state_json,
         game_key=new_key,
@@ -454,7 +515,7 @@ async def import_save_zip(
     # 立即加载并注册进内存，否则 list_games（只遍历内存）看不到导入的对局
     await load(registry, new_key)
     logger.info("已导入存档为新对局: %s", sp.parent.name)
-    return {"ok": True, "game_key": list(new_key)}
+    return {"ok": True, "game_key": list(new_key), "player_access_closed": access_closed}
 
 
 async def save_all_active(registry: GameRegistry) -> None:

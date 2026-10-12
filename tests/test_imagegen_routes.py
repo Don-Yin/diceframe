@@ -122,9 +122,9 @@ class _FakeApi:
     async def generate_generated_image(self, **request):
         return await self.generated_images.generate_image(**request)
 
-    def list_game_generated_images(self, game_key, user_id, *, purpose=""):
+    def list_game_generated_images(self, game_key, user_id, *, purpose="", viewer_is_gm=False):
         return self.generated_images.list_game_images(
-            game_key, user_id, purpose=purpose,
+            game_key, user_id, purpose=purpose, viewer_is_gm=viewer_is_gm,
         )
 
     async def use_generated_image_as_map_background(
@@ -411,3 +411,55 @@ async def test_generated_asset_file_and_map_background(tmp_path):
     assert api.background_updates == [
         ("web|room|bot", {"kind": "generated", "asset_id": ASSET_ID}),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("user_id", "owner", "preview", "gm_view"),
+    [
+        ("player", False, False, False),  # seat token / bot acting for the seat
+        ("player", True, True, False),    # owner preview or P2P delegate of a seat
+        ("gm", False, False, True),       # the GM seat
+        ("gm", True, False, True),        # the logged-in owner
+    ],
+    ids=["seat", "owner-preview-or-p2p", "gm", "owner"],
+)
+async def test_game_history_strips_gm_written_text_for_non_gm(
+    tmp_path, user_id, owner, preview, gm_view,
+):
+    api = _FakeApi(tmp_path)
+    api._imagegen.assets.list_records = lambda **_filters: [{
+        "generation_id": "1" * 32,
+        "asset_id": ASSET_ID,
+        "purpose": "scene",
+        "prompt": "the lich sleeps in the hidden vault",
+        "revised_prompt": "a lich in a secret vault",
+        "provider": "p",
+        "model": "m",
+        "owner_type": "game",
+        "owner_id": "web:room:bot",
+        "context": {
+            "round": 2,
+            "scene": "Gate",
+            "narration": "raw GM narration [STATE: secret lich]",
+            "actions": "[{'check_request': {'secret_dc': 18}}]",
+            "panels": [{"description": "the party at the gate"}],
+        },
+        "created_at": "2026-08-22T00:00:00+00:00",
+    }]
+    request = _Request(api, user_id=user_id, owner_authenticated=owner)
+    request._values["player_preview"] = preview
+
+    response = await generated_images.api_game_generated_images(request)
+    assert response.status == 200
+    image = json.loads(response.text)["images"][0]
+
+    assert image["asset_id"] == ASSET_ID and image["round"] == 2
+    assert image["context"]["panels"] == [{"description": "the party at the gate"}]
+    if gm_view:
+        assert image["prompt"] == "the lich sleeps in the hidden vault"
+        assert "secret lich" in image["context"]["narration"]
+    else:
+        assert "lich" not in response.text
+        assert "secret_dc" not in response.text
+        assert {"prompt", "revised_prompt"}.isdisjoint(image)

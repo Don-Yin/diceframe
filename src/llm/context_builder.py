@@ -10,8 +10,12 @@ from typing import Any, Literal
 
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text, normalize_language
+from src.engine.modules import (
+    checks, economy_state, legacy_combat, narrative_notes, private_channels, progression_state,
+    table_settings,
+)
 from src.engine.visibility_rules import manual_roll_visible_to
-from src.knowledge.visibility import PUBLIC_VISIBILITY_MARKERS, visibility_values
+from src.knowledge.visibility import entry_visible_to_viewer
 from src.llm.parser import sanitize_narration
 from src.llm.world_prompt import format_world_state_block
 
@@ -381,7 +385,7 @@ def format_manual_roll_context(
         return ""
     language = normalize_language(getattr(instance, "language", "zh-CN"))
     records: list[str] = []
-    for req in getattr(instance, "manual_roll_requests", None) or []:
+    for req in checks.manual_roll_requests(instance):
         if not isinstance(req, dict):
             continue
         if req.get("status") != "resolved" or str(req.get("run_id") or "") != run_id:
@@ -675,14 +679,15 @@ async def build_context(
     )
 
     # 3. 摘要 + 关键事实
-    summary = sanitize_narration(instance.summary.get("narrative", ""))
+    summary = sanitize_narration(narrative_notes.summary(instance).get("narrative", ""))
     summary_section_parts: list[str] = []
     if summary:
         summary_section_parts.append(_truncate(summary, budget_summary))
-    if instance.key_facts:
+    key_facts = narrative_notes.key_facts(instance)
+    if key_facts:
         facts_lines = [
             f"- {f.get('content', '')}"
-            for f in instance.key_facts
+            for f in key_facts
             if isinstance(f, dict) and f.get("content")
         ]
         if facts_lines:
@@ -693,12 +698,13 @@ async def build_context(
         sec_idx["summary"] = len(parts) - 1
 
     # D1: 已确认事项（防 GM 重复讨论；有预算上限，超窗收尾时优先让出）
-    if instance.confirmed_items:
+    confirmed_items = narrative_notes.confirmed_items(instance)
+    if confirmed_items:
         confirmed_text = localized_text(language, {
-            "en": "; ".join(instance.confirmed_items[-20:]),
-            "zh-CN": "、".join(instance.confirmed_items[-20:]),
-            "ja": "、".join(instance.confirmed_items[-20:]),
-            "de": "; ".join(instance.confirmed_items[-20:]),
+            "en": "; ".join(confirmed_items[-20:]),
+            "zh-CN": "、".join(confirmed_items[-20:]),
+            "ja": "、".join(confirmed_items[-20:]),
+            "de": "; ".join(confirmed_items[-20:]),
         })
         confirmed_text = _truncate(confirmed_text, budget_confirmed)
         heading = localized_text(language, {
@@ -710,7 +716,7 @@ async def build_context(
         parts.append(f"{heading}\n{confirmed_text}")
         sec_idx["confirmed"] = len(parts) - 1
 
-    economy = getattr(instance, "economy", {})
+    economy = economy_state.state(instance)
     outcomes = economy.get("outcomes", []) if isinstance(economy, dict) else []
     proposals = economy.get("proposals", []) if isinstance(economy, dict) else []
     pending_personal_purchase = any(
@@ -930,31 +936,18 @@ def filter_player_visible_lorebook_entries(
     Facts already discovered publicly remain available through the public log,
     summary, and confirmed-facts sections without exposing the underlying lore.
     """
-    allowed = {str(actor_uid).strip().casefold()}
-    if actor_name:
-        allowed.add(str(actor_name).strip().casefold())
-    public = {marker.casefold() for marker in PUBLIC_VISIBILITY_MARKERS}
-    result: list[dict] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        visible = {item.casefold() for item in visibility_values(entry.get("visible_to"))}
-        if visible & (allowed | public):
-            result.append(deepcopy(entry))
-    return result
+    uid = str(actor_uid or "").strip()
+    if not uid:
+        return filter_public_lorebook_entries(entries)
+    return [
+        deepcopy(entry) for entry in entries
+        if entry_visible_to_viewer(entry, "character", uid, str(actor_name or ""))
+    ]
 
 
 def filter_public_lorebook_entries(entries: list[dict]) -> list[dict]:
     """Select only lore explicitly marked as visible to the whole table."""
-    public = {marker.casefold() for marker in PUBLIC_VISIBILITY_MARKERS}
-    result: list[dict] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        visible = {item.casefold() for item in visibility_values(entry.get("visible_to"))}
-        if visible & public:
-            result.append(deepcopy(entry))
-    return result
+    return [deepcopy(entry) for entry in entries if entry_visible_to_viewer(entry, "party")]
 
 
 def _player_safe_state(
@@ -984,14 +977,14 @@ def _player_safe_state(
     ]
     return {
         "world_name": instance.world_name,
-        "round_number": instance.round_number,
-        "scene": instance.scene,
-        "game_time": instance.game_time,
-        "difficulty": instance.difficulty,
+        "round_number": progression_state.round_value(instance),
+        "scene": narrative_notes.scene(instance),
+        "game_time": narrative_notes.game_time(instance),
+        "difficulty": table_settings.difficulty(instance),
         "language": instance.language,
         "questioning_character": actor_view,
         "public_party_roster": party,
-        "combat_state": instance.combat_state,
+        "combat_state": legacy_combat.combat_state(instance),
     }
 
 
@@ -1056,12 +1049,12 @@ async def build_player_safe_context(
         sec_idx["lorebook"] = len(parts) - 1
 
     summary_parts: list[str] = []
-    narrative = sanitize_narration(str((instance.summary or {}).get("narrative") or ""))
+    narrative = sanitize_narration(str((narrative_notes.summary(instance) or {}).get("narrative") or ""))
     if narrative:
         summary_parts.append(narrative)
     facts = [
         f"- {fact.get('content', '')}"
-        for fact in (instance.key_facts or [])
+        for fact in (narrative_notes.key_facts(instance) or [])
         if isinstance(fact, dict) and fact.get("content")
     ]
     if facts:
@@ -1075,8 +1068,9 @@ async def build_player_safe_context(
         }) + "\n" + _truncate("\n".join(summary_parts), budget_summary))
         sec_idx["summary"] = len(parts) - 1
 
-    if instance.confirmed_items:
-        confirmed = "\n".join(f"- {item}" for item in instance.confirmed_items[-20:])
+    confirmed_items = narrative_notes.confirmed_items(instance)
+    if confirmed_items:
+        confirmed = "\n".join(f"- {item}" for item in confirmed_items[-20:])
         parts.append(localized_text(language, {
             "en": "## Public Confirmed Items",
             "zh-CN": "【公开确认事项】",
@@ -1106,7 +1100,7 @@ async def build_player_safe_context(
 
     own_private = []
     for item in (
-        (instance.private_log or {}).get(actor_uid, []) if visibility == "private" else []
+        (private_channels.private_log(instance) or {}).get(actor_uid, []) if visibility == "private" else []
     ):
         if not isinstance(item, dict):
             continue

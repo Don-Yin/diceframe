@@ -14,6 +14,7 @@ from src.webui.routes._common import (
 
 logger = logging.getLogger("trpg")
 from src.webui.routes.game_route_common import _gm_only_inst
+from src.webui.services._common import canonical_game_key
 
 
 async def api_create_game(request: web.Request) -> web.Response:
@@ -59,8 +60,33 @@ async def api_create_game(request: web.Request) -> web.Response:
         ),
         # 逐卡控制方式与「未认领角色默认」；缺省时保持旧行为（每个席位 human）。
         unclaimed_control_default=str(body.get("unclaimed_control_default", "") or ""),
+        world_ref=body.get("world_ref"),
+        book_bindings=body.get("book_bindings"),
     )
     return web.json_response(result)
+
+
+_LIFECYCLE_ERROR_STATUS = {
+    "GAME_NOT_FOUND": 404,
+    "WORLD_NOT_FOUND": 404,
+    "INVALID_WORLD_ID": 400,
+    "INVALID_WORLD_REF": 422,
+    "ADVENTURE_WORLD_LOCKED": 409,
+    "ADVENTURE_RUNTIME_INIT_FAILED": 422,
+    "RULESET_RUNTIME_INIT_FAILED": 422,
+    "REWRITE_IN_PROGRESS": 409,
+    "STALE_RUN": 409,
+    "ROUND_PROCESSING": 409,
+    "WORLD_LOAD_FAILED": 500,
+}
+
+
+def _lifecycle_status(result: dict) -> int:
+    """HTTP status for a coded lifecycle failure; uncoded legacy failures stay 200."""
+
+    if result.get("ok", True):
+        return 200
+    return _LIFECYCLE_ERROR_STATUS.get(str(result.get("error_code") or ""), 200)
 
 
 async def api_reset_game(request: web.Request) -> web.Response:
@@ -68,11 +94,24 @@ async def api_reset_game(request: web.Request) -> web.Response:
     if denied is not None:
         return denied
     gk = request.match_info["game_key"]
-    _, denied = _gm_only_inst(request, gk)
+    inst, denied = _gm_only_inst(request, gk)
     if denied is not None:
         return denied
-    result = await _get_api(request).reset_game(gk)
-    return web.json_response(result)
+    before = set(getattr(inst, "players", {}) or {})
+    # The GM identity survives a reset; only the departed seats' devices go.
+    before.discard(str(getattr(inst, "gm_uid", "") or ""))
+    api = _get_api(request)
+    result = await api.reset_game(gk)
+    if result.get("ok"):
+        # Reset starts a run without the old seats: their devices are just
+        # visitors in this game from now on.
+        current = api.get_game_instance(gk)
+        remaining = set(getattr(current, "players", {}) or {}) if current is not None else set()
+        mgr = request.app.get("session_manager")
+        if mgr is not None:
+            for uid in sorted(before - remaining):
+                mgr.revoke_game_binding(uid, canonical_game_key(gk))
+    return web.json_response(result, status=_lifecycle_status(result))
 
 
 async def api_restart_game(request: web.Request) -> web.Response:
@@ -84,7 +123,7 @@ async def api_restart_game(request: web.Request) -> web.Response:
     if denied is not None:
         return denied
     result = await _get_api(request).restart_game(gk)
-    return web.json_response(result)
+    return web.json_response(result, status=_lifecycle_status(result))
 
 
 async def api_switch_world(request: web.Request) -> web.Response:
@@ -97,7 +136,7 @@ async def api_switch_world(request: web.Request) -> web.Response:
         return denied
     body = await request.json()
     result = await _get_api(request).switch_world(gk, body.get("world_id", ""))
-    return web.json_response(result)
+    return web.json_response(result, status=_lifecycle_status(result))
 
 
 async def api_create_from_seed(request: web.Request) -> web.Response:
