@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "tool",
+    "id": "alchemists_supplies"
+  },
+  "fields": {
+    "name": "炼金工具"
+  }
+}

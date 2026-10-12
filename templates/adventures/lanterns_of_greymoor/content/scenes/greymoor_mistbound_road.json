@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "kind": "scene",
+  "id": "greymoor_mistbound_road",
+  "source_ref": "diceframe-original:dnd2024-adventures/lanterns-of-greymoor",
+  "automation_level": "guided",
+  "map_location_ref": "map_location:greymoor_route",
+  "map_marker_id": "mistbound_road",
+  "npc_refs": []
+}

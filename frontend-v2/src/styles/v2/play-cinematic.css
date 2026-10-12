@@ -1,0 +1,765 @@
+/* Play table: cinematic scene masthead and genuinely asymmetric story cards. */
+@media (min-width: 801px) {
+  .play-hud {
+    min-height: 58px;
+    padding: 6px 12px;
+  }
+
+  .play-layout,
+  .play-layout.no-console {
+    grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) minmax(280px, 340px);
+    height: calc(100dvh - 58px);
+  }
+
+  .play-layout.no-console {
+    grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+  }
+
+  .play-layout.collapsed {
+    grid-template-columns: 48px minmax(0, 1fr) minmax(280px, 340px);
+  }
+
+  .play-layout.collapsed.no-console {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+
+  .play-layout.rail-collapsed {
+    grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) 48px;
+  }
+
+  .play-layout.collapsed.rail-collapsed {
+    grid-template-columns: 48px minmax(0, 1fr) 48px;
+  }
+}
+
+.play-hud {
+  border-bottom: 1px solid color-mix(in srgb, var(--df-accent) 28%, var(--df-border-soft));
+  background: color-mix(in srgb, var(--df-canvas) 91%, transparent);
+}
+
+.play-titleblock h1 {
+  font-size: 19px;
+}
+
+.play-hud-stats {
+  min-width: 215px;
+}
+
+.hud-stat {
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--df-surface-2) 64%, transparent);
+}
+
+.game-sidebar {
+  padding: 10px;
+  border-right-color: color-mix(in srgb, var(--df-accent) 27%, var(--df-border-soft));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--df-canvas) 15%, transparent), var(--df-surface-1) 280px),
+    var(--df-bg-ruins-image) center top / 100% auto no-repeat;
+}
+
+/* 收起态不绘制背景立绘，避免窄列里被等比压缩；渐变层保留 */
+.game-sidebar.collapsed {
+  --df-bg-ruins-image: none;
+}
+
+.game-sidebar .character {
+  padding: 7px 5px 13px;
+  border-bottom: 1px solid var(--df-border-soft);
+  background: transparent;
+}
+
+.game-sidebar .character > header {
+  margin-bottom: 8px;
+}
+
+.game-sidebar .character-profile {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: end;
+  gap: 12px;
+  padding-top: 82px;
+}
+
+.game-sidebar .character-profile .portrait-image {
+  width: 92px !important;
+  height: 112px !important;
+  border-radius: 7px;
+}
+
+.game-sidebar .portrait-edit-button {
+  width: 92px;
+}
+
+.game-sidebar .character-title h3 {
+  margin-bottom: 7px;
+  font-size: 21px;
+}
+
+.game-sidebar .hp {
+  margin-top: 13px;
+}
+
+.game-sidebar .chips {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.game-sidebar .chips span {
+  justify-content: center;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-sidebar > .panel:not(.character) {
+  margin-top: 7px;
+  padding: 12px 5px;
+  border-top: 1px solid var(--df-border-soft);
+}
+
+.play-control-rail {
+  padding: 10px;
+  border-left-color: color-mix(in srgb, var(--df-accent) 27%, var(--df-border-soft));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--df-canvas-glow) 22%, var(--df-surface-1)), var(--df-surface-1));
+}
+
+.play-control-rail .gm-toolbar .gm-group,
+.play-control-rail .gm-toolbar .perc,
+.play-control-rail .panel {
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--df-surface-2) 70%, transparent);
+}
+
+.play-control-rail .gm-toolbar .gm-group h4 {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--df-border-soft);
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.play-main {
+  gap: 7px;
+  padding: 9px 12px;
+}
+
+.scene-strip {
+  position: relative;
+  isolation: isolate;
+  min-height: 78px;
+  overflow: hidden;
+  align-items: center;
+  padding: 11px 14px;
+  border-color: color-mix(in srgb, var(--df-accent) 38%, var(--df-border-soft));
+  border-radius: 6px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--df-canvas) 80%, transparent), color-mix(in srgb, var(--df-canvas) 30%, transparent) 64%, color-mix(in srgb, var(--df-canvas) 67%, transparent)),
+    linear-gradient(180deg, transparent 28%, var(--df-surface-1)),
+    var(--df-bg-scene-image) center 43% / cover no-repeat;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--df-accent) 22%, transparent), var(--df-shadow);
+}
+
+.scene-strip::after {
+  position: absolute;
+  z-index: -1;
+  right: 16px;
+  bottom: -67px;
+  width: 120px;
+  height: 120px;
+  border: 1px solid color-mix(in srgb, var(--df-accent) 32%, transparent);
+  border-radius: 50%;
+  content: "";
+}
+
+.scene-strip h2 {
+  max-width: 520px;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: clamp(17px, 1.55vw, 22px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 2px 12px var(--df-canvas);
+}
+
+.scene-strip p {
+  color: var(--df-text-secondary);
+}
+
+.scene-chips {
+  align-self: center;
+  max-width: 42%;
+}
+
+.scene-chips span {
+  border-color: color-mix(in srgb, var(--df-accent) 30%, var(--df-border-soft));
+  background: color-mix(in srgb, var(--df-canvas) 68%, transparent);
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+}
+
+.game-sidebar .character-profile .portrait-image,
+.play-control-rail .character-profile .portrait-image {
+  width: 68px !important;
+  height: 82px !important;
+  border-radius: 7px;
+}
+
+.game-sidebar .character-profile .portrait-edit-button,
+.play-control-rail .character-profile .portrait-edit-button {
+  min-width: 68px;
+  min-height: 82px;
+}
+
+.play-main .timeline-wrap {
+  border: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--df-canvas) 30%, transparent);
+  box-shadow: none;
+}
+
+.play-main .timeline {
+  padding: 14px 18px 82px;
+}
+
+.play-main .round-divider {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  margin: 18px 0 12px;
+  font-size: 10px;
+  letter-spacing: .14em;
+}
+
+.play-main .round-divider::before,
+.play-main .round-divider::after {
+  flex: 1;
+  height: 1px;
+  content: "";
+  background: linear-gradient(90deg, transparent, var(--df-border-soft));
+}
+
+.play-main .round-divider::after {
+  background: linear-gradient(90deg, var(--df-border-soft), transparent);
+}
+
+.play-main .message {
+  margin-block: 9px;
+  padding: 13px 15px;
+  border-radius: 6px;
+  box-shadow: 0 9px 24px rgba(0, 0, 0, .14);
+}
+
+.play-main .message.player {
+  border: 1px solid color-mix(in srgb, var(--df-interactive) 28%, var(--df-border-soft));
+  border-right: 3px solid var(--df-interactive);
+  border-left-width: 1px !important;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--df-interactive) 8%, var(--df-surface-2)), var(--df-surface-1));
+}
+
+.play-main .message.gm {
+  border: 1px solid color-mix(in srgb, var(--df-accent) 32%, var(--df-border-soft));
+  border-left: 3px solid var(--df-accent);
+  background:
+    radial-gradient(circle at 0 0, color-mix(in srgb, var(--df-accent) 10%, transparent), transparent 27%),
+    linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
+}
+
+.play-main .message.story-recap {
+  width: min(980px, 100%);
+  border: 1px solid color-mix(in srgb, var(--df-interactive) 34%, var(--df-border-soft));
+  border-left: 3px solid var(--df-interactive);
+}
+
+.play-main .message-copy > strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--df-border-soft) 64%, transparent);
+}
+
+.play-main .composer {
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--df-surface-1) 92%, transparent);
+  box-shadow: 0 -10px 30px color-mix(in srgb, var(--df-canvas) 50%, transparent);
+}
+
+@media (max-width: 1120px) {
+  .reference-settings-page .system-status-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .plugin-workspace .market-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .character-library-toolbar {
+    grid-template-columns: minmax(200px, 1fr) 150px auto;
+  }
+
+  .character-import-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 900px) {
+  .settings-page-heading {
+    align-items: flex-start;
+  }
+
+  .reference-settings-page .settings-layout,
+  .create-wizard-shell,
+  .lorebook-shell,
+  .reference-logs-page .logs-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reference-settings-page .settings-nav {
+    position: sticky;
+    z-index: 24;
+    top: 52px;
+    display: flex;
+    min-height: 0;
+    overflow-x: auto;
+    padding: 6px;
+    border: 0;
+    border-bottom: 1px solid var(--df-border-soft);
+    border-radius: var(--df-radius-md);
+  }
+
+  .reference-settings-page .settings-nav .nav-item {
+    flex: 0 0 auto;
+  }
+
+  .reference-settings-page .settings-pane {
+    min-height: 0;
+  }
+
+  .create-journey-rail {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 13px;
+    border-right: 0;
+    border-bottom: 1px solid var(--df-border-soft);
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--df-canvas) 72%, transparent), var(--df-surface-1)),
+      var(--df-bg-ruins-image) center / cover no-repeat;
+  }
+
+  .create-rail-sigil {
+    align-self: center;
+    margin: 0 14px 0 0;
+  }
+
+  .create-step-nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .create-step-nav-item {
+    grid-template-columns: 31px minmax(0, 1fr);
+    min-height: 46px;
+  }
+
+  .create-step-nav-item::after {
+    top: 16px;
+    right: 5px;
+    bottom: auto;
+    left: 31px;
+    width: auto;
+    height: 1px;
+  }
+
+  .create-step-nav-item > span {
+    width: 31px;
+    height: 31px;
+  }
+
+  .create-rail-summary {
+    display: none;
+  }
+
+  .lorebook-character-rail {
+    position: static;
+    max-height: none;
+  }
+
+  .lorebook-character-rail .character {
+    display: grid;
+    grid-template-columns: minmax(210px, .75fr) minmax(0, 1.25fr);
+    gap: 8px 14px;
+  }
+
+  .lorebook-character-rail .character > header {
+    grid-column: 1 / -1;
+  }
+
+  .lorebook-character-rail .character-profile {
+    padding-top: 0;
+  }
+
+  .lorebook-character-rail .character > details,
+  .lorebook-character-rail .character > .chips {
+    grid-column: 2;
+  }
+
+  .reference-logs-page .log-index {
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(210px, .7fr) minmax(0, 1.3fr);
+    min-height: 0;
+    padding: 8px;
+    border: 0;
+    border-bottom: 1px solid var(--df-border-soft);
+  }
+
+  .reference-logs-page .log-campaign-card {
+    grid-row: 1 / 4;
+    min-height: 142px;
+    padding-top: 64px;
+  }
+
+  .reference-logs-page .log-export {
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 800px) {
+  .reference-settings-page .system-status-grid {
+    grid-auto-columns: minmax(230px, 76vw);
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    overflow-x: auto;
+  }
+
+  .settings-page-heading {
+    min-height: 80px;
+  }
+
+  .reference-settings-page .settings-layout {
+    padding: 5px;
+  }
+
+  .reference-settings-page .settings-pane {
+    padding: 15px 12px 18px;
+  }
+
+  .advanced-settings-pane {
+    padding: 10px !important;
+  }
+
+  .plugin-workspace .plugin-install {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .plugin-workspace.plugin-workspace .toolbar-row {
+    grid-template-columns: minmax(0, 1fr) 140px auto;
+  }
+
+  .plugin-workspace.plugin-workspace .market-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .plugin-workspace .market-card {
+    min-height: 226px;
+  }
+
+  .create-stage-panel {
+    padding: 19px 16px 14px;
+  }
+
+  .create-mode-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .create-mode-cards button {
+    min-height: 78px;
+    padding: 9px;
+  }
+
+  .create-confirm-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .characters-page .current-character-card {
+    background:
+      radial-gradient(circle at 0 50%, color-mix(in srgb, var(--df-interactive) 8%, transparent), transparent 48%),
+      linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
+  }
+
+  .character-library-toolbar {
+    grid-template-columns: minmax(0, 1fr) 130px auto;
+  }
+
+  .characters-page .character-library-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lorebook-page .lore-world-bar,
+  .lorebook-page .lore-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lorebook-page .lore-world-bar > select,
+  .lorebook-page .lore-tools > input {
+    grid-column: 1 / -1;
+  }
+
+  .scene-strip {
+    min-height: 72px;
+    padding: 9px 11px;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--df-canvas) 74%, transparent), color-mix(in srgb, var(--df-canvas) 30%, transparent)),
+      linear-gradient(180deg, transparent 25%, var(--df-surface-1)),
+      var(--df-bg-scene-image) center 42% / cover no-repeat;
+  }
+
+  .play-main .timeline {
+    padding-inline: 9px;
+  }
+
+  .game-sidebar .character-profile {
+    padding-top: 62px;
+  }
+}
+
+@media (max-width: 560px) {
+  .settings-page-heading {
+    display: grid;
+    gap: 12px;
+  }
+
+  .reference-settings-page .system-status-card {
+    min-height: 111px;
+  }
+
+  .advanced-section-head {
+    padding-inline: 14px;
+  }
+
+  .advanced-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    margin-inline: 8px;
+  }
+
+  .advanced-row > div:first-child {
+    display: grid;
+    gap: 3px;
+  }
+
+  .advanced-number,
+  .token-input-wrap,
+  .token-input-wrap .advanced-number {
+    width: 100%;
+  }
+
+  .create-page-header {
+    align-items: flex-start;
+  }
+
+  .create-journey-rail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .create-rail-sigil {
+    display: none;
+  }
+
+  .create-step-nav-item {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 3px;
+    text-align: center;
+  }
+
+  .create-step-nav-item::after {
+    top: 15px;
+    right: -50%;
+    left: 50%;
+  }
+
+  .create-step-nav-item > div small {
+    display: none;
+  }
+
+  .create-stage-panel {
+    padding-inline: 12px;
+  }
+
+  .create-field-grid,
+  .create-config-surface,
+  .create-mode-cards,
+  .create-recommended-rules .rec-grid,
+  .create-confirm-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .create-step-card .wide {
+    grid-column: auto;
+  }
+
+  .create-character-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .create-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .create-actions button:first-child {
+    margin: 0;
+  }
+
+  .character-library-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .character-library-toolbar > input,
+  .character-import-actions {
+    grid-column: 1 / -1;
+  }
+
+  .character-import-actions {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .characters-page .character-library-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    padding: 12px 0 0;
+  }
+
+  .characters-page .library-character-card {
+    min-height: 278px;
+    padding: 9px;
+  }
+
+  .characters-page .library-character-card .character-card-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .characters-page .library-character-card .portrait-edit-button {
+    grid-column: auto;
+  }
+
+  .characters-page .library-character-card .portrait-image {
+    width: 100% !important;
+    height: 108px !important;
+  }
+
+  .characters-page .library-character-card .actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+  .lorebook-character-rail .character {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    padding: 10px;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--df-canvas) 55%, transparent), var(--df-surface-1)),
+      var(--df-bg-ruins-image) center / cover no-repeat;
+  }
+
+  .lorebook-character-rail .character > header,
+  .lorebook-character-rail .character > .stat-row,
+  .lorebook-character-rail .character > details,
+  .lorebook-character-rail .character > .chips {
+    display: none;
+  }
+
+  .lorebook-character-rail .character-profile {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding-top: 0;
+  }
+
+  .lorebook-character-rail .portrait-image {
+    width: 64px !important;
+    height: 72px !important;
+  }
+
+  .lorebook-character-rail .character-title h3 {
+    margin: 0;
+    font-size: 18px;
+  }
+
+  .lorebook-character-rail .character > .hp {
+    margin-top: 3px;
+  }
+
+  .reference-logs-page .log-index {
+    display: none;
+  }
+
+  .reference-logs-page .logs-workspace {
+    display: block;
+    padding: 8px;
+  }
+
+  .reference-logs-page .log-mobile-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0 0 12px;
+    border: 1px solid var(--df-border-soft);
+    border-radius: var(--df-radius-md);
+    background: color-mix(in srgb, var(--df-surface-2) 72%, transparent);
+  }
+
+  .reference-logs-page .log-mobile-tabs button {
+    min-height: 42px;
+  }
+
+  .reference-logs-page .log-mobile-export {
+    display: inline-flex;
+  }
+
+  .reference-logs-page .logs-document {
+    padding-inline: 2px;
+  }
+
+  .reference-logs-page .log-reader {
+    padding-left: 18px;
+  }
+
+  .reference-logs-page .log-reader::before {
+    left: 4px;
+  }
+
+  .reference-logs-page .log-reader article::before {
+    left: -18px;
+  }
+
+  .scene-strip {
+    min-height: 68px;
+  }
+
+  .scene-strip h2 {
+    max-width: 58vw;
+    font-size: 17px;
+  }
+
+  .scene-chips {
+    max-width: 38%;
+    gap: 4px;
+  }
+
+  .scene-chips span {
+    padding: 3px 6px;
+    font-size: 9px;
+  }
+
+  .scene-chips span:last-child {
+    display: none;
+  }
+
+  .play-main .message {
+    padding: 10px;
+  }
+}

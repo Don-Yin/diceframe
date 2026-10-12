@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "kind": "tool",
+  "id": "leatherworkers_tools",
+  "source_ref": "srd-5.2.1:p93-94:tools",
+  "automation_level": "deterministic",
+  "category": "artisan",
+  "ability_ref": "ability:dex"
+}

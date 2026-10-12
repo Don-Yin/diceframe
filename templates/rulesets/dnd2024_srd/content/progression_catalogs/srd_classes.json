@@ -1,0 +1,253 @@
+{
+  "schema_version": 1,
+  "kind": "progression_catalog",
+  "id": "srd_classes",
+  "source_ref": "srd-5.2.1:p28-p79:class-feature-tables",
+  "automation_level": "guided",
+  "subclass_catalog_ref": "subclass_catalog:srd_subclasses",
+  "advancement_feat_catalog_ref": "advancement_feat_catalog:srd_advancement_feats",
+  "spell_catalog_ref": "spell_catalog:srd_spells",
+  "rest_catalog_ref": "rest_catalog:srd_recovery",
+  "combat_catalog_ref": "combat_catalog:srd_combat_core",
+  "max_level": 20,
+  "slot_profiles": {
+    "full": [
+      [2, 0, 0, 0, 0, 0, 0, 0, 0],
+      [3, 0, 0, 0, 0, 0, 0, 0, 0],
+      [4, 2, 0, 0, 0, 0, 0, 0, 0],
+      [4, 3, 0, 0, 0, 0, 0, 0, 0],
+      [4, 3, 2, 0, 0, 0, 0, 0, 0],
+      [4, 3, 3, 0, 0, 0, 0, 0, 0],
+      [4, 3, 3, 1, 0, 0, 0, 0, 0],
+      [4, 3, 3, 2, 0, 0, 0, 0, 0],
+      [4, 3, 3, 3, 1, 0, 0, 0, 0],
+      [4, 3, 3, 3, 2, 0, 0, 0, 0],
+      [4, 3, 3, 3, 2, 1, 0, 0, 0],
+      [4, 3, 3, 3, 2, 1, 0, 0, 0],
+      [4, 3, 3, 3, 2, 1, 1, 0, 0],
+      [4, 3, 3, 3, 2, 1, 1, 0, 0],
+      [4, 3, 3, 3, 2, 1, 1, 1, 0],
+      [4, 3, 3, 3, 2, 1, 1, 1, 0],
+      [4, 3, 3, 3, 2, 1, 1, 1, 1],
+      [4, 3, 3, 3, 3, 1, 1, 1, 1],
+      [4, 3, 3, 3, 3, 2, 1, 1, 1],
+      [4, 3, 3, 3, 3, 2, 2, 1, 1]
+    ],
+    "half": [
+      [2, 0, 0, 0, 0], [2, 0, 0, 0, 0], [3, 0, 0, 0, 0], [3, 0, 0, 0, 0],
+      [4, 2, 0, 0, 0], [4, 2, 0, 0, 0], [4, 3, 0, 0, 0], [4, 3, 0, 0, 0],
+      [4, 3, 2, 0, 0], [4, 3, 2, 0, 0], [4, 3, 3, 0, 0], [4, 3, 3, 0, 0],
+      [4, 3, 3, 1, 0], [4, 3, 3, 1, 0], [4, 3, 3, 2, 0], [4, 3, 3, 2, 0],
+      [4, 3, 3, 3, 1], [4, 3, 3, 3, 1], [4, 3, 3, 3, 2], [4, 3, 3, 3, 2]
+    ]
+  },
+  "classes": {
+    "barbarian": {
+      "source_ref": "srd-5.2.1:p28:barbarian-features",
+      "features_by_level": [
+        ["rage", "unarmored_defense", "weapon_mastery"], ["danger_sense", "reckless_attack"],
+        ["barbarian_subclass", "primal_knowledge"], ["ability_score_improvement"],
+        ["extra_attack", "fast_movement"], ["subclass_feature"],
+        ["feral_instinct", "instinctive_pounce"], ["ability_score_improvement"],
+        ["brutal_strike"], ["subclass_feature"], ["relentless_rage"],
+        ["ability_score_improvement"], ["improved_brutal_strike"], ["subclass_feature"],
+        ["persistent_rage"], ["ability_score_improvement"], ["improved_brutal_strike"],
+        ["indomitable_might"], ["epic_boon"], ["primal_champion"]
+      ],
+      "tracks": {
+        "rages": [2, 2, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 6],
+        "rage_damage": [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4],
+        "weapon_mastery": [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+      }
+    },
+    "bard": {
+      "source_ref": "srd-5.2.1:p31:bard-features",
+      "slot_profile": "full",
+      "features_by_level": [
+        ["bardic_inspiration", "spellcasting"], ["expertise", "jack_of_all_trades"],
+        ["bard_subclass"], ["ability_score_improvement"], ["font_of_inspiration"],
+        ["subclass_feature"], ["countercharm"], ["ability_score_improvement"],
+        ["expertise"], ["magical_secrets"], [], ["ability_score_improvement"], [],
+        ["subclass_feature"], [], ["ability_score_improvement"], [],
+        ["superior_inspiration"], ["epic_boon"], ["words_of_creation"]
+      ],
+      "tracks": {
+        "bardic_die": [6, 6, 6, 6, 8, 8, 8, 8, 8, 10, 10, 10, 10, 10, 12, 12, 12, 12, 12, 12],
+        "cantrips": [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+        "prepared_spells": [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22]
+      }
+    },
+    "cleric": {
+      "source_ref": "srd-5.2.1:p36:cleric-features",
+      "slot_profile": "full",
+      "features_by_level": [
+        ["spellcasting", "divine_order"], ["channel_divinity"], ["cleric_subclass"],
+        ["ability_score_improvement"], ["sear_undead"], ["subclass_feature"],
+        ["blessed_strikes"], ["ability_score_improvement"], [], ["divine_intervention"], [],
+        ["ability_score_improvement"], [], ["improved_blessed_strikes"], [],
+        ["ability_score_improvement"], ["subclass_feature"], [], ["epic_boon"],
+        ["greater_divine_intervention"]
+      ],
+      "tracks": {
+        "channel_divinity": [0, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4],
+        "cantrips": [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
+        "prepared_spells": [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22]
+      }
+    },
+    "druid": {
+      "source_ref": "srd-5.2.1:p41:druid-features",
+      "slot_profile": "full",
+      "features_by_level": [
+        ["spellcasting", "druidic", "primal_order"], ["wild_shape", "wild_companion"],
+        ["druid_subclass"], ["ability_score_improvement"], ["wild_resurgence"],
+        ["subclass_feature"], ["elemental_fury"], ["ability_score_improvement"], [],
+        ["subclass_feature"], [], ["ability_score_improvement"], [], ["subclass_feature"],
+        ["improved_elemental_fury"], ["ability_score_improvement"], [], ["beast_spells"],
+        ["epic_boon"], ["archdruid"]
+      ],
+      "tracks": {
+        "wild_shape": [0, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4],
+        "cantrips": [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+        "prepared_spells": [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22]
+      }
+    },
+    "fighter": {
+      "source_ref": "srd-5.2.1:p47:fighter-features",
+      "features_by_level": [
+        ["fighting_style", "second_wind", "weapon_mastery"], ["action_surge", "tactical_mind"],
+        ["fighter_subclass"], ["ability_score_improvement"], ["extra_attack", "tactical_shift"],
+        ["ability_score_improvement"], ["subclass_feature"], ["ability_score_improvement"],
+        ["indomitable", "tactical_master"], ["subclass_feature"], ["two_extra_attacks"],
+        ["ability_score_improvement"], ["indomitable", "studied_attacks"],
+        ["ability_score_improvement"], ["subclass_feature"], ["ability_score_improvement"],
+        ["action_surge", "indomitable"], ["subclass_feature"], ["epic_boon"],
+        ["three_extra_attacks"]
+      ],
+      "tracks": {
+        "second_wind": [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+        "weapon_mastery": [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6],
+        "action_surge": [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2],
+        "indomitable": [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]
+      }
+    },
+    "monk": {
+      "source_ref": "srd-5.2.1:p49:monk-features",
+      "features_by_level": [
+        ["martial_arts", "unarmored_defense"], ["monks_focus", "unarmored_movement", "uncanny_metabolism"],
+        ["deflect_attacks", "monk_subclass"], ["ability_score_improvement", "slow_fall"],
+        ["extra_attack", "stunning_strike"], ["empowered_strikes", "subclass_feature"],
+        ["evasion"], ["ability_score_improvement"], ["acrobatic_movement"],
+        ["heightened_focus", "self_restoration"], ["subclass_feature"],
+        ["ability_score_improvement"], ["deflect_energy"], ["disciplined_survivor"],
+        ["perfect_focus"], ["ability_score_improvement"], ["subclass_feature"],
+        ["superior_defense"], ["epic_boon"], ["body_and_mind"]
+      ],
+      "tracks": {
+        "martial_arts_die": [6, 6, 6, 6, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 10, 10, 12, 12, 12, 12],
+        "focus_points": [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+        "unarmored_movement": [0, 10, 10, 10, 10, 15, 15, 15, 15, 20, 20, 20, 20, 25, 25, 25, 25, 30, 30, 30]
+      }
+    },
+    "paladin": {
+      "source_ref": "srd-5.2.1:p53:paladin-features",
+      "slot_profile": "half",
+      "features_by_level": [
+        ["lay_on_hands", "spellcasting", "weapon_mastery"], ["fighting_style", "paladins_smite"],
+        ["channel_divinity", "paladin_subclass"], ["ability_score_improvement"],
+        ["extra_attack", "faithful_steed"], ["aura_of_protection"], ["subclass_feature"],
+        ["ability_score_improvement"], ["abjure_foes"], ["aura_of_courage"],
+        ["radiant_strikes"], ["ability_score_improvement"], [], ["restoring_touch"],
+        ["subclass_feature"], ["ability_score_improvement"], [], ["aura_expansion"],
+        ["epic_boon"], ["subclass_feature"]
+      ],
+      "tracks": {
+        "channel_divinity": [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3],
+        "prepared_spells": [2, 3, 4, 5, 6, 6, 7, 7, 9, 9, 10, 10, 11, 11, 12, 12, 14, 14, 15, 15],
+        "lay_on_hands": [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100]
+      }
+    },
+    "ranger": {
+      "source_ref": "srd-5.2.1:p57:ranger-features",
+      "slot_profile": "half",
+      "features_by_level": [
+        ["spellcasting", "favored_enemy", "weapon_mastery"], ["deft_explorer", "fighting_style"],
+        ["ranger_subclass"], ["ability_score_improvement"], ["extra_attack"], ["roving"],
+        ["subclass_feature"], ["ability_score_improvement"], ["expertise"], ["tireless"],
+        ["subclass_feature"], ["ability_score_improvement"], ["relentless_hunter"],
+        ["natures_veil"], ["subclass_feature"], ["ability_score_improvement"],
+        ["precise_hunter"], ["feral_senses"], ["epic_boon"], ["foe_slayer"]
+      ],
+      "tracks": {
+        "favored_enemy": [2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6],
+        "prepared_spells": [2, 3, 4, 5, 6, 6, 7, 7, 9, 9, 10, 10, 11, 11, 12, 12, 14, 14, 15, 15]
+      }
+    },
+    "rogue": {
+      "source_ref": "srd-5.2.1:p61:rogue-features",
+      "features_by_level": [
+        ["expertise", "sneak_attack", "thieves_cant", "weapon_mastery"], ["cunning_action"],
+        ["rogue_subclass", "steady_aim"], ["ability_score_improvement"],
+        ["cunning_strike", "uncanny_dodge"], ["expertise"], ["evasion", "reliable_talent"],
+        ["ability_score_improvement"], ["subclass_feature"], ["ability_score_improvement"],
+        ["improved_cunning_strike"], ["ability_score_improvement"], ["subclass_feature"],
+        ["devious_strikes"], ["slippery_mind"], ["ability_score_improvement"],
+        ["subclass_feature"], ["elusive"], ["epic_boon"], ["stroke_of_luck"]
+      ],
+      "tracks": {
+        "sneak_attack_dice": [1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10]
+      }
+    },
+    "sorcerer": {
+      "source_ref": "srd-5.2.1:p64:sorcerer-features",
+      "slot_profile": "full",
+      "features_by_level": [
+        ["spellcasting", "innate_sorcery"], ["font_of_magic", "metamagic"],
+        ["sorcerer_subclass"], ["ability_score_improvement"], ["sorcerous_restoration"],
+        ["subclass_feature"], ["sorcery_incarnate"], ["ability_score_improvement"], [],
+        ["metamagic"], [], ["ability_score_improvement"], [], ["subclass_feature"], [],
+        ["ability_score_improvement"], ["metamagic"], ["subclass_feature"],
+        ["epic_boon"], ["arcane_apotheosis"]
+      ],
+      "tracks": {
+        "sorcery_points": [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+        "cantrips": [4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6],
+        "prepared_spells": [2, 4, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22]
+      }
+    },
+    "warlock": {
+      "source_ref": "srd-5.2.1:p70:warlock-features",
+      "slot_profile": "pact",
+      "features_by_level": [
+        ["eldritch_invocations", "pact_magic"], ["magical_cunning"], ["warlock_subclass"],
+        ["ability_score_improvement"], [], ["subclass_feature"], [],
+        ["ability_score_improvement"], ["contact_patron"], ["subclass_feature"],
+        ["mystic_arcanum_6"], ["ability_score_improvement"], ["mystic_arcanum_7"],
+        ["subclass_feature"], ["mystic_arcanum_8"], ["ability_score_improvement"],
+        ["mystic_arcanum_9"], [], ["epic_boon"], ["eldritch_master"]
+      ],
+      "tracks": {
+        "eldritch_invocations": [1, 3, 3, 3, 5, 5, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10],
+        "cantrips": [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+        "prepared_spells": [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15],
+        "pact_slots": [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4],
+        "pact_slot_level": [1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5]
+      }
+    },
+    "wizard": {
+      "source_ref": "srd-5.2.1:p77:wizard-features",
+      "slot_profile": "full",
+      "features_by_level": [
+        ["spellcasting", "ritual_adept", "arcane_recovery"], ["scholar"],
+        ["wizard_subclass"], ["ability_score_improvement"], ["memorize_spell"],
+        ["subclass_feature"], [], ["ability_score_improvement"], [], ["subclass_feature"], [],
+        ["ability_score_improvement"], [], ["subclass_feature"], [],
+        ["ability_score_improvement"], [], ["spell_mastery"], ["epic_boon"],
+        ["signature_spells"]
+      ],
+      "tracks": {
+        "cantrips": [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
+        "prepared_spells": [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 18, 19, 21, 22, 23, 24, 25]
+      }
+    }
+  }
+}

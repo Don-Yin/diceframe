@@ -1,0 +1,124 @@
+/* Settings and archive pages share the same restrained control-plane language. */
+.system-status-grid {
+  gap: 12px;
+}
+
+.system-status-card {
+  position: relative;
+  overflow: hidden;
+  border-color: var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
+}
+
+.system-status-card::after {
+  position: absolute;
+  right: -24px;
+  bottom: -34px;
+  width: 86px;
+  height: 86px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 50%;
+  content: "";
+  opacity: .22;
+}
+
+.settings-layout {
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.settings-nav {
+  top: 82px;
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-lg);
+  background: color-mix(in srgb, var(--df-surface-1) 78%, transparent);
+  box-shadow: var(--df-shadow);
+  backdrop-filter: blur(14px);
+}
+
+.settings-nav .nav-item {
+  min-height: 40px;
+  border-color: transparent;
+  color: var(--df-text-muted);
+  background: transparent;
+  box-shadow: none;
+}
+
+.settings-nav .nav-item:hover,
+.settings-nav .nav-item.active {
+  border-color: color-mix(in srgb, var(--df-interactive) 34%, transparent);
+  color: var(--df-interactive-strong);
+  background: var(--df-hover);
+  box-shadow: none;
+}
+
+.settings-pane {
+  min-height: 340px;
+  padding: clamp(18px, 2.5vw, 26px);
+}
+
+.settings-pane h3 {
+  font-size: 20px;
+}
+
+.form-row {
+  align-items: center;
+  gap: 14px;
+}
+
+.form-row > label {
+  color: var(--df-text-secondary);
+}
+
+.provider-card {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  color: var(--df-text);
+  background: linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
+}
+
+.provider-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.provider-card-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-row,
+.log-reader article,
+.archive-page .char-card,
+.archive-page .lore-card,
+.rules-page .rule-card,
+.rule-help-grid article,
+.rule-help-section {
+  border-color: var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  color: var(--df-text);
+  background: linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .035);
+}
+
+.logs-page .mode-tabs,
+.lorebook-page .lore-world-bar,
+.lorebook-page .lore-tools,
+.rule-help-grid article,
+.rule-help-section {
+  border-color: var(--df-border-soft);
+  background: color-mix(in srgb, var(--df-surface-2) 86%, transparent);
+}
+/* 手机扫码登录弹窗的外壳与邀请/接管链接弹窗共用一套，见 v2/qr-share.css。 */

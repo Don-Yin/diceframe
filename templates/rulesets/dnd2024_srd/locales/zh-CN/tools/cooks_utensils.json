@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "tool",
+    "id": "cooks_utensils"
+  },
+  "fields": {
+    "name": "厨师用具"
+  }
+}

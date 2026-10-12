@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "sleight_of_hand"
+  },
+  "fields": {
+    "name": "巧手",
+    "summary": "扒窃、藏起小物件或完成手上把戏。"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "background",
+    "id": "soldier"
+  },
+  "fields": {
+    "name": "士兵",
+    "summary": "受过军旅训练，擅长运动和威吓。"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "skill",
+    "id": "insight"
+  },
+  "fields": {
+    "name": "Insight",
+    "summary": "Read another creature's emotions, intentions, and unspoken meaning."
+  }
+}

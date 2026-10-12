@@ -1,0 +1,159 @@
+/* Naive Input owns the visible focus ring on its outer wrapper. The inner
+   native input/textarea must not also receive the global ring. */
+.n-input .n-input__input-el:focus,
+.n-input .n-input__input-el:focus-visible,
+.n-input .n-input__textarea-el:focus,
+.n-input .n-input__textarea-el:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.view {
+  width: min(1240px, 100%);
+  max-width: none;
+  padding: clamp(18px, 2.5vw, 34px);
+}
+
+.form,
+.plugin,
+.settings-pane,
+.empty-panel,
+.dialog,
+.wizard-inner {
+  border-color: var(--df-border-soft);
+  border-radius: var(--df-radius-lg);
+  background: linear-gradient(160deg, var(--df-surface-raised), var(--df-surface-1) 42%, var(--df-surface-2));
+  box-shadow: var(--df-shadow), inset 0 1px 0 rgba(255, 255, 255, .045);
+}
+
+.section-kicker {
+  color: var(--df-interactive-strong);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+
+.overview-hero,
+.archive-hero {
+  position: relative;
+  padding: 20px 0 18px;
+  border-bottom-color: var(--df-border-soft);
+}
+
+.overview-hero::after,
+.archive-hero::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 1px;
+  content: "";
+  background: linear-gradient(90deg, var(--df-accent), transparent 70%);
+}
+
+.overview-hero h1,
+.archive-hero h1 {
+  margin-top: 7px;
+  font-size: clamp(28px, 3.2vw, 42px);
+  line-height: 1.08;
+}
+
+.overview-hero p,
+.archive-hero p {
+  color: var(--df-text-muted);
+  line-height: 1.65;
+}
+
+.overview-stats {
+  grid-template-columns: repeat(4, minmax(112px, .72fr)) minmax(220px, 1.5fr);
+  gap: 12px;
+  margin-block: 20px;
+}
+
+.overview-stats article,
+.archive-stats article {
+  position: relative;
+  overflow: hidden;
+  padding: 14px 16px;
+  border-color: var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: linear-gradient(135deg, var(--df-surface-2), var(--df-surface-1));
+}
+
+.overview-stats article::before,
+.archive-stats article::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 100%;
+  content: "";
+  background: linear-gradient(180deg, var(--df-interactive), transparent);
+}
+
+.overview-stats strong,
+.archive-stats strong {
+  color: var(--df-accent-strong);
+  font-family: var(--df-font-title);
+  font-size: 25px;
+}
+
+.game-grid {
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 16px;
+}
+
+.game-card {
+  position: relative;
+  min-height: 290px;
+  overflow: hidden;
+  padding: 16px;
+  border-color: var(--df-border-soft);
+  border-radius: var(--df-radius-lg);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--df-canvas-glow) 50%, transparent), transparent 45%),
+    linear-gradient(180deg, var(--df-surface-raised), var(--df-surface-1));
+  box-shadow: var(--df-shadow), inset 0 1px 0 rgba(255, 255, 255, .045);
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.game-card::after {
+  position: absolute;
+  right: -50px;
+  bottom: -80px;
+  width: 210px;
+  height: 210px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 50%;
+  content: "";
+  pointer-events: none;
+  opacity: .25;
+  box-shadow: inset 0 0 0 18px transparent, inset 0 0 0 19px var(--df-border-soft);
+}
+
+.game-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.game-card:hover {
+  border-color: color-mix(in srgb, var(--df-interactive) 58%, var(--df-border-soft));
+  box-shadow: var(--df-shadow-strong), inset 0 1px 0 rgba(255, 255, 255, .07);
+  transform: translateY(-2px);
+}
+
+.game-card h2 {
+  color: var(--df-accent-strong);
+  font-size: 21px;
+}
+
+.game-card-meta span {
+  border-color: var(--df-border-soft);
+  color: var(--df-text-muted);
+  background: color-mix(in srgb, var(--df-control-bg) 72%, transparent);
+}
+
+.game-card-enter {
+  min-height: 44px;
+}

@@ -1,0 +1,381 @@
+﻿"""主游戏流程处理器 —— 回合推进 + LLM 调用 + 结果播报。"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any, Literal
+
+from src.engine.action_gate import StructuredIntentRequirement
+from src.engine.game_instance import GameInstance, GameRegistry
+from src.llm.client import LLMClient
+from src.lorebook.matcher import KeywordMatcher
+from src.lorebook.store import LorebookStore
+from src.memory.delta import MemoryStore
+from src.commands.ai_player import fill_ai_player_actions
+from src.commands.combat_resolver import CombatResolver
+from src.commands.dice_resolver import DiceResolver
+from src.commands.game_factory import GameFactory
+from src.commands.game_lifecycle import GameLifecycle
+from src.commands.kp_questions import KPQuestionResponder
+from src.commands.progression_resolver import ProgressionResolver
+from src.commands.prompt_composer import PromptComposer
+from src.commands.puzzle_processor import PuzzleProcessor
+from src.commands.round_helpers import (
+    default_quick_actions_by_class,
+    should_multi_step,
+    validate_dice_constraint,
+)
+from src.commands.round_processor import RoundProcessor
+from src.commands.state_update_applier import StateUpdateApplier
+from src.commands.state_recap import (
+    build_state_change_messages as _build_state_change_messages,
+    snapshot_public_player_state as _snapshot_public_player_state,
+)
+from src.commands.story_recap import StoryRecapGenerator
+from src.commands.swipe_generator import SwipeGenerator
+from src.engine.language import DEFAULT_LANGUAGE
+from src.engine.modules import narrative_notes
+from src.lorebook.retrieval import LoreRetriever
+from src.content_modules.projection import ContentProjectionService
+from src.rulesets.builtin import build_default_ruleset_registry
+from src.rulesets.registry import RulesetRuntimeRegistry
+
+logger = logging.getLogger("trpg")
+
+
+class GameHandler:
+    """游戏流程处理器 —— 连接所有模块的粘合层。"""
+
+    def __init__(
+        self,
+        registry: GameRegistry,
+        llm_client: LLMClient,
+        lorebook_matcher: KeywordMatcher,
+        lorebook_store: LorebookStore | None = None,
+        memory_store: MemoryStore | None = None,
+        prompts_dir: Path | None = None,
+        rules_dir: Path | None = None,
+        worlds_dir: Path | None = None,
+        narrative_max_tokens: int = 4096,
+        summary_max_tokens: int = 4096,
+        brief_max_tokens: int = 4096,
+        analysis_max_tokens: int = 4096,
+        ruleset_registry: RulesetRuntimeRegistry | None = None,
+    ):
+        self.registry = registry
+        self._combat = CombatResolver()
+        self._dice = DiceResolver()
+        self._puzzles = PuzzleProcessor()
+        self.llm_client = llm_client
+        self.matcher = lorebook_matcher
+        self.lorebook_store = lorebook_store
+        self.memory_store = memory_store
+        self.prompts_dir = prompts_dir or Path(".")
+        self.rules_dir = rules_dir or Path(".")
+        self.ruleset_registry = ruleset_registry or build_default_ruleset_registry()
+        self._prompt = PromptComposer(
+            self.prompts_dir, self.rules_dir, self.memory_store, self.ruleset_registry,
+        )
+        self.worlds_dir = worlds_dir or (Path(__file__).parent.parent.parent / "templates" / "worlds")
+        self._plugin_host = None
+        self.content_projection = ContentProjectionService(
+            self.lorebook_store,
+            load_world_template=self._load_world_template,
+        )
+        # 通用 Lore 检索：所有走标准回合管线的 Ruleset 共用同一实例。embedding 客户端
+        # 复用现有 MemoryStore.embedding_client（同一份 embedding_enabled /
+        # embedding_provider_ref / embedding_model / embedding_max_input 配置），
+        # 因此这里用 provider 惰性取，不新建第二套 embedding 配置或客户端。
+        self.lore_retriever = LoreRetriever(
+            self.matcher,
+            store=self.lorebook_store,
+            load_world_template=self._load_world_template,
+            content_projection=self.content_projection,
+            embedding_client_provider=self._embedding_client,
+        )
+        self._factory = GameFactory(self.registry, self.lorebook_store, self.worlds_dir)
+        self._state_applier = StateUpdateApplier(
+            self.rules_dir, self.worlds_dir, self._load_world_template,
+            ruleset_registry=self.ruleset_registry,
+        )
+        self._progression = ProgressionResolver(self.rules_dir, self.worlds_dir)
+        self._round_processor = RoundProcessor(
+            self.registry,
+            self.llm_client,
+            self.matcher,
+            self.lorebook_store,
+            self.memory_store,
+            self._prompt,
+            self._dice,
+            self._combat,
+            self._puzzles,
+            self._state_applier,
+            self._progression,
+            self._load_world_template,
+            self._ensure_matcher_for_world,
+            narrative_max_tokens,
+            summary_max_tokens,
+            analysis_max_tokens,
+            lore_retriever=self.lore_retriever,
+            content_projection=self.content_projection,
+        )
+        self._swipe_generator = SwipeGenerator(
+            self.llm_client,
+            self.matcher,
+            self._prompt,
+            self._state_applier,
+            self._load_world_template,
+            self._ensure_matcher_for_world,
+            narrative_max_tokens,
+            self.registry.get,
+            self.registry.save,
+            lore_retriever=self.lore_retriever,
+        )
+        self._lifecycle = GameLifecycle(
+            self.registry,
+            self.llm_client,
+            self._prompt,
+            self._state_applier,
+            self._ensure_matcher_for_world,
+            self.create_game,
+            self._load_world_template,
+            narrative_max_tokens,
+            brief_max_tokens,
+            self.memory_store,
+        )
+        self._story_recap = StoryRecapGenerator(self.llm_client, brief_max_tokens, registry=self.registry)
+        self._kp_questions = KPQuestionResponder(
+            self.llm_client,
+            self.matcher,
+            self._prompt,
+            self._load_world_template,
+            self._ensure_matcher_for_world,
+            max_tokens=min(768, max(128, brief_max_tokens)),
+            lore_retriever=self.lore_retriever,
+            content_projection=self.content_projection,
+        )
+        self.narrative_max_tokens = narrative_max_tokens
+        self.summary_max_tokens = summary_max_tokens
+        self.brief_max_tokens = brief_max_tokens
+        self.analysis_max_tokens = analysis_max_tokens
+
+    def _embedding_client(self) -> Any | None:
+        """复用现有 embedding 客户端（未配置时为 None，语义检索自动跳过）。"""
+
+        return getattr(self.memory_store, "embedding_client", None)
+
+    def _ensure_matcher_for_world(self, world_id: str, language: str = "") -> None:
+        """确保当前 world + language 的条目已装进匹配器与语义候选。"""
+
+        self.lore_retriever.ensure_world(world_id, language)
+
+    def invalidate_matcher_for_world(self, world_id: str) -> None:
+        """Force the next round to rebuild a locale-correct lorebook view."""
+        self.lore_retriever.invalidate_world(world_id)
+
+    # ---- 新建游戏 ----
+
+    async def create_game(
+        self, game_key: tuple, world_id: str, world_name: str,
+        group_name: str, rule_id: str = "",
+        seed_code: str = "", difficulty: str = "标准",
+        language: str = DEFAULT_LANGUAGE,
+        fresh_instance: bool = False,
+    ) -> GameInstance:
+        """兼容旧入口；实际逻辑已拆到 GameFactory。"""
+        plugin_template = None
+        if self._plugin_host and not self._factory.load_world_template(world_id):
+            plugin_template = self._plugin_host.load_world_template(world_id, language)
+        instance = await self._factory.create_game(
+            game_key, world_id, world_name, group_name,
+            rule_id=rule_id, seed_code=seed_code, difficulty=difficulty,
+            language=language,
+            fresh_instance=fresh_instance,
+        )
+        if plugin_template:
+            instance.rule_id = str(rule_id or plugin_template.get("default_rule") or "freeform_fantasy")
+            # 非 UI 建图路径（bot/种子码/API）可能尚未触发 list_worlds 同步，
+            # 这里先幂等 sync 一遍，保证插件世界书已带标记灌入；再用带标记的 id
+            # 覆盖 init_world_from_template 的无标记初始化，避免产生无法按插件清理的副本。
+            if self._plugin_host and self.lorebook_store:
+                self._plugin_host.sync_lorebooks(self.lorebook_store)
+            logger.info("插件世界模板，已同步世界书并跳过重复初始化: %s", world_id)
+        return instance
+
+    def _load_world_template(self, world_id: str, language: str = "") -> dict | None:
+        """兼容旧内部调用；实际逻辑已拆到 GameFactory。"""
+        data = self._factory.load_world_template(world_id, language)
+        if data:
+            return data
+        if self._plugin_host:
+            return self._plugin_host.load_world_template(world_id, language)
+        return None
+
+    def set_plugin_host(self, plugin_host) -> None:
+        self._plugin_host = plugin_host
+
+    def set_image_generation_service(self, service) -> None:
+        if hasattr(self._prompt, "set_auto_storyboard"):
+            self._prompt.set_auto_storyboard(bool(getattr(service, "auto_storyboard", False)))
+        if hasattr(self._round_processor, "set_image_generation_service"):
+            self._round_processor.set_image_generation_service(service)
+        if hasattr(self._swipe_generator, "set_scene_image_hook"):
+            self._swipe_generator.set_scene_image_hook(self._round_processor.schedule_scene_image)
+
+    def set_adventure_world_advance(self, callback) -> None:
+        """Connect optional Adventure v2 gate reevaluation to round settlement."""
+
+        self._round_processor.set_adventure_world_advance(callback)
+
+    def set_adventure_run_initializer(self, callback) -> None:
+        """Connect Adventure v2 run initialization to reset/restart candidates."""
+
+        self._lifecycle.set_adventure_run_initializer(callback)
+
+    async def _init_world_from_template(self, world_id: str, template: dict) -> None:
+        """兼容旧内部调用；实际逻辑已拆到 GameFactory。"""
+        await self._factory.init_world_from_template(world_id, template)
+
+    # ---- 开始游戏 ----
+
+    async def start_game(self, instance: GameInstance) -> str:
+        """兼容旧入口；实际逻辑已拆到 GameLifecycle。"""
+        return await self._lifecycle.start_game(instance)
+
+    # ---- 智能续接 ----
+
+    async def resume_game(self, instance: GameInstance) -> str:
+        """兼容旧入口；实际逻辑已拆到 GameLifecycle。"""
+        return await self._lifecycle.resume_game(instance)
+
+    async def generate_story_recap(self, instance: GameInstance) -> dict:
+        """Generate a public recap card from completed round logs."""
+        return await self._story_recap.generate(instance)
+
+    async def answer_kp_question(
+        self,
+        instance: GameInstance,
+        actor_uid: str,
+        question: str,
+        visibility: Literal["private", "party"] = "private",
+    ) -> dict:
+        """Answer table talk without entering the action or round pipeline."""
+        return await self._kp_questions.answer(instance, actor_uid, question, visibility)
+
+    # ---- 重置游戏 ----
+
+    async def reset_game(self, instance: GameInstance) -> GameInstance:
+        """兼容旧入口；实际逻辑已拆到 GameLifecycle。"""
+        return await self._lifecycle.reset_game(instance)
+
+    async def restart_game(self, instance: GameInstance) -> GameInstance:
+        """兼容旧入口；实际逻辑已拆到 GameLifecycle。"""
+        return await self._lifecycle.restart_game(instance)
+
+    # ---- 处理单轮 ----
+
+    async def process_round(self, instance: GameInstance, *, on_delta=None, on_reset=None) -> tuple[str, dict | None]:
+        """处理完整的一轮判定：context 拼接 → LLM 调用 → 解析 → 更新状态 → 播报。
+
+        Returns: (narration: str, info_asymmetry: dict | None)
+            info_asymmetry 格式: {"user_qq_xxx": "仅该玩家可见的消息", ...}
+        """
+        return await self._round_processor.process_round(instance, on_delta=on_delta, on_reset=on_reset)
+
+    def prepare_round_checks(self, instance: GameInstance) -> list[dict]:
+        """结算本轮结构化检定；若可消耗幸运，叙事会等待玩家选择。"""
+        return self._round_processor.prepare_round_checks(instance)
+
+    async def prepare_round_checks_ai(self, instance: GameInstance) -> list[dict]:
+        """由模型工具规划并结算本轮检定。"""
+        return await self._round_processor.prepare_round_checks_ai(instance)
+
+    async def fill_ai_player_actions(
+        self, instance: GameInstance, *,
+        requires_structured_intent: StructuredIntentRequirement = False,
+    ) -> list[dict]:
+        """让 AI 托管席位在真人交齐后，走同一行动管线声明本轮行动。"""
+        return await fill_ai_player_actions(
+            instance,
+            llm_client=self.llm_client,
+            prompt_composer=self._prompt,
+            requires_structured_intent=requires_structured_intent,
+        )
+
+    async def _process_round_impl(self, instance: GameInstance, *, on_delta=None, on_reset=None) -> tuple[str, dict | None]:
+        """兼容旧内部调用；实际逻辑已拆到 RoundProcessor。
+
+        NOTE: 这是原地判定实现，**不含** ``process_round`` 的并发门禁与失败回滚
+        （调用方需自行持锁）。运行时入口请一律走 ``process_round``，否则生成失败
+        会把对局留在判定阶段。
+        """
+        return await self._round_processor.process_round_impl(instance, on_delta=on_delta, on_reset=on_reset)
+
+    def _skill_growth_checks(self, instance: GameInstance, growth_skills: list[dict]) -> None:
+        """兼容旧内部调用；实际逻辑已拆到 ProgressionResolver。"""
+        self._progression.skill_growth_checks(instance, growth_skills)
+
+    @staticmethod
+    def _calc_xp_to_level(level: int) -> int:
+        """兼容旧内部调用；实际逻辑已拆到 ProgressionResolver。"""
+        return ProgressionResolver.calc_xp_to_level(level)
+
+    def _try_level_up(self, instance: GameInstance, uid: str) -> list[str]:
+        """兼容旧内部调用；实际逻辑已拆到 ProgressionResolver。"""
+        return self._progression.try_level_up(instance, uid)
+
+    def _apply_state_update(self, instance: GameInstance, update: dict) -> None:
+        """兼容旧内部调用；实际逻辑已拆到 StateUpdateApplier。"""
+        # The applier can write the scene after other state; reject an
+        # unsupported notes slot before any of it changes.
+        narrative_notes.require_writable(instance)
+        self._state_applier.apply_state_update(instance, update)
+
+    def load_item_categories(self, instance: GameInstance) -> dict[str, list[str]]:
+        """Expose the narrative pipeline's item category table to injected services."""
+
+        return self._state_applier.load_item_categories(instance)
+
+    async def commit_deferred_economy_effects(
+        self,
+        instance: GameInstance,
+        effects: dict,
+    ) -> None:
+        """Commit narrative effects after the authoritative payment succeeds."""
+
+        await self._round_processor.commit_deferred_economy_effects(
+            instance, effects,
+        )
+
+    def schedule_deferred_economy_scene_image(
+        self,
+        instance: GameInstance,
+        payload: dict,
+    ):
+        """Schedule a settled scene image after the authoritative save."""
+
+        return self._round_processor.schedule_deferred_scene_image(instance, payload)
+
+    def _tick_madness(self, instance: GameInstance) -> None:
+        """兼容旧内部调用；实际逻辑已拆到 StateUpdateApplier。"""
+        self._state_applier.tick_madness(instance)
+
+    async def generate_swipe(self, instance: GameInstance, round_num: int) -> str | None:
+        """兼容旧内部调用；实际逻辑已拆到 SwipeGenerator。"""
+        return await self._swipe_generator.generate(instance, round_num)
+
+    @staticmethod
+    def _should_multi_step(instance: GameInstance, actions_text: str) -> bool:
+        """兼容旧内部调用；实际逻辑已拆到 round_helpers。"""
+        return should_multi_step(instance, actions_text)
+
+    @staticmethod
+    def _validate_dice_constraint(dice_block: str, narration: str) -> bool:
+        """兼容旧内部调用；实际逻辑已拆到 round_helpers。"""
+        return validate_dice_constraint(dice_block, narration)
+
+    @staticmethod
+    def _default_quick_actions_by_class(class_name: str) -> list[str]:
+        """兼容旧内部调用；实际逻辑已拆到 round_helpers。"""
+        return default_quick_actions_by_class(class_name)

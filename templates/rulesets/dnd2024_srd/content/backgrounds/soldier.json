@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "background",
+  "id": "soldier",
+  "source_ref": "srd-5.2.1:p83:soldier",
+  "automation_level": "deterministic",
+  "ability_refs": [
+    "ability:str",
+    "ability:dex",
+    "ability:con"
+  ],
+  "skill_refs": [
+    "skill:athletics",
+    "skill:intimidation"
+  ],
+  "tool_proficiency_refs": [
+    "tool:gaming_set"
+  ],
+  "feat_ref": "feat:savage_attacker",
+  "equipment_package_refs": [
+    "equipment_package:soldier_a",
+    "equipment_package:soldier_b"
+  ]
+}

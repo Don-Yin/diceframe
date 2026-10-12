@@ -1,0 +1,6 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "scene", "id": "greymoor_waykeeper_cottage"},
+  "fields": {"name": "Waykeeper Cottage", "description": "Mira's small roadside post beside the dark lantern line."}
+}

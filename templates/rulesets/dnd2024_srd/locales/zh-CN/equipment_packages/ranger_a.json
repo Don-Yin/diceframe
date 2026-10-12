@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "equipment_package",
+    "id": "ranger_a"
+  },
+  "fields": {
+    "name": "游侠装备 A"
+  }
+}

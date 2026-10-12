@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "feat",
+    "id": "alert"
+  },
+  "fields": {
+    "name": "Alert",
+    "summary": "Add your Proficiency Bonus to Initiative and, after rolling, optionally swap Initiative with a willing ally."
+  }
+}

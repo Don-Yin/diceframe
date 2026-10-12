@@ -1,0 +1,6 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {"kind": "scene", "id": "greymoor_waykeeper_cottage"},
+  "fields": {"name": "守灯人小屋", "description": "米拉位于暗淡灯列旁的驿道路边小屋。"}
+}

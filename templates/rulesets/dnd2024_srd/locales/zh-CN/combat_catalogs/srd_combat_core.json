@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "combat_catalog",
+    "id": "srd_combat_core"
+  },
+  "fields": {
+    "labels": {
+      "unarmed_strike": "徒手打击"
+    }
+  }
+}

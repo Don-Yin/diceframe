@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "feat",
+  "id": "magic_initiate_cleric",
+  "automation_level": "guided",
+  "category": "origin",
+  "spell_list": "cleric",
+  "choice_specs": [
+    {"id": "spellcasting_ability", "count": 1, "option_ids": ["int", "wis", "cha"]},
+    {
+      "id": "cantrips",
+      "count": 2,
+      "option_ids": [
+        "guidance", "light", "mending", "resistance", "sacred_flame",
+        "spare_the_dying", "thaumaturgy"
+      ]
+    },
+    {
+      "id": "level_1_spell",
+      "count": 1,
+      "option_ids": [
+        "bane", "bless", "command", "create_or_destroy_water", "cure_wounds",
+        "detect_evil_and_good", "detect_magic", "detect_poison_and_disease",
+        "guiding_bolt", "healing_word", "inflict_wounds",
+        "protection_from_evil_and_good", "purify_food_and_drink", "sanctuary",
+        "shield_of_faith"
+      ]
+    }
+  ],
+  "source_ref": "srd-5.2.1:p87:magic-initiate"
+}

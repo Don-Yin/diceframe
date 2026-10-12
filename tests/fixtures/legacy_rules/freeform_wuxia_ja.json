@@ -1,0 +1,58 @@
+{
+  "language": "ja",
+  "extends": "base_d20",
+  "rule_version": "1.2",
+  "rule_id": "freeform_wuxia",
+  "scene_image": {"kind": "builtin", "id": "freeform_wuxia"},
+  "rule_name": "武侠・仙侠フリーフォーム",
+  "rule_name_en": "Wuxia/Xianxia Freeform",
+  "description": "架空の武侠・仙侠世界のための軽量フリーフォームルール。",
+  "attributes": [
+    {"key": "str", "name": "筋力", "min": 3, "max": 18},
+    {"key": "dex", "name": "敏捷力", "min": 3, "max": 18},
+    {"key": "con", "name": "耐久力", "min": 3, "max": 18},
+    {"key": "int", "name": "知力", "min": 3, "max": 18},
+    {"key": "wis", "name": "判断力", "min": 3, "max": 18},
+    {"key": "cha", "name": "魅力", "min": 3, "max": 18}
+  ],
+  "special_stats": [
+    {"key": "qi", "name": "内力", "max": 100, "initial": 100,
+     "description": "内功や軽功を使うと内力が消費され、瞑想や休息で回復します。"}
+  ],
+  "attribute_points": 60,
+  "attr_hint": "属性は3〜18の値を使います。10が凡人の平均です。内功・身法・悟性などの実力は、対応する属性に応じて強くなります。",
+  "dice_system": "d20",
+  "combat_model": "hp_based",
+  "hp_formula": "5 + con * 3",
+  "valid_qualities": ["common", "uncommon", "rare", "legendary"],
+  "max_skills": 4,
+  "skill_point_total": 200,
+  "max_skill_value": 80,
+  "skill_mode": "narrative",
+  "skill_hint": "スキルには武術の技、軽功、医術・毒術、江湖の技法を書けます。「スキル名（20-80）」の形式で、値が高いほど修行が深いことを示します。",
+  "currency": "霊石",
+  "item_categories": {
+    "equipment": ["剣","刀","飛剣","麈尾","道袍","護符","玉佩","長棍","鉄扇","飛鏢","暗器","軟甲","軽甲","鎧甲"],
+    "pills": ["丹","薬","散","丸","液","露","漿","膏","粉","湯"],
+    "consumable": ["符咒","霊石","巻物","金創薬","真気丹","解毒散","清心丸"],
+    "misc": ["令牌","玉簡","令牌","地図","秘籍","刀譜","剣譜","残巻","卜卦","羅盤","瓢箪","酒壺"]
+  },
+  "classes": [
+    {"name": "剣客", "description": "剣道に入り込んだ武人", "starter_equipment": ["鉄の剣", "軽甲"]},
+    {"name": "道士", "description": "道術と符を用いる修行者", "starter_equipment": ["桃木剣", "符紙×5"]},
+    {"name": "刺客", "description": "暗闇で暗器を操る達人", "starter_equipment": ["毒を塗った短剣", "飛鏢×10"]},
+    {"name": "遊侠", "description": "天涯を流浪し義を貫く者", "starter_equipment": ["長棍", "金創薬×3"]}
+  ],
+  "skill_pools": {
+    "剣客": ["御剣術", "剣気", "剣盾", "破招"],
+    "道士": ["退魔", "符咒", "錬丹", "望気"],
+    "刺客": ["暗器", "軽功", "毒術", "易容"],
+    "遊侠": ["棍術", "追跡", "療傷", "交渉"]
+  },
+  "gm_prompt_appendix": "あなたは架空の武侠・仙侠世界のGMです。江湖の因縁、宗門の争い、仙道を求める修行、降妖除魔――義侠心と奇縁に満ちた世界です。プレイヤーは江湖を自由に歩き、宗門に入門し、達人に挑み、秘境を探索できます。内力の消耗と回復に注意してください。軽功で地形の障害を越えられます。",
+  "difficulty_instructions": {
+    "轻松": "敵は弱く、宗門は友好的、機縁に恵まれている",
+    "标准": "江湖は危険だが公平、修行と戦略が必要",
+    "硬核": "強敵に囲まれ、走火入魔のリスクが高く、傷の回復も遅い"
+  }
+}

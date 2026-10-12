@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "class",
+    "id": "sorcerer"
+  },
+  "fields": {
+    "name": "Sorcerer",
+    "summary": "A Charisma-based innate spellcaster with powerful bursts and limited resources to manage carefully."
+  }
+}

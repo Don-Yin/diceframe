@@ -1,0 +1,15 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "rule", "id": "dnd2024_srd"},
+  "rule": {
+    "rule_name": "5E 2024 SRD Advanced Rules",
+    "description": "An isolated SRD 5.2.1 advanced experience with guided character creation, versioned characters, authoritative actions, and server-resolved combat. It does not replace D&D 5e Lite.",
+    "gm_prompt_appendix": "This is the advanced 5E 2024 SRD ruleset. Character resources, action economy, rolls, attacks, saves, damage, healing, conditions, concentration, reactions, and dying are resolved authoritatively by the runtime. Narrate submitted EventBatches only and never alter their mechanics. During ordinary exploration, output COMBAT:start in the state-tag block only when a hostile encounter has actually begun and initiative is the next necessary step. Do not trigger it for threats, arguments, or avoidable danger. Describe the engagement without resolving attacks, damage, or enemy turns; the system will open the authoritative combat tool."
+  },
+  "attributes": {
+    "str": {"name": "Strength"}, "dex": {"name": "Dexterity"},
+    "con": {"name": "Constitution"}, "int": {"name": "Intelligence"},
+    "wis": {"name": "Wisdom"}, "cha": {"name": "Charisma"}
+  }
+}

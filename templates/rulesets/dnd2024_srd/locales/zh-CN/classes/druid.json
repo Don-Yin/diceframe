@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "class",
+    "id": "druid"
+  },
+  "fields": {
+    "name": "德鲁伊",
+    "summary": "以自然魔法进行控场、治疗与变化，选择较多。"
+  }
+}

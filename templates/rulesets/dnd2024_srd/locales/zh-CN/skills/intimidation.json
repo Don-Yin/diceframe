@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "intimidation"
+  },
+  "fields": {
+    "name": "威吓",
+    "summary": "以气势或威胁迫使他人服从。"
+  }
+}

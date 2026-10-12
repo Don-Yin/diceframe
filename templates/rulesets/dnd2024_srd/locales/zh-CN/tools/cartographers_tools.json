@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "tool",
+    "id": "cartographers_tools"
+  },
+  "fields": {
+    "name": "绘图工具"
+  }
+}

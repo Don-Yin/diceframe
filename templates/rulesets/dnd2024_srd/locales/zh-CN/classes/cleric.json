@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "class",
+    "id": "cleric"
+  },
+  "fields": {
+    "name": "牧师",
+    "summary": "可靠的神术施法者，能治疗、支援并在前线作战。"
+  }
+}

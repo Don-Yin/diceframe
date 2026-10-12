@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "kind": "class",
+  "id": "sorcerer",
+  "source_ref": "srd-5.2.1:p64:sorcerer-core-traits",
+  "class_progression_ref": "progression_catalog:srd_classes",
+  "automation_level": "guided",
+  "hit_die": 6,
+  "fixed_hp_per_level": 4,
+  "spellcasting_ability": "cha",
+  "recommended_spell_choices": {
+    "cantrip_ids": ["light", "prestidigitation", "shocking_grasp", "sorcerous_burst"],
+    "prepared_spell_ids": ["burning_hands", "detect_magic"]
+  },
+  "primary_ability_refs": [
+    "ability:cha"
+  ],
+  "saving_throw_refs": [
+    "ability:con",
+    "ability:cha"
+  ],
+  "skill_choice": {
+    "count": 2,
+    "allowed_refs": [
+      "skill:arcana",
+      "skill:deception",
+      "skill:insight",
+      "skill:intimidation",
+      "skill:persuasion",
+      "skill:religion"
+    ]
+  },
+  "armor_proficiencies": [],
+  "weapon_proficiencies": [
+    "simple"
+  ],
+  "equipment_package_refs": [
+    "equipment_package:sorcerer_a",
+    "equipment_package:sorcerer_b"
+  ],
+  "recommended_standard_array": {
+    "str": 10,
+    "dex": 13,
+    "con": 14,
+    "int": 8,
+    "wis": 12,
+    "cha": 15
+  },
+  "level_1_feature_ids": [
+    "innate_sorcery",
+    "spellcasting"
+  ],
+  "experience": {
+    "difficulty": "advanced"
+  }
+}

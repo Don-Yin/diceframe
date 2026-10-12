@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "arcana"
+  },
+  "fields": {
+    "name": "奥秘",
+    "summary": "回忆法术、魔法物品与位面相关知识。"
+  }
+}

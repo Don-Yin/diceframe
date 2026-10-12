@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "kind": "subclass_catalog",
+  "id": "srd_subclasses",
+  "source_ref": "srd-5.2.1:p30-p82:srd-subclasses",
+  "automation_level": "guided",
+  "subclasses": {
+    "barbarian": {
+      "id": "path_of_the_berserker",
+      "class_ref": "class:barbarian",
+      "source_ref": "srd-5.2.1:p30:path-of-the-berserker",
+      "feature_ids_by_level": {"3": ["frenzy"], "6": ["mindless_rage"], "10": ["retaliation"], "14": ["intimidating_presence"]}
+    },
+    "bard": {
+      "id": "college_of_lore",
+      "class_ref": "class:bard",
+      "source_ref": "srd-5.2.1:p35:college-of-lore",
+      "feature_ids_by_level": {"3": ["bonus_proficiencies", "cutting_words"], "6": ["magical_discoveries"], "14": ["peerless_skill"]}
+    },
+    "cleric": {
+      "id": "life_domain",
+      "class_ref": "class:cleric",
+      "source_ref": "srd-5.2.1:p40:life-domain",
+      "feature_ids_by_level": {"3": ["disciple_of_life", "life_domain_spells", "preserve_life"], "6": ["blessed_healer"], "17": ["supreme_healing"]}
+    },
+    "druid": {
+      "id": "circle_of_the_land",
+      "class_ref": "class:druid",
+      "source_ref": "srd-5.2.1:p46:circle-of-the-land",
+      "feature_ids_by_level": {"3": ["circle_of_the_land_spells", "lands_aid"], "6": ["natural_recovery"], "10": ["natures_ward"], "14": ["natures_sanctuary"]}
+    },
+    "fighter": {
+      "id": "champion",
+      "class_ref": "class:fighter",
+      "source_ref": "srd-5.2.1:p49:champion",
+      "feature_ids_by_level": {"3": ["improved_critical", "remarkable_athlete"], "7": ["additional_fighting_style"], "10": ["heroic_warrior"], "15": ["superior_critical"], "18": ["survivor"]}
+    },
+    "monk": {
+      "id": "warrior_of_the_open_hand",
+      "class_ref": "class:monk",
+      "source_ref": "srd-5.2.1:p52:warrior-of-the-open-hand",
+      "feature_ids_by_level": {"3": ["open_hand_technique"], "6": ["wholeness_of_body"], "11": ["fleet_step"], "17": ["quivering_palm"]}
+    },
+    "paladin": {
+      "id": "oath_of_devotion",
+      "class_ref": "class:paladin",
+      "source_ref": "srd-5.2.1:p56:oath-of-devotion",
+      "feature_ids_by_level": {"3": ["oath_of_devotion_spells", "sacred_weapon"], "7": ["aura_of_devotion"], "15": ["smite_of_protection"], "20": ["holy_nimbus"]}
+    },
+    "ranger": {
+      "id": "hunter",
+      "class_ref": "class:ranger",
+      "source_ref": "srd-5.2.1:p61:hunter",
+      "feature_ids_by_level": {"3": ["hunters_lore", "hunters_prey"], "7": ["defensive_tactics"], "11": ["superior_hunters_prey"], "15": ["superior_hunters_defense"]}
+    },
+    "rogue": {
+      "id": "thief",
+      "class_ref": "class:rogue",
+      "source_ref": "srd-5.2.1:p64:thief",
+      "feature_ids_by_level": {"3": ["fast_hands", "second_story_work"], "9": ["supreme_sneak"], "13": ["use_magic_device"], "17": ["thiefs_reflexes"]}
+    },
+    "sorcerer": {
+      "id": "draconic_sorcery",
+      "class_ref": "class:sorcerer",
+      "source_ref": "srd-5.2.1:p69:draconic-sorcery",
+      "feature_ids_by_level": {"3": ["draconic_resilience", "draconic_spells"], "6": ["elemental_affinity"], "14": ["dragon_wings"], "18": ["dragon_companion"]}
+    },
+    "warlock": {
+      "id": "fiend_patron",
+      "class_ref": "class:warlock",
+      "source_ref": "srd-5.2.1:p76:fiend-patron",
+      "feature_ids_by_level": {"3": ["dark_ones_blessing", "fiend_spells"], "6": ["dark_ones_own_luck"], "10": ["fiendish_resilience"], "14": ["hurl_through_hell"]}
+    },
+    "wizard": {
+      "id": "evoker",
+      "class_ref": "class:wizard",
+      "source_ref": "srd-5.2.1:p82:evoker",
+      "feature_ids_by_level": {"3": ["evocation_savant", "potent_cantrip"], "6": ["sculpt_spells"], "10": ["empowered_evocation"], "14": ["overchannel"]}
+    }
+  }
+}

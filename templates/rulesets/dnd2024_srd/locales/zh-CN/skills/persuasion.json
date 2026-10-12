@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "persuasion"
+  },
+  "fields": {
+    "name": "游说",
+    "summary": "诚恳而得体地说服他人。"
+  }
+}

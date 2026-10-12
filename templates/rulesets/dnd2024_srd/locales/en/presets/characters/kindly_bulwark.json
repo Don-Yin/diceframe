@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "quick_character_preset",
+    "id": "kindly_bulwark"
+  },
+  "fields": {
+    "name": "Kindly Bulwark",
+    "summary": "A Dwarf Cleric who can heal allies while wearing armor on the front line.",
+    "recommendation_reason": "Choose this if you want to keep allies safe without being fragile; its healing and support choices are reassuring and clear."
+  }
+}

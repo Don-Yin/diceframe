@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "skill",
+    "id": "survival"
+  },
+  "fields": {
+    "name": "Survival",
+    "summary": "Track, forage, navigate, or avoid hazards in the natural world."
+  }
+}

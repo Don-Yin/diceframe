@@ -1,0 +1,51 @@
+"""D&D 2024 class feature runtime (v1).
+
+Feature identity and availability, class resource lifecycle projection, and
+combat capability projection.  The package is intentionally thin: it answers
+what a character owns and what it may declare, and nothing else.
+"""
+
+from .combat import CombatContext
+from .equipment import Dnd2024EquipmentCatalog, weapon_matches_kind
+from .models import (
+    CapabilityCost,
+    CapabilityCostView,
+    CapabilityAction,
+    ClassFeatureDefinition,
+    ClassFeatureError,
+    CombatCapabilityView,
+    Dnd2024ClassFeatureCatalog,
+    EquipmentRequirement,
+    FeatureCapability,
+    FeatureView,
+    ResourceCost,
+    WEAPON_KINDS,
+)
+from .resolver import Dnd2024ClassFeatureResolver
+from .resources import (
+    ClassResourceDeclaration,
+    Dnd2024ClassResourceCatalog,
+    ResourceDefinition,
+)
+
+__all__ = [
+    "CapabilityCost",
+    "CapabilityCostView",
+    "CapabilityAction",
+    "ClassFeatureDefinition",
+    "ClassFeatureError",
+    "ClassResourceDeclaration",
+    "CombatCapabilityView",
+    "CombatContext",
+    "Dnd2024ClassFeatureCatalog",
+    "Dnd2024ClassFeatureResolver",
+    "Dnd2024ClassResourceCatalog",
+    "Dnd2024EquipmentCatalog",
+    "EquipmentRequirement",
+    "FeatureCapability",
+    "FeatureView",
+    "ResourceCost",
+    "ResourceDefinition",
+    "WEAPON_KINDS",
+    "weapon_matches_kind",
+]

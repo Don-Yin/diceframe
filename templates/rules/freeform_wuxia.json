@@ -1,0 +1,400 @@
+{
+  "extends": "base_d20",
+  "rule_version": "1.2",
+  "rule_id": "freeform_wuxia",
+  "scene_image": {
+    "kind": "builtin",
+    "id": "freeform_wuxia"
+  },
+  "rule_name": "武侠仙侠自由规则",
+  "description": "架空武侠仙侠世界的轻量自由规则",
+  "attributes": [
+    {
+      "key": "str",
+      "name": "力量",
+      "min": 3,
+      "max": 18
+    },
+    {
+      "key": "dex",
+      "name": "敏捷",
+      "min": 3,
+      "max": 18
+    },
+    {
+      "key": "con",
+      "name": "体质",
+      "min": 3,
+      "max": 18
+    },
+    {
+      "key": "int",
+      "name": "智力",
+      "min": 3,
+      "max": 18
+    },
+    {
+      "key": "wis",
+      "name": "感知",
+      "min": 3,
+      "max": 18
+    },
+    {
+      "key": "cha",
+      "name": "魅力",
+      "min": 3,
+      "max": 18
+    }
+  ],
+  "special_stats": [
+    {
+      "key": "qi",
+      "name": "内力",
+      "max": 100,
+      "initial": 100,
+      "description": "使用内功和轻功消耗内力，调息休息可恢复"
+    }
+  ],
+  "attribute_points": 60,
+  "attr_hint": "属性使用 3-18 数值，10 约等于普通人平均水平；内功、身法、悟性等表现会随对应属性增强。",
+  "dice_system": "d20",
+  "combat_model": "hp_based",
+  "hp_formula": "5 + con * 3",
+  "valid_qualities": [
+    "common",
+    "uncommon",
+    "rare",
+    "legendary"
+  ],
+  "max_skills": 4,
+  "skill_point_total": 200,
+  "max_skill_value": 80,
+  "skill_mode": "narrative",
+  "skill_hint": "技能可写武学招式、轻功、医毒或江湖手段。可写“技能名(20-80)”；数值越高，代表修为越深。",
+  "currency": "灵石",
+  "item_categories": {
+    "equipment": [
+      "剑",
+      "刀",
+      "飞剑",
+      "拂尘",
+      "道袍",
+      "护符",
+      "玉佩",
+      "长棍",
+      "铁扇",
+      "飞镖",
+      "暗器",
+      "软甲",
+      "轻甲",
+      "甲胄",
+      "Sword",
+      "Saber",
+      "Flying Sword",
+      "Whisk",
+      "Daoist Robe",
+      "Talisman",
+      "Jade Pendant",
+      "Staff",
+      "Iron Fan",
+      "Dart",
+      "Hidden Weapon",
+      "Soft Armor",
+      "Light Armor",
+      "Armor",
+      "剣",
+      "飛剣",
+      "麈尾",
+      "護符",
+      "長棍",
+      "鉄扇",
+      "飛鏢",
+      "軟甲",
+      "軽甲",
+      "鎧甲"
+    ],
+    "pills": [
+      "丹",
+      "药",
+      "散",
+      "丸",
+      "液",
+      "露",
+      "浆",
+      "膏",
+      "粉",
+      "汤",
+      "Pill",
+      "Medicine",
+      "Powder",
+      "Pellet",
+      "Elixir",
+      "Dew",
+      "Syrup",
+      "Paste",
+      "Dust",
+      "Decoction",
+      "薬",
+      "漿",
+      "湯"
+    ],
+    "consumable": [
+      "符咒",
+      "灵石",
+      "卷轴",
+      "金疮药",
+      "真气丹",
+      "解毒散",
+      "清心丸",
+      "Talisman",
+      "Spirit Stone",
+      "Scroll",
+      "Wound Medicine",
+      "Qi Pill",
+      "Antidote Powder",
+      "Clarity Pill",
+      "霊石",
+      "巻物",
+      "金創薬",
+      "真気丹"
+    ],
+    "misc": [
+      "令牌",
+      "玉简",
+      "信物",
+      "地图",
+      "秘籍",
+      "刀谱",
+      "剑谱",
+      "残卷",
+      "卜卦",
+      "罗盘",
+      "葫芦",
+      "酒壶",
+      "Token",
+      "Jade Slip",
+      "Map",
+      "Manual",
+      "Saber Manual",
+      "Sword Manual",
+      "Fragment",
+      "Divination",
+      "Compass",
+      "Gourd",
+      "Wine Flask",
+      "玉簡",
+      "地図",
+      "刀譜",
+      "剣譜",
+      "残巻",
+      "羅盤",
+      "瓢箪",
+      "酒壺"
+    ]
+  },
+  "classes": [
+    {
+      "name": "剑客",
+      "description": "以剑入道的武者",
+      "starter_equipment": [
+        "铁剑",
+        "轻甲"
+      ],
+      "id": "swordsman"
+    },
+    {
+      "name": "道士",
+      "description": "修习道法符箓之士",
+      "starter_equipment": [
+        "桃木剑",
+        "符纸×5"
+      ],
+      "id": "daoist"
+    },
+    {
+      "name": "刺客",
+      "description": "暗影中的暗器高手",
+      "starter_equipment": [
+        "淬毒匕首",
+        "飞镖×10"
+      ],
+      "id": "assassin"
+    },
+    {
+      "name": "游侠",
+      "description": "浪迹天涯的行侠仗义者",
+      "starter_equipment": [
+        "长棍",
+        "金疮药×3"
+      ],
+      "id": "wanderer"
+    }
+  ],
+  "skill_pools": {
+    "swordsman": [
+      "sword_control",
+      "sword_aura",
+      "sword_shield",
+      "parry_break"
+    ],
+    "daoist": [
+      "exorcism",
+      "talismans",
+      "alchemy",
+      "qi_sight"
+    ],
+    "assassin": [
+      "hidden_weapons",
+      "lightness_arts",
+      "poisons",
+      "disguise"
+    ],
+    "wanderer": [
+      "staff_arts",
+      "tracking",
+      "healing",
+      "persuasion"
+    ]
+  },
+  "gm_prompt_appendix": "你是架空武侠仙侠世界的GM。江湖恩怨、宗门争斗、修仙问道、降妖除魔--这是一个充满侠义与奇遇的世界。玩家可以在江湖中自由行走，拜入宗门、挑战高手、探寻秘境。注意内力的消耗与恢复，轻功可以跨越地形障碍。",
+  "difficulty_instructions": {
+    "轻松": "敌人较弱，宗门友好，机缘充足",
+    "标准": "江湖险恶但公平，需要修炼和策略",
+    "硬核": "强敌环伺，走火入魔风险高，重伤难愈"
+  },
+  "rule_schema_version": 2,
+  "default_locale": "zh-CN",
+  "locale_schema_version": 1,
+  "skills": {
+    "sword_control": {
+      "name": "御剑术"
+    },
+    "sword_aura": {
+      "name": "剑气纵横"
+    },
+    "sword_shield": {
+      "name": "剑盾"
+    },
+    "parry_break": {
+      "name": "破招"
+    },
+    "exorcism": {
+      "name": "驱邪"
+    },
+    "talismans": {
+      "name": "符咒"
+    },
+    "alchemy": {
+      "name": "炼丹"
+    },
+    "qi_sight": {
+      "name": "望气"
+    },
+    "hidden_weapons": {
+      "name": "暗器"
+    },
+    "lightness_arts": {
+      "name": "轻功"
+    },
+    "poisons": {
+      "name": "毒术"
+    },
+    "disguise": {
+      "name": "易容"
+    },
+    "staff_arts": {
+      "name": "棍法"
+    },
+    "tracking": {
+      "name": "追踪"
+    },
+    "healing": {
+      "name": "疗伤"
+    },
+    "persuasion": {
+      "name": "交涉"
+    }
+  },
+  "combat": {
+    "scheduler": {
+      "kind": "threshold",
+      "gauge": "action_gauge",
+      "speed": "action_speed",
+      "threshold": 100,
+      "overflow": "carry",
+      "consume": "reset"
+    },
+    "resources": [
+      {
+        "id": "hp",
+        "source": "hp"
+      },
+      {
+        "id": "qi",
+        "source": "special_stat",
+        "stat": "qi",
+        "maximum": 100
+      },
+      {
+        "id": "barrier",
+        "source": "combat_state",
+        "maximum": 50,
+        "damage_priority": "before_hp"
+      }
+    ],
+    "actions": [
+      {
+        "id": "item:healing_pill.use",
+        "kind": "consumable",
+        "name": "回春丹",
+        "consume_item": {
+          "item": "回春丹",
+          "qty": 1
+        },
+        "effects": [
+          {
+            "kind": "resource_change",
+            "resource": "hp",
+            "amount": {
+              "op": "constant",
+              "value": 10
+            }
+          }
+        ]
+      },
+      {
+        "id": "ability:qi_palm",
+        "kind": "ability",
+        "name": "内力掌",
+        "costs": [
+          {
+            "resource": "qi",
+            "amount": {
+              "op": "constant",
+              "value": 8
+            }
+          }
+        ],
+        "effects": [
+          {
+            "kind": "damage",
+            "amount": {
+              "op": "multiply",
+              "args": [
+                {
+                  "op": "attribute",
+                  "id": "str"
+                },
+                {
+                  "op": "constant",
+                  "value": 2
+                }
+              ]
+            },
+            "damage_type": "bludgeoning"
+          }
+        ]
+      }
+    ]
+  }
+}

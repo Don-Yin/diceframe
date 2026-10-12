@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "kind": "map_location",
+  "id": "greymoor_route",
+  "source_ref": "diceframe-original:dnd2024-adventures/lanterns-of-greymoor",
+  "automation_level": "reference",
+  "region_id": "greymoor",
+  "markers": ["mistbound_road", "waykeeper_cottage", "forked_trail", "thorn_glade", "old_shrine"]
+}

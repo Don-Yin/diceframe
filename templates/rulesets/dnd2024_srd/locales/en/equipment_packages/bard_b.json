@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "equipment_package",
+    "id": "bard_b"
+  },
+  "fields": {
+    "name": "Bard Equipment B (90 GP)"
+  }
+}

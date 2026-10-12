@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "kind": "species",
+  "creature_type": "humanoid",
+  "automation_level": "guided",
+  "id": "orc",
+  "size_options": [
+    "medium"
+  ],
+  "speed": 30,
+  "source_ref": "srd-5.2.1:p86:orc",
+  "traits": [
+    {
+      "id": "adrenaline_rush",
+      "source_ref": "srd-5.2.1:p86:orc",
+      "automation_level": "guided"
+    },
+    {
+      "id": "darkvision_120",
+      "source_ref": "srd-5.2.1:p86:orc",
+      "automation_level": "deterministic"
+    },
+    {
+      "id": "relentless_endurance",
+      "source_ref": "srd-5.2.1:p86:orc",
+      "automation_level": "guided"
+    }
+  ]
+}

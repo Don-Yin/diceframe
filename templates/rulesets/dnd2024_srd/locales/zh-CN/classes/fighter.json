@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "class",
+    "id": "fighter"
+  },
+  "fields": {
+    "name": "战士",
+    "summary": "直观、坚韧且武器选择丰富，非常适合第一次接触战斗的新手。"
+  }
+}

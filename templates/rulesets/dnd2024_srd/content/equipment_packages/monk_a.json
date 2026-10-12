@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "monk_a",
+  "source_ref": "srd-5.2.1:p49:monk_a",
+  "automation_level": "deterministic",
+  "category": "class",
+  "item_refs": [
+    "item:spear",
+    "item:dagger",
+    "item:artisans_tools",
+    "item:explorer_pack"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:spear",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:dagger",
+      "quantity": 5
+    },
+    {
+      "item_ref": "item:artisans_tools",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:explorer_pack",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 11
+}

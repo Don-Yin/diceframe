@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "species",
+    "id": "goliath"
+  },
+  "fields": {
+    "name": "歌利亚",
+    "summary": "继承一种巨人祖先恩赐，体格强壮且移动迅速；5级可短时变为大型。"
+  }
+}

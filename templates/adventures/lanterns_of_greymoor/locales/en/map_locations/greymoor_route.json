@@ -1,0 +1,6 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "map_location", "id": "greymoor_route"},
+  "fields": {"name": "Greymoor Route", "description": "The way-lantern road from the mistbound mile to the old shrine."}
+}

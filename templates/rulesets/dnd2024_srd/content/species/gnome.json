@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "kind": "species",
+  "creature_type": "humanoid",
+  "automation_level": "guided",
+  "id": "gnome",
+  "size_options": [
+    "small"
+  ],
+  "speed": 30,
+  "source_ref": "srd-5.2.1:p85:gnome",
+  "choice_specs": [
+    {
+      "id": "gnomish_lineage",
+      "count": 1,
+      "option_ids": [
+        "forest_gnome",
+        "rock_gnome"
+      ]
+    },
+    {
+      "id": "lineage_spellcasting_ability",
+      "count": 1,
+      "option_ids": [
+        "int",
+        "wis",
+        "cha"
+      ]
+    }
+  ],
+  "traits": [
+    {
+      "id": "darkvision_60",
+      "source_ref": "srd-5.2.1:p85:gnome",
+      "automation_level": "deterministic"
+    },
+    {
+      "id": "gnomish_cunning",
+      "source_ref": "srd-5.2.1:p85:gnome",
+      "automation_level": "guided"
+    },
+    {
+      "id": "gnomish_lineage",
+      "source_ref": "srd-5.2.1:p85:gnome",
+      "automation_level": "guided"
+    }
+  ]
+}

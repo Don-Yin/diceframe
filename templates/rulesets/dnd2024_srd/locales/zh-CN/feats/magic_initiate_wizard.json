@@ -1,0 +1,36 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "feat",
+    "id": "magic_initiate_wizard"
+  },
+  "fields": {
+    "name": "魔法学徒（法师）",
+    "summary": "从法师法术列表选择两个戏法与一个一级法术，并选择施法关键属性。",
+    "labels": {
+      "spellcasting_ability": "施法关键属性",
+      "cantrips": "戏法（选择 2 个）",
+      "level_1_spell": "1 环法术（选择 1 个）",
+      "int": "智力", "wis": "感知", "cha": "魅力",
+      "acid_splash": "酸液飞溅", "chill_touch": "寒冷之触", "dancing_lights": "舞光术",
+      "elementalism": "元素戏法", "fire_bolt": "火焰箭", "light": "光亮术",
+      "mage_hand": "法师之手", "mending": "修复术", "message": "传讯术",
+      "minor_illusion": "次级幻影", "poison_spray": "毒气喷溅",
+      "prestidigitation": "魔法伎俩", "ray_of_frost": "霜噬射线",
+      "shocking_grasp": "电爪", "true_strike": "克敌机先",
+      "alarm": "警报术", "burning_hands": "燃烧之手", "charm_person": "魅惑人类",
+      "chromatic_orb": "繁彩球", "color_spray": "七彩喷射",
+      "comprehend_languages": "通晓语言", "detect_magic": "侦测魔法",
+      "disguise_self": "易容术", "expeditious_retreat": "脚底抹油",
+      "false_life": "虚假生命", "feather_fall": "羽落术", "find_familiar": "寻获魔宠",
+      "floating_disk": "浮碟术", "fog_cloud": "云雾术", "grease": "油腻术",
+      "hideous_laughter": "狂笑术", "ice_knife": "冰刃术", "identify": "鉴定术",
+      "illusory_script": "迷幻手稿", "jump": "跳跃术", "longstrider": "大步奔行",
+      "mage_armor": "法师护甲", "magic_missile": "魔法飞弹",
+      "protection_from_evil_and_good": "防护善恶", "ray_of_sickness": "致病射线",
+      "shield": "护盾术", "silent_image": "无声幻影", "sleep": "睡眠术",
+      "thunderwave": "雷鸣波", "unseen_servant": "隐形仆役"
+    }
+  }
+}

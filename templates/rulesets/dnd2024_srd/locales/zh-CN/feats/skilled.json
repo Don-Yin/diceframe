@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "feat",
+    "id": "skilled"
+  },
+  "fields": {
+    "name": "熟练",
+    "summary": "选择任意三项技能或工具获得熟练；可以重复获得。"
+  }
+}

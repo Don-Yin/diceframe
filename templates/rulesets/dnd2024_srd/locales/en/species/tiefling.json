@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "species",
+    "id": "tiefling"
+  },
+  "fields": {
+    "name": "Tiefling",
+    "summary": "Choose an Abyssal, Chthonic, or Infernal legacy to gain matching resistance and spells."
+  }
+}

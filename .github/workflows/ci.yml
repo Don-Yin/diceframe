@@ -1,0 +1,150 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Install CJK font for bot card rendering
+        # Bot 卡片渲染要求真实 CJK 字形（与 Docker 镜像一致）；测试环境没有
+        # 字体时相关用例会 skip，装了字体才能在 CI 真正覆盖中文渲染路径。
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+
+      - name: Lint with ruff
+        run: python -m ruff check src/
+
+      - name: Type check with mypy
+        # 按 pyproject [tool.mypy].files 限定范围（当前 5 个已通过文件），
+        # 不加路径参数。全量 src/ 有历史类型债，用 files 白名单渐进扩展。
+        run: python -m mypy
+
+      - name: Validate Windows portable dependency lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/validate_portable_lock.py
+          python -m pip download \
+            --dest "${RUNNER_TEMP}/diceframe-portable-lock" \
+            --only-binary=:all: \
+            --platform win_amd64 \
+            --python-version 3.11 \
+            --implementation cp \
+            --abi cp311 \
+            --require-hashes \
+            -r requirements-portable.lock
+
+      - name: Run backend tests
+        run: python -m pytest -q --cov=src --cov-report=term-missing --cov-report=xml
+
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: frontend-v2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend-v2/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run frontend tests
+        run: npm run test
+
+      - name: Build frontend
+        run: npm run build
+
+  browser-smoke:
+    name: Browser smoke tests
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # FIX-07 §9：浏览器 smoke 不允许 continue-on-error —— 它必须能让总 workflow 变红，
+    # 否则 PR 上的假绿会掩盖真实的浏览器回归。
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend-v2/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          npm ci --prefix frontend-v2
+          npm --prefix frontend-v2 exec playwright install --with-deps chromium
+
+      - name: Run clean-data browser tests
+        working-directory: frontend-v2
+        env:
+          DICEFRAME_E2E_SERVER_LOG: ${{ github.workspace }}/frontend-v2/test-results/server.log
+        run: npm run test:e2e:smoke
+
+      - name: Upload browser test artifacts
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: browser-smoke-results
+          path: frontend-v2/test-results/
+          retention-days: 7
+          if-no-files-found: ignore

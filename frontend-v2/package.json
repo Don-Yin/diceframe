@@ -1,0 +1,47 @@
+{
+  "name": "diceframe-frontend-v2",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0",
+    "npm": "^10.9.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "build:standalone": "vue-tsc -b && vite build --mode standalone",
+    "typecheck": "vue-tsc -b",
+    "lint": "eslint src tests --max-warnings 0",
+    "test": "vitest run",
+    "test:e2e": "python ../scripts/run_e2e.py",
+    "test:e2e:smoke": "python ../scripts/run_e2e.py e2e/admin-ui.spec.ts e2e/adventure-panel.spec.ts e2e/dnd2024-workspace.spec.ts e2e/flows.spec.ts e2e/lorebook-golden.spec.ts e2e/peer-connect.spec.ts e2e/responsive.spec.ts e2e/shell.spec.ts",
+    "test:e2e:visual": "python ../scripts/run_e2e.py e2e/final-polish.spec.ts e2e/plugin-layout.spec.ts",
+    "test:e2e:mobile": "python ../scripts/run_e2e.py --project=mobile"
+  },
+  "dependencies": {
+    "@vicons/ionicons5": "0.13.0",
+    "@vitejs/plugin-vue": "6.0.7",
+    "dompurify": "^3.4.13",
+    "marked": "^18.0.9",
+    "naive-ui": "2.44.1",
+    "pinia": "3.0.4",
+    "qrcode-generator": "^2.0.4",
+    "vite": "8.1.4",
+    "vue": "3.5.39",
+    "vue-i18n": "^11.4.6",
+    "vue-router": "5.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@types/node": "26.1.1",
+    "@vue/test-utils": "2.4.11",
+    "eslint": "^9.39.5",
+    "eslint-plugin-vue": "^10.10.0",
+    "jsdom": "29.1.1",
+    "typescript": "5.7.3",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "4.1.10",
+    "vue-tsc": "2.2.0"
+  }
+}

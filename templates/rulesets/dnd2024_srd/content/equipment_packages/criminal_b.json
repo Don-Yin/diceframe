@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "criminal_b",
+  "source_ref": "srd-5.2.1:p83:criminal_b",
+  "automation_level": "deterministic",
+  "category": "background",
+  "item_refs": [],
+  "item_grants": [],
+  "coins_gp": 50
+}

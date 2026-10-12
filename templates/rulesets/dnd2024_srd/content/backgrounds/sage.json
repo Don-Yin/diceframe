@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "background",
+  "id": "sage",
+  "source_ref": "srd-5.2.1:p83:sage",
+  "automation_level": "deterministic",
+  "ability_refs": [
+    "ability:con",
+    "ability:int",
+    "ability:wis"
+  ],
+  "skill_refs": [
+    "skill:arcana",
+    "skill:history"
+  ],
+  "tool_proficiency_refs": [
+    "tool:calligraphers_supplies"
+  ],
+  "feat_ref": "feat:magic_initiate_wizard",
+  "equipment_package_refs": [
+    "equipment_package:sage_a",
+    "equipment_package:sage_b"
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "kind": "feat",
+  "id": "magic_initiate_wizard",
+  "automation_level": "guided",
+  "category": "origin",
+  "spell_list": "wizard",
+  "choice_specs": [
+    {"id": "spellcasting_ability", "count": 1, "option_ids": ["int", "wis", "cha"]},
+    {
+      "id": "cantrips",
+      "count": 2,
+      "option_ids": [
+        "acid_splash", "chill_touch", "dancing_lights", "elementalism", "fire_bolt",
+        "light", "mage_hand", "mending", "message", "minor_illusion", "poison_spray",
+        "prestidigitation", "ray_of_frost", "shocking_grasp", "true_strike"
+      ]
+    },
+    {
+      "id": "level_1_spell",
+      "count": 1,
+      "option_ids": [
+        "alarm", "burning_hands", "charm_person", "chromatic_orb", "color_spray",
+        "comprehend_languages", "detect_magic", "disguise_self", "expeditious_retreat",
+        "false_life", "feather_fall", "find_familiar", "floating_disk", "fog_cloud",
+        "grease", "hideous_laughter", "ice_knife", "identify", "illusory_script",
+        "jump", "longstrider", "mage_armor", "magic_missile",
+        "protection_from_evil_and_good", "ray_of_sickness", "shield", "silent_image",
+        "sleep", "thunderwave", "unseen_servant"
+      ]
+    }
+  ],
+  "source_ref": "srd-5.2.1:p87:magic-initiate"
+}

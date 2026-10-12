@@ -1,0 +1,123 @@
+{
+  "locale_schema_version": 1,
+  "locale": "ja",
+  "target": {
+    "kind": "rule",
+    "id": "freeform_fantasy"
+  },
+  "items": {
+    "iron_sword": {
+      "name": "鉄の剣"
+    },
+    "leather_armor": {
+      "name": "革鎧"
+    },
+    "staff": {
+      "name": "杖"
+    },
+    "spellbook": {
+      "name": "魔法書"
+    },
+    "longbow": {
+      "name": "長弓"
+    },
+    "arrows": {
+      "name": "矢×20"
+    },
+    "dagger": {
+      "name": "短剣"
+    },
+    "lockpicks": {
+      "name": "ピッキングツール"
+    }
+  },
+  "rule": {
+    "rule_name": "クラシックファンタジー・フリーフォーム",
+    "description": "D&D を基にした軽量な剣と魔法のフリーフォームルール。",
+    "attr_hint": "属性は3〜18の値を使います。10が凡人の平均で、14以上なら明確な才能を意味します。点数を集中させると弱点もはっきりします。",
+    "skill_hint": "スキルは GM にキャラクターの得意分野を示します。「スキル名（20-80）」のように書くか、名前だけでも構いません。値が高いほど、描写や判定で信頼できます。",
+    "gm_prompt_appendix": "あなたはクラシックファンタジーの世界のGMです。世界は魔法とモンスター、冒険に満ちています。プレイヤーは自由にダンジョンを探索し、NPCと交流し、謎を解くことができます。戦闘はd20判定システムを使用します。",
+    "difficulty_instructions": {
+      "轻松": "簡単な戦闘、豊富な資源、友好的なNPC",
+      "标准": "挑戦的だが公平、資源は限られており、戦略が必要",
+      "硬核": "資源は乏しく、敵は手強い、キャラクターが永久に死亡する可能性がある"
+    },
+    "currency": "金貨"
+  },
+  "attributes": {
+    "str": {
+      "name": "筋力"
+    },
+    "dex": {
+      "name": "敏捷力"
+    },
+    "con": {
+      "name": "耐久力"
+    },
+    "int": {
+      "name": "知力"
+    },
+    "wis": {
+      "name": "判断力"
+    },
+    "cha": {
+      "name": "魅力"
+    }
+  },
+  "classes": {
+    "warrior": {
+      "name": "戦士",
+      "description": "前線で戦う近接戦闘の専門家"
+    },
+    "mage": {
+      "name": "魔術師",
+      "description": "秘術の呪文使い"
+    },
+    "ranger": {
+      "name": "レンジャー",
+      "description": "射撃と追跡の専門家"
+    },
+    "rogue": {
+      "name": "盗賊",
+      "description": "隠密と鍵開けの達人"
+    }
+  },
+  "skills": {
+    "heavy_strike": {
+      "name": "重撃"
+    },
+    "defensive_stance": {
+      "name": "防御の構え"
+    },
+    "charge": {
+      "name": "突撃"
+    },
+    "fireball": {
+      "name": "火球術"
+    },
+    "magic_shield": {
+      "name": "魔法の盾"
+    },
+    "arcana": {
+      "name": "魔法知識"
+    },
+    "precise_shot": {
+      "name": "精密射撃"
+    },
+    "tracking": {
+      "name": "追跡"
+    },
+    "nature_sense": {
+      "name": "自然感知"
+    },
+    "stealth": {
+      "name": "隠密"
+    },
+    "lockpicking": {
+      "name": "鍵開け"
+    },
+    "sneak_attack": {
+      "name": "不意打ち"
+    }
+  }
+}

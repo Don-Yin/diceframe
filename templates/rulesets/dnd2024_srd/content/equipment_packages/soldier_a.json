@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "soldier_a",
+  "source_ref": "srd-5.2.1:p83:soldier_a",
+  "automation_level": "deterministic",
+  "category": "background",
+  "item_refs": [
+    "item:spear",
+    "item:shortbow",
+    "item:arrows",
+    "item:gaming_set",
+    "item:healers_kit",
+    "item:quiver",
+    "item:travelers_clothes"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:spear",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:shortbow",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:arrows",
+      "quantity": 20
+    },
+    {
+      "item_ref": "item:gaming_set",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:healers_kit",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:quiver",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:travelers_clothes",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 14
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "class",
+    "id": "bard"
+  },
+  "fields": {
+    "name": "Bard",
+    "summary": "A flexible expert in support, social scenes, skills, and magic, with many choices to manage."
+  }
+}

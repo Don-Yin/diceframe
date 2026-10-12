@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "kind": "class_feature_catalog",
+  "id": "srd_class_features",
+  "source_ref": "srd-5.2.1:p49-p52:monk-features",
+  "automation_level": "deterministic",
+  "labels": {
+    "monk": "Monk",
+    "martial_arts": "Martial Arts",
+    "monks_focus": "Monk's Focus",
+    "flurry_of_blows": "Flurry of Blows",
+    "patient_defense": "Patient Defense",
+    "patient_defense_focus": "Patient Defense (Focus)",
+    "step_of_the_wind": "Step of the Wind",
+    "step_of_the_wind_focus": "Step of the Wind (Focus)",
+    "bonus_unarmed_strike": "Bonus Unarmed Strike",
+    "focus_points": "Focus Points",
+    "unarmed_strike": "Unarmed Strike",
+    "action": "Action",
+    "bonus_action": "Bonus Action"
+  },
+  "classes": {
+    "monk": {
+      "source_ref": "srd-5.2.1:p49:monk-core-traits",
+      "features": [
+        {
+          "id": "martial_arts",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p50:martial-arts",
+          "summary": "Unarmed Strikes may use Strength or Dexterity, and your Martial Arts die replaces their base damage.",
+          "parameters": {
+            "unarmed_damage_die_track": "martial_arts_die",
+            "unarmed_damage_die_format": "1d{die}",
+            "unarmed_ability_choice": ["str", "dex"]
+          },
+          "equipment_requirement": {
+            "unarmored": true,
+            "no_shield": true,
+            "weapon_kinds": ["simple_melee", "martial_melee_light"]
+          },
+          "capabilities": [
+            {
+              "id": "bonus_unarmed_strike",
+              "cost": {"bonus_action": 1},
+              "requires_hostile_target": true,
+              "actions": [{"kind": "unarmed_strike", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "monks_focus",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p50:monks-focus",
+          "summary": "You gain Focus Points that fuel Flurry of Blows, Patient Defense, and Step of the Wind.",
+          "resource_id": "focus_points"
+        },
+        {
+          "id": "flurry_of_blows",
+          "minimum_level": 2,
+          "option_of": "monks_focus",
+          "source_ref": "srd-5.2.1:p51:flurry-of-blows",
+          "summary": "Spend 1 Focus Point to make two Unarmed Strikes as a Bonus Action.",
+          "capabilities": [
+            {
+              "id": "flurry_of_blows",
+              "cost": {"bonus_action": 1, "resources": [{"id": "focus_points", "amount": 1}]},
+              "requires_hostile_target": true,
+              "actions": [{"kind": "unarmed_strike", "count": 2}]
+            }
+          ]
+        },
+        {
+          "id": "patient_defense",
+          "minimum_level": 2,
+          "option_of": "monks_focus",
+          "source_ref": "srd-5.2.1:p51:patient-defense",
+          "summary": "Take the Disengage action as a Bonus Action, or spend 1 Focus Point to Disengage and Dodge together.",
+          "capabilities": [
+            {
+              "id": "patient_defense",
+              "cost": {"bonus_action": 1},
+              "actions": [{"kind": "disengage"}]
+            },
+            {
+              "id": "patient_defense_focus",
+              "cost": {"bonus_action": 1, "resources": [{"id": "focus_points", "amount": 1}]},
+              "actions": [{"kind": "disengage"}, {"kind": "dodge"}]
+            }
+          ]
+        },
+        {
+          "id": "step_of_the_wind",
+          "minimum_level": 2,
+          "option_of": "monks_focus",
+          "source_ref": "srd-5.2.1:p51:step-of-the-wind",
+          "summary": "Take the Dash action as a Bonus Action, or spend 1 Focus Point to Dash and Disengage together.",
+          "capabilities": [
+            {
+              "id": "step_of_the_wind",
+              "cost": {"bonus_action": 1},
+              "actions": [{"kind": "dash"}]
+            },
+            {
+              "id": "step_of_the_wind_focus",
+              "cost": {"bonus_action": 1, "resources": [{"id": "focus_points", "amount": 1}]},
+              "actions": [{"kind": "dash"}, {"kind": "disengage"}]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

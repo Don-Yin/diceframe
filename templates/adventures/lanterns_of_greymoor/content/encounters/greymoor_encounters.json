@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "kind": "encounter_catalog",
+  "id": "greymoor_encounters",
+  "source_ref": "diceframe-original:dnd2024-adventures/lanterns-of-greymoor",
+  "automation_level": "deterministic",
+  "presets": [
+    {
+      "id": "first_skirmish",
+      "difficulty": "standard",
+      "enemies": [
+        {
+          "id": "goblin-minion-1",
+          "profile_id": "goblin_minion",
+          "hp": 7,
+          "armor_class": 12,
+          "speed": 30,
+          "position": 25,
+          "initiative_modifier": 2,
+          "abilities": {"str": 8, "dex": 15, "con": 10, "int": 10, "wis": 8, "cha": 8},
+          "saving_throws": {"str": -1, "dex": 2, "con": 0, "int": 0, "wis": -1, "cha": -1},
+          "attacks": [
+            {"id": "dagger", "attack_bonus": 4, "damage": "1d4+2", "damage_type": "piercing", "range": 5, "long_range": 60}
+          ]
+        }
+      ]
+    }
+  ]
+}

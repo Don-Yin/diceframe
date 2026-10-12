@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "item",
+    "id": "quarterstaff"
+  },
+  "fields": {
+    "name": "长棍"
+  }
+}

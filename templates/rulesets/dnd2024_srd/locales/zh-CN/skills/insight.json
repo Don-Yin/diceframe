@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "insight"
+  },
+  "fields": {
+    "name": "洞悉",
+    "summary": "判断他人的情绪、意图和言外之意。"
+  }
+}

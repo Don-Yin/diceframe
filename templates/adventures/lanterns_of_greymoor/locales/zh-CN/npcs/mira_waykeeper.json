@@ -1,0 +1,6 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {"kind": "npc", "id": "mira_waykeeper"},
+  "fields": {"name": "守灯人米拉", "description": "担心导师失踪与引路灯熄灭的年轻守灯人。"}
+}

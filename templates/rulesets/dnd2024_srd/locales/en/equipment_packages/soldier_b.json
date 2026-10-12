@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "equipment_package",
+    "id": "soldier_b"
+  },
+  "fields": {
+    "name": "Soldier Equipment B (50 GP)"
+  }
+}

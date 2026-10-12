@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "item",
+    "id": "priest_pack"
+  },
+  "fields": {
+    "name": "祭司套组"
+  }
+}

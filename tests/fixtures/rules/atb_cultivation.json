@@ -1,0 +1,79 @@
+{
+  "rule_version": "1.0",
+  "rule_schema_version": 2,
+  "rule_id": "atb_cultivation_fixture",
+  "rule_name": "ATB 修仙回归夹具",
+  "description": "Issue 212 回归夹具：行动速度由角色属性派生并攒到阈值 100 出手；法术伤害公式关联施法属性；灵力作为可消耗资源。",
+  "dice_system": "d20",
+  "combat_model": "hp_based",
+  "hp_formula": "20 + con * 3",
+  "attributes": [
+    {"key": "wu_xing", "name": "悟性"},
+    {"key": "shen_fa", "name": "身法"},
+    {"key": "str", "name": "根骨"},
+    {"key": "con", "name": "体质"}
+  ],
+  "special_stats": [
+    {"key": "ling_li", "name": "灵力", "max": 100, "initial": 100}
+  ],
+  "combat": {
+    "scheduler": {
+      "kind": "threshold",
+      "gauge": "action_gauge",
+      "speed": "action_speed",
+      "threshold": 100,
+      "overflow": "carry",
+      "consume": "reset",
+      "speed_formula": {
+        "op": "multiply",
+        "args": [
+          {"op": "attribute", "id": "shen_fa"},
+          {"op": "constant", "value": 4}
+        ]
+      }
+    },
+    "resources": [
+      {"id": "hp", "source": "hp"},
+      {"id": "ling_li", "source": "special_stat", "stat": "ling_li"}
+    ],
+    "actions": [
+      {
+        "id": "spell:fireball",
+        "kind": "ability",
+        "name": "火球术",
+        "costs": [
+          {"resource": "ling_li", "amount": {"op": "constant", "value": 10}}
+        ],
+        "effects": [
+          {
+            "kind": "damage",
+            "damage_type": "fire",
+            "amount": {
+              "op": "multiply",
+              "args": [
+                {"op": "attribute", "id": "wu_xing"},
+                {"op": "constant", "value": 3}
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "technique:escape_light",
+        "kind": "ability",
+        "name": "遁术·轻身",
+        "costs": [
+          {"resource": "ling_li", "amount": {"op": "constant", "value": 5}}
+        ],
+        "effects": [
+          {
+            "kind": "modify_stat",
+            "resource": "action_speed",
+            "duration": 2,
+            "amount": {"op": "constant", "value": 40}
+          }
+        ]
+      }
+    ]
+  }
+}

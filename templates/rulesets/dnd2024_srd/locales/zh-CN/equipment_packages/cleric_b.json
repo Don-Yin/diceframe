@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "equipment_package",
+    "id": "cleric_b"
+  },
+  "fields": {
+    "name": "牧师装备 B（110 GP）"
+  }
+}

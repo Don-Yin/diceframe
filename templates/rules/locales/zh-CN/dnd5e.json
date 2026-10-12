@@ -1,0 +1,10 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {"kind": "rule", "id": "dnd5e"},
+  "rule": {"rule_name": "D&D 5e 轻量规则", "description": "基于龙与地下城第五版 SRD 风格的轻量辅助规则。"},
+  "attributes": {"str": {"name": "力量"}, "dex": {"name": "敏捷"}, "con": {"name": "体质"}, "int": {"name": "智力"}, "wis": {"name": "感知"}, "cha": {"name": "魅力"}},
+  "classes": {"barbarian": {"name": "野蛮人", "description": "狂怒的近战战士"}, "bard": {"name": "吟游诗人"}, "cleric": {"name": "牧师"}, "druid": {"name": "德鲁伊"}, "fighter": {"name": "战士"}, "monk": {"name": "武僧"}, "paladin": {"name": "圣骑士"}, "ranger": {"name": "游侠"}, "rogue": {"name": "游荡者"}, "sorcerer": {"name": "术士"}, "warlock": {"name": "邪术师"}, "wizard": {"name": "法师"}},
+  "items": {"dagger": {"name": "匕首"}, "shortsword": {"name": "短剑"}, "longsword": {"name": "长剑"}, "scimitar": {"name": "弯刀"}, "rapier": {"name": "细剑"}, "greatsword": {"name": "巨剑"}, "greataxe": {"name": "巨斧"}, "mace": {"name": "钉头锤"}, "warhammer": {"name": "战锤"}, "quarterstaff": {"name": "短棍"}, "longbow": {"name": "长弓"}, "shortbow": {"name": "短弓"}, "leather_armor": {"name": "皮甲"}, "chain_mail": {"name": "链甲"}, "shield": {"name": "盾牌"}, "wooden_shield": {"name": "木盾"}, "arcane_focus": {"name": "法器"}},
+  "skills": {"athletics": {"aliases": ["运动", "力量"]}, "acrobatics": {"aliases": ["杂技", "体操"]}, "stealth": {"aliases": ["潜行", "隐匿"]}, "perception": {"aliases": ["察觉", "感知"]}, "arcana": {"aliases": ["奥秘"]}, "insight": {"aliases": ["洞察"]}}
+}

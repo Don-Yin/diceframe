@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "item",
+    "id": "dungeoneer_pack"
+  },
+  "fields": {
+    "name": "Dungeoneer's Pack"
+  }
+}

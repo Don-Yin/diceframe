@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "barbarian_a",
+  "source_ref": "srd-5.2.1:p28:barbarian_a",
+  "automation_level": "deterministic",
+  "category": "class",
+  "item_refs": [
+    "item:greataxe",
+    "item:handaxe",
+    "item:explorer_pack"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:greataxe",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:handaxe",
+      "quantity": 4
+    },
+    {
+      "item_ref": "item:explorer_pack",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 15
+}

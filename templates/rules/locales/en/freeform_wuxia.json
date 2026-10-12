@@ -1,0 +1,115 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "rule",
+    "id": "freeform_wuxia"
+  },
+  "rule": {
+    "rule_name": "Wuxia/Xianxia Freeform",
+    "description": "A lightweight freeform rule for an alternate wuxia/xianxia world.",
+    "attr_hint": "Attributes use 3-18 values; 10 is roughly average. Internal arts, agility, and insight scale with the corresponding attributes.",
+    "skill_hint": "Skills may be martial techniques, lightness arts, medicine/poison, or jianghu methods. Write as \"Skill Name (20-80)\"; higher values mean deeper mastery.",
+    "gm_prompt_appendix": "You are the GM of an alternate wuxia/xianxia world. Jianghu feuds, sect conflicts, cultivation and immortality-seeking, demon slaying-a world full of chivalry and serendipity. Players can roam the jianghu freely, join a sect, challenge masters, and explore secret realms. Mind the consumption and recovery of Qi; lightness arts can cross terrain obstacles.",
+    "difficulty_instructions": {
+      "轻松": "Weaker foes, friendly sects, ample opportunities",
+      "标准": "The jianghu is dangerous but fair; training and strategy needed",
+      "硬核": "Powerful foes surround you, high risk of cultivation deviation, wounds heal slowly"
+    },
+    "currency": "Spirit Stone"
+  },
+  "attributes": {
+    "str": {
+      "name": "Strength"
+    },
+    "dex": {
+      "name": "Dexterity"
+    },
+    "con": {
+      "name": "Constitution"
+    },
+    "int": {
+      "name": "Intelligence"
+    },
+    "wis": {
+      "name": "Wisdom"
+    },
+    "cha": {
+      "name": "Charisma"
+    }
+  },
+  "classes": {
+    "swordsman": {
+      "name": "Swordsman",
+      "description": "A warrior who follows the Way of the Sword"
+    },
+    "daoist": {
+      "name": "Daoist",
+      "description": "A practitioner of Daoist arts and talismans"
+    },
+    "assassin": {
+      "name": "Assassin",
+      "description": "A hidden-weapons master in the shadows"
+    },
+    "wanderer": {
+      "name": "Wanderer",
+      "description": "A wandering champion of justice"
+    }
+  },
+  "special_stats": {
+    "qi": {
+      "name": "Qi",
+      "description": "Using internal arts and lightness arts consumes Qi; meditation and rest restore it."
+    }
+  },
+  "skills": {
+    "sword_control": {
+      "name": "Sword Control"
+    },
+    "sword_aura": {
+      "name": "Sword Aura"
+    },
+    "sword_shield": {
+      "name": "Sword Shield"
+    },
+    "parry_break": {
+      "name": "Parry Break"
+    },
+    "exorcism": {
+      "name": "Exorcism"
+    },
+    "talismans": {
+      "name": "Talismans"
+    },
+    "alchemy": {
+      "name": "Alchemy"
+    },
+    "qi_sight": {
+      "name": "Qi Sight"
+    },
+    "hidden_weapons": {
+      "name": "Hidden Weapons"
+    },
+    "lightness_arts": {
+      "name": "Lightness Arts"
+    },
+    "poisons": {
+      "name": "Poisons"
+    },
+    "disguise": {
+      "name": "Disguise"
+    },
+    "staff_arts": {
+      "name": "Staff Arts"
+    },
+    "tracking": {
+      "name": "Tracking"
+    },
+    "healing": {
+      "name": "Healing"
+    },
+    "persuasion": {
+      "name": "Persuasion"
+    }
+  }
+}

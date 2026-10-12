@@ -1,0 +1,59 @@
+/* Alignment sweep: compact reference controls never collapse into vertical text. */
+.memory-page .memory-search {
+  flex-wrap: nowrap;
+}
+
+.memory-page .memory-search input {
+  width: clamp(220px, 24vw, 320px);
+  min-width: 220px;
+  min-height: 38px;
+}
+
+.memory-page .memory-search button {
+  flex: 0 0 auto;
+  min-width: 58px;
+  min-height: 38px;
+  padding-inline: 11px;
+  white-space: nowrap;
+}
+
+.reference-logs-page .log-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.reference-logs-page .log-toolbar select {
+  width: 82px;
+  min-width: 82px;
+  min-height: 34px;
+}
+
+.lorebook-page .lore-language-filter {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.lorebook-page .lore-language-filter > span {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.lorebook-page .lore-language-filter > select {
+  min-width: 106px;
+}
+
+@media (max-width: 760px) {
+  .memory-page .memory-search {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .memory-page .memory-search input {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
+}

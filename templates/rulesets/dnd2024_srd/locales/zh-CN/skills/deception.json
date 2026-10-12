@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "deception"
+  },
+  "fields": {
+    "name": "欺瞒",
+    "summary": "说服他人相信谎言，或可信地伪装身份。"
+  }
+}

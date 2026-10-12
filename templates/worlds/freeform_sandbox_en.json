@@ -1,0 +1,13 @@
+{
+  "world_id": "freeform_sandbox_en",
+  "world_name": "Freeform Sandbox",
+  "description": "A blank world with no preset era, location, factions, or NPCs. Players and the GM build it together from their character concepts.",
+  "language": "en",
+  "sandbox": true,
+  "world_setting": "",
+  "starter_scene": "",
+  "suggested_difficulty": "Freeform",
+  "default_rule": "tavern_free",
+  "starter_lorebook": [],
+  "item_categories": {"equipment": [], "consumable": [], "misc": []}
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "bundle_id": "core:dnd2024-srd",
+  "runtime_id": "core:dnd2024",
+  "ruleset_version": "0.1.0",
+  "content_version": "srd-5.2.1+r5",
+  "default_locale": "zh-CN",
+  "supported_locales": [
+    "zh-CN",
+    "en"
+  ],
+  "license": {
+    "id": "CC-BY-4.0",
+    "attribution": "legal/ATTRIBUTION.md"
+  }
+}

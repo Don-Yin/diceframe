@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "background",
+  "id": "criminal",
+  "source_ref": "srd-5.2.1:p83:criminal",
+  "automation_level": "deterministic",
+  "ability_refs": [
+    "ability:dex",
+    "ability:con",
+    "ability:int"
+  ],
+  "skill_refs": [
+    "skill:sleight_of_hand",
+    "skill:stealth"
+  ],
+  "tool_proficiency_refs": [
+    "tool:thieves_tools"
+  ],
+  "feat_ref": "feat:alert",
+  "equipment_package_refs": [
+    "equipment_package:criminal_a",
+    "equipment_package:criminal_b"
+  ]
+}

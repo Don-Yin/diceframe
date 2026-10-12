@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "species",
+    "id": "human"
+  },
+  "fields": {
+    "name": "人类",
+    "summary": "灵活多才：长休获得英雄激励，并额外选择一项技能熟练与一项起源专长。"
+  }
+}

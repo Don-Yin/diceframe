@@ -1,0 +1,92 @@
+name: Publish Docker Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Explicit image tag, for example 2.3.0 or 2.3.0-beta.1"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  ghcr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Prepare image tags
+        id: meta
+        shell: bash
+        run: |
+          owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          version="${{ inputs.version }}"
+          update_latest="false"
+          version="${version#v}"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid image version: ${version}" >&2
+            exit 1
+          fi
+          if [[ "${version}" == *-* ]]; then
+            update_latest="false"
+          fi
+          ghcr_image="ghcr.io/${owner}/diceframe"
+          dockerhub_image="docker.io/falconku/diceframe"
+          tags="${ghcr_image}:${version},${dockerhub_image}:${version}"
+          if [[ "${update_latest}" == "true" ]]; then
+            tags="${tags},${ghcr_image}:latest,${dockerhub_image}:latest"
+          fi
+          {
+            echo "version=${version}"
+            echo "tags=${tags}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Download existing release seed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.meta.outputs.version }}"
+          mkdir -p dist/source
+          gh release download "v${version}" \
+            --pattern "DiceFrame-v${version}-docker-update-linux-amd64.zip" \
+            --pattern "SHA256SUMS" \
+            --dir dist/source
+          archive="dist/source/DiceFrame-v${version}-docker-update-linux-amd64.zip"
+          (cd dist/source && sha256sum --check --ignore-missing SHA256SUMS)
+          python scripts/validate_docker_update.py "$archive" --version "$version"
+          cp "$archive" dist/docker-update.zip
+          (cd dist && sha256sum docker-update.zip | sed 's/  docker-update\.zip$/  update.zip/' > docker-update.sha256)
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          target: managed-artifact
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}

@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "quick_character_preset",
+    "id": "lucky_scout"
+  },
+  "fields": {
+    "name": "幸运斥候",
+    "summary": "半身人游荡者，擅长潜行、调查与一次精准的偷袭。",
+    "recommendation_reason": "如果你喜欢观察环境、寻找机会并在关键时刻出手，这个构筑能让技能和战斗都很有参与感。"
+  }
+}

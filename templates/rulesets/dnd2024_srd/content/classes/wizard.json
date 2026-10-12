@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "kind": "class",
+  "id": "wizard",
+  "source_ref": "srd-5.2.1:p77:wizard-core-traits",
+  "class_progression_ref": "progression_catalog:srd_classes",
+  "automation_level": "guided",
+  "hit_die": 6,
+  "fixed_hp_per_level": 4,
+  "spellcasting_ability": "int",
+  "recommended_spell_choices": {
+    "cantrip_ids": ["light", "mage_hand", "ray_of_frost"],
+    "spellbook_ids": ["detect_magic", "feather_fall", "mage_armor", "magic_missile", "sleep", "thunderwave"],
+    "prepared_spell_ids": ["detect_magic", "mage_armor", "magic_missile", "sleep"]
+  },
+  "primary_ability_refs": [
+    "ability:int"
+  ],
+  "saving_throw_refs": [
+    "ability:int",
+    "ability:wis"
+  ],
+  "skill_choice": {
+    "count": 2,
+    "allowed_refs": [
+      "skill:arcana",
+      "skill:history",
+      "skill:insight",
+      "skill:investigation",
+      "skill:medicine",
+      "skill:nature",
+      "skill:religion"
+    ]
+  },
+  "armor_proficiencies": [],
+  "weapon_proficiencies": [
+    "simple"
+  ],
+  "equipment_package_refs": [
+    "equipment_package:wizard_a",
+    "equipment_package:wizard_b"
+  ],
+  "recommended_standard_array": {
+    "str": 8,
+    "dex": 12,
+    "con": 13,
+    "int": 15,
+    "wis": 14,
+    "cha": 10
+  },
+  "level_1_feature_ids": [
+    "ritual_adept",
+    "arcane_recovery",
+    "spellcasting"
+  ],
+  "experience": {
+    "difficulty": "advanced"
+  }
+}

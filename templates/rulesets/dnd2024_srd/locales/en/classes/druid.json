@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "class",
+    "id": "druid"
+  },
+  "fields": {
+    "name": "Druid",
+    "summary": "A nature spellcaster with control, healing, and transformation tools and a broad choice set."
+  }
+}

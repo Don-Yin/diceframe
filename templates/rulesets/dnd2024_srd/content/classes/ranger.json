@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "class",
+  "id": "ranger",
+  "source_ref": "srd-5.2.1:p57:ranger-core-traits",
+  "class_progression_ref": "progression_catalog:srd_classes",
+  "automation_level": "guided",
+  "hit_die": 10,
+  "fixed_hp_per_level": 6,
+  "spellcasting_ability": "wis",
+  "recommended_spell_choices": {
+    "cantrip_ids": [],
+    "prepared_spell_ids": ["cure_wounds", "ensnaring_strike"]
+  },
+  "primary_ability_refs": [
+    "ability:dex",
+    "ability:wis"
+  ],
+  "saving_throw_refs": [
+    "ability:str",
+    "ability:dex"
+  ],
+  "skill_choice": {
+    "count": 3,
+    "allowed_refs": [
+      "skill:animal_handling",
+      "skill:athletics",
+      "skill:insight",
+      "skill:investigation",
+      "skill:nature",
+      "skill:perception",
+      "skill:stealth",
+      "skill:survival"
+    ]
+  },
+  "armor_proficiencies": [
+    "light",
+    "medium",
+    "shield"
+  ],
+  "weapon_proficiencies": [
+    "simple",
+    "martial"
+  ],
+  "equipment_package_refs": [
+    "equipment_package:ranger_a",
+    "equipment_package:ranger_b"
+  ],
+  "recommended_standard_array": {
+    "str": 12,
+    "dex": 15,
+    "con": 13,
+    "int": 8,
+    "wis": 14,
+    "cha": 10
+  },
+  "level_1_feature_ids": [
+    "favored_enemy",
+    "spellcasting",
+    "weapon_mastery"
+  ],
+  "experience": {
+    "difficulty": "intermediate"
+  }
+}

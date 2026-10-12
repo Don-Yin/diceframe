@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "athletics"
+  },
+  "fields": {
+    "name": "运动",
+    "summary": "攀爬、跳跃、游泳或以蛮力突破障碍。"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "skill",
+    "id": "performance"
+  },
+  "fields": {
+    "name": "Performance",
+    "summary": "Act, tell a story, play music, or dance for an audience."
+  }
+}

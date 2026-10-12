@@ -1,0 +1,37 @@
+{
+  "locale_schema_version": 1,
+  "locale": "ja",
+  "target": {
+    "kind": "rule",
+    "id": "tavern_free"
+  },
+  "rule": {
+    "rule_name": "酒場フリーRP",
+    "description": "ダイスも属性も使わない、純粋な物語ロールプレイモード。酒場で卓を囲むように自由に会話します。",
+    "attr_hint": "酒場モードでは属性の割り振りは不要です。キャラクターの設定をそのまま書いてください。",
+    "skill_hint": "得意なことを1〜5個書いてください。描写用のみで、数値による判定は行いません。",
+    "currency": "金貨"
+  },
+  "classes": {
+    "adventurer": {
+      "name": "冒険者",
+      "description": "自由な冒険者"
+    },
+    "merchant": {
+      "name": "商人",
+      "description": "旅商人"
+    },
+    "bard": {
+      "name": "吟遊詩人",
+      "description": "吟遊詩人"
+    },
+    "mercenary": {
+      "name": "傭兵",
+      "description": "雇われの戦士"
+    },
+    "scholar": {
+      "name": "学者",
+      "description": "遊学の学者"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "species",
+    "id": "halfling"
+  },
+  "fields": {
+    "name": "Halfling",
+    "summary": "Brave and lucky, able to move through larger creatures' spaces and hide behind allies."
+  }
+}

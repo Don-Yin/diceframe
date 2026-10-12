@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "skill",
+    "id": "medicine"
+  },
+  "fields": {
+    "name": "Medicine",
+    "summary": "Diagnose an illness or determine the nature of an injury or death."
+  }
+}

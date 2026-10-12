@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "skill",
+    "id": "history"
+  },
+  "fields": {
+    "name": "History",
+    "summary": "Recall historical events, people, nations, and cultures."
+  }
+}

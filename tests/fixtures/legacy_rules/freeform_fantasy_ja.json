@@ -1,0 +1,54 @@
+{
+  "language": "ja",
+  "extends": "base_d20",
+  "rule_version": "1.2",
+  "rule_id": "freeform_fantasy",
+  "scene_image": {"kind": "builtin", "id": "freeform_fantasy"},
+  "rule_name": "クラシックファンタジー・フリーフォーム",
+  "rule_name_en": "Classic Fantasy Freeform",
+  "description": "D&D を基にした軽量な剣と魔法のフリーフォームルール。",
+  "attributes": [
+    {"key": "str", "name": "筋力", "min": 3, "max": 18},
+    {"key": "dex", "name": "敏捷力", "min": 3, "max": 18},
+    {"key": "con", "name": "耐久力", "min": 3, "max": 18},
+    {"key": "int", "name": "知力", "min": 3, "max": 18},
+    {"key": "wis", "name": "判断力", "min": 3, "max": 18},
+    {"key": "cha", "name": "魅力", "min": 3, "max": 18}
+  ],
+  "special_stats": [],
+  "attribute_points": 60,
+  "attr_hint": "属性は3〜18の値を使います。10が凡人の平均で、14以上なら明確な才能を意味します。点数を集中させると弱点もはっきりします。",
+  "dice_system": "d20",
+  "combat_model": "hp_based",
+  "hp_formula": "5 + con * 3",
+  "valid_qualities": ["common", "uncommon", "rare", "legendary"],
+  "max_skills": 3,
+  "skill_point_total": 200,
+  "max_skill_value": 80,
+  "skill_mode": "narrative",
+  "skill_hint": "スキルは GM にキャラクターの得意分野を示します。「スキル名（20-80）」のように書くか、名前だけでも構いません。値が高いほど、描写や判定で信頼できます。",
+  "currency": "金貨",
+  "item_categories": {
+    "equipment": ["剣","弓","杖","短剣","シミター","大剣","槍","メイス","ウォーハンマー","盾","革鎧","チェインメイル","プレートアーマー","ローブ","ブーツ","手袋","兜","マント","腕甲","ネックレス","指輪","鎧","ボディアーマー","胸甲","脛当て","腕当て","肩甲"],
+    "consumable": ["薬","巻物","エリクサー","食料","包帯","解毒薬","爆弾","お守り","たいまつ","矢","弩矢"],
+    "misc": ["鍵","地図","手紙","印章","石","宝石","水晶","本","ノート","徽章","リュック","ロープ","ランタン"]
+  },
+  "classes": [
+    {"name": "戦士", "description": "前線で戦う近接戦闘の専門家", "starter_equipment": ["鉄の剣", "革鎧"]},
+    {"name": "魔術師", "description": "秘術の呪文使い", "starter_equipment": ["杖", "魔法書"]},
+    {"name": "レンジャー", "description": "射撃と追跡の専門家", "starter_equipment": ["長弓", "矢×20"]},
+    {"name": "盗賊", "description": "隠密と鍵開けの達人", "starter_equipment": ["短剣", "ピッキングツール"]}
+  ],
+  "skill_pools": {
+    "戦士": ["重撃", "防御の構え", "突撃"],
+    "魔術師": ["火球術", "魔法の盾", "魔法知識"],
+    "レンジャー": ["精密射撃", "追跡", "自然感知"],
+    "盗賊": ["隠密", "鍵開け", "不意打ち"]
+  },
+  "gm_prompt_appendix": "あなたはクラシックファンタジーの世界のGMです。世界は魔法とモンスター、冒険に満ちています。プレイヤーは自由にダンジョンを探索し、NPCと交流し、謎を解くことができます。戦闘はd20判定システムを使用します。",
+  "difficulty_instructions": {
+    "轻松": "簡単な戦闘、豊富な資源、友好的なNPC",
+    "标准": "挑戦的だが公平、資源は限られており、戦略が必要",
+    "硬核": "資源は乏しく、敵は手強い、キャラクターが永久に死亡する可能性がある"
+  }
+}

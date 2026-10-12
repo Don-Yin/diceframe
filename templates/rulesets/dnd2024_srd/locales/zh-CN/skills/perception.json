@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "perception"
+  },
+  "fields": {
+    "name": "察觉",
+    "summary": "综合感官发现容易被忽略的事物。"
+  }
+}

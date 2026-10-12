@@ -1,0 +1,219 @@
+"""Platform-neutral DiceFrame command predicates."""
+
+from __future__ import annotations
+
+import re
+
+
+def is_help(text: str) -> bool:
+    return text.strip().lower() in {"帮助", "help", "?", "？", "怎么玩", "新手", "开始", "指令"}
+
+
+def is_character_create(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    return normalized in {
+        "新建角色", "创建角色", "车卡", "建卡", "角色创建", "我要建卡",
+        "new character", "create character", "character creation", "character",
+    }
+
+
+def is_ai_character_create(text: str) -> bool:
+    normalized = re.sub(r"\s+", "", text.strip().lower())
+    return normalized in {
+        "ai车卡", "ai建卡", "ai新建角色", "ai创建角色",
+        "私聊车卡", "私聊建卡", "智能车卡", "辅助车卡",
+        "aicharacter", "aicharactergeneration", "generatecharacter",
+    }
+
+
+def is_invite(text: str) -> bool:
+    normalized = re.sub(r"\s+", "", text.strip().lower())
+    return normalized in {
+        "邀请", "邀请我", "私聊邀请我", "发我邀请",
+        "邀请链接", "链接", "网页入口", "加入链接", "分享",
+        "share", "invite", "inviteme",
+    }
+
+
+def is_private_character_creation_request(text: str) -> bool:
+    compact = re.sub(r"\s+", "", str(text or "").strip().lower())
+    if not compact:
+        return False
+    return any(word in compact for word in {
+        "车卡", "建卡", "新建角色", "创建角色", "角色创建",
+        "ai车卡", "ai建卡", "角色草稿", "生成角色",
+        "newcharacter", "createcharacter", "charactergeneration", "characterdraft",
+    })
+
+
+def is_private_log(text: str) -> bool:
+    return text.strip().lower() in {
+        "感知", "我的感知", "私密感知", "悄悄话", "私密信息", "私聊记录",
+        "sense", "perception", "private log", "private info",
+    }
+
+
+def is_recap(text: str) -> bool:
+    return text.strip().lower() in {"前情", "前情提要", "提要", "剧情回顾", "剧情摘要", "剧情", "回顾", "recap", "summary"}
+
+
+def is_map(text: str) -> bool:
+    return text.strip().lower() in {"地图", "场景地图", "查看地图", "当前地图", "地点", "地点列表", "map"}
+
+
+def is_away(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    compact = normalized.replace(" ", "")
+    return (
+        any(word in compact for word in {"暂离", "下线", "挂机"})
+        or normalized in {"离开", "afk", "away"}
+        or normalized.startswith(("away ", "afk "))
+    )
+
+
+def is_return(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    compact = normalized.replace(" ", "")
+    return (
+        any(word in compact for word in {"回来", "归队", "上线"})
+        or normalized in {"return", "back"}
+        or normalized.startswith(("return ", "back "))
+    )
+
+
+def away_target_query(text: str) -> str:
+    raw = str(text or "").strip()
+    raw = re.sub(r"^(让|标记)?\s*", "", raw)
+    raw = re.sub(r"^(暂离|离开|下线|挂机|回来|归队|上线)\s*", "", raw)
+    raw = re.sub(r"\s*(暂离|离开|下线|挂机|回来|归队|上线)$", "", raw)
+    raw = re.sub(r"^(away|afk|return|back)\s+", "", raw, flags=re.IGNORECASE)
+    return raw.strip()
+
+
+# 托管指令必须用 startswith 判定：日常叙事里「托管」不会出现在句首，
+# 而 GM 指令总是以动词开头。取消托管必须先于托管判定（前者包含后者）。
+def is_host_ai(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(text or "").strip().lower())
+    compact = normalized.replace(" ", "")
+    return compact.startswith(("托管", "交给ai", "设为ai", "让ai接管", "ai托管")) or normalized.startswith(
+        ("host ", "ai host ")
+    )
+
+
+def is_stop_hosting(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(text or "").strip().lower())
+    compact = normalized.replace(" ", "")
+    return compact.startswith(
+        ("取消托管", "停止托管", "解除托管", "收回托管", "交回真人", "停止ai托管", "取消ai托管")
+    ) or normalized.startswith(("unhost ", "stop host ", "stop hosting "))
+
+
+def hosting_target_query(text: str) -> str:
+    raw = str(text or "").strip()
+    raw = re.sub(r"^(请|把|让|给)?\s*", "", raw)
+    raw = re.sub(
+        r"^(取消托管|取消ai托管|停止托管|停止ai托管|解除托管|收回托管|交回真人|"
+        r"托管|交给ai|设为ai|让ai接管|ai托管)\s*",
+        "",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    raw = re.sub(r"^(unhost|stop hosting|stop host|ai host|host)\s+", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\s*(托管|取消托管|host|unhost)$", "", raw, flags=re.IGNORECASE)
+    return raw.strip()
+
+
+def is_advance(text: str) -> bool:
+    normalized = re.sub(r"\s+", "", text.strip().lower())
+    return normalized in {
+        "推进", "强制推进", "下一轮", "下回合", "进入下一轮", "进入下回合",
+        "推进剧情", "继续推进", "继续", "advance", "next", "nextround", "forceadvance",
+    }
+
+
+def advance_force(text: str) -> bool:
+    normalized = re.sub(r"\s+", "", text.strip().lower())
+    return normalized not in {"尝试推进", "普通推进", "advance"}
+
+
+def kp_question(text: str) -> str | None:
+    """Return the table-talk question, or ``None`` when this is a normal action.
+
+    Chinese accepts ``询问 <question>`` or ``询问: <question>``. English uses
+    the unambiguous ``ask kp <question>`` or ``ask: <question>`` forms so an
+    in-character action such as ``ask the guard ...`` remains an action.
+
+    Once an explicit command prefix is recognized, an empty remainder is
+    returned as ``""`` instead of falling back to the action pipeline.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+
+    chinese = re.match(r"^询问(?=$|\s|[:：])", raw)
+    if chinese:
+        remainder = raw[chinese.end():].lstrip()
+        if remainder.startswith((":", "：")):
+            remainder = remainder[1:].strip()
+        return remainder.strip()
+
+    ask_colon = re.match(r"^ask\s*[:：]", raw, flags=re.IGNORECASE)
+    if ask_colon:
+        return raw[ask_colon.end():].strip()
+
+    ask_kp = re.match(r"^ask\s+kp(?=$|\s|[:：])", raw, flags=re.IGNORECASE)
+    if ask_kp:
+        remainder = raw[ask_kp.end():].lstrip()
+        if remainder.startswith((":", "：")):
+            remainder = remainder[1:].strip()
+        return remainder.strip()
+
+    return None
+
+
+def luck_decision(text: str) -> bool | None:
+    """识别是否使用幸运；True=使用，False=保留失败。"""
+    normalized = re.sub(r"\s+", "", str(text or "").strip().lower())
+    if normalized in {
+        "幸运", "用幸运", "使用幸运", "消耗幸运", "花幸运",
+        "luck", "useluck", "spendluck",
+    } or normalized.startswith(("用幸运", "使用幸运", "消耗幸运", "花幸运", "useluck", "spendluck")):
+        return True
+    if normalized in {
+        "不用幸运", "不使用幸运", "保留失败", "接受失败", "放弃幸运",
+        "noluck", "declineluck", "keepfailure", "acceptfailure",
+    } or normalized.startswith(("不用幸运", "不使用幸运", "保留失败", "接受失败", "放弃幸运", "declineluck", "keepfailure")):
+        return False
+    return None
+
+
+def luck_index(text: str) -> int:
+    match = re.search(r"(\d+)", str(text or ""))
+    return max(1, int(match.group(1))) if match else 1
+
+
+def is_payment_list(text: str) -> bool:
+    return text.strip().lower() in {
+        "支付", "付款", "待支付", "待付款", "支付列表", "付款列表",
+        "pay", "payment", "payments", "pending payments",
+    }
+
+
+def payment_decision(text: str) -> bool | None:
+    normalized = re.sub(r"\s+", "", text.strip().lower())
+    if normalized in {
+        "确认支付", "同意支付", "支付确认", "确认付款", "同意付款", "付款确认",
+        "confirmpay", "confirmpayment", "acceptpay", "acceptpayment",
+    } or normalized.startswith(("确认支付", "同意支付", "确认付款", "同意付款", "confirmpay", "acceptpay")):
+        return True
+    if normalized in {
+        "拒绝支付", "取消支付", "支付拒绝", "拒绝付款", "取消付款", "付款拒绝",
+        "rejectpay", "rejectpayment", "declinepay", "declinepayment",
+    } or normalized.startswith(("拒绝支付", "取消支付", "拒绝付款", "取消付款", "rejectpay", "declinepay")):
+        return False
+    return None
+
+
+def payment_index(text: str) -> int:
+    match = re.search(r"(\d+)", text)
+    return max(1, int(match.group(1))) if match else 1

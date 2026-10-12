@@ -1,0 +1,6 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "scene", "id": "greymoor_mistbound_road"},
+  "fields": {"name": "Mistbound Road", "description": "A cold way-lantern, a stranded wagon, and fog swallowing the Greymoor road."}
+}

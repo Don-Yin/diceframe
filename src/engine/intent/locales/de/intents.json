@@ -1,0 +1,53 @@
+{
+  "purchase_intent": [
+    "kaufen",
+    "kaufe",
+    "kauft",
+    "kaufte",
+    "gekauft",
+    "bezahlen",
+    "bezahle",
+    "bezahlt",
+    "zahlen",
+    "zahle",
+    "gezahlt",
+    "ausgeben",
+    "mieten",
+    "bestellen"
+  ],
+  "purchase_confirm": [
+    "abgemacht",
+    "akzeptieren",
+    "akzeptiert",
+    "bestätigen",
+    "bestätigt",
+    "ich nehme es",
+    "einverstanden",
+    "passt",
+    "bezahle",
+    "kaufe es"
+  ],
+  "purchase_offer": [
+    "kostet",
+    "preis",
+    "gebühr",
+    "kosten"
+  ],
+  "free_purchase": [
+    "kostenlos",
+    "gratis",
+    "umsonst"
+  ],
+  "deferred_payment": [
+    "später bezahlen",
+    "auf kredit",
+    "anschreiben",
+    "borgen"
+  ],
+  "currency_labels": [
+    "gold",
+    "goldstück",
+    "goldstücke",
+    "kreditpunkte"
+  ]
+}

@@ -1,0 +1,169 @@
+/* Log reader: persistent campaign index + document reading surface. */
+.logs-workspace {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.log-index {
+  position: sticky;
+  top: 86px;
+  align-self: start;
+  min-height: min(720px, calc(100dvh - 112px));
+  padding: 13px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-lg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--df-canvas-glow) 28%, transparent), transparent 34%),
+    var(--df-surface-1);
+  box-shadow: var(--df-shadow);
+}
+
+.log-campaign-card {
+  display: grid;
+  gap: 8px;
+  min-height: 190px;
+  padding: 88px 13px 13px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background:
+    linear-gradient(180deg, transparent 18%, var(--df-surface-2) 65%),
+    radial-gradient(circle at 70% 18%, color-mix(in srgb, var(--df-accent) 24%, transparent), transparent 24%),
+    linear-gradient(135deg, var(--df-canvas-glow), var(--df-surface-raised));
+}
+
+.log-index-kicker {
+  color: var(--df-accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.log-campaign-card h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.log-campaign-card p,
+.log-campaign-card small {
+  margin: 0;
+  overflow: hidden;
+  color: var(--df-text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-index-tabs {
+  display: grid;
+  gap: 5px;
+  margin: 14px 0 0;
+  border: 0;
+  background: transparent;
+}
+
+.log-index-tabs button {
+  justify-content: flex-start;
+  min-height: 44px;
+  padding-inline: 13px;
+  border: 1px solid transparent;
+  border-radius: var(--df-radius-md);
+  text-align: left;
+}
+
+.log-index-tabs button.active {
+  border-color: color-mix(in srgb, var(--df-interactive) 48%, transparent);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--df-interactive) 18%, var(--df-control-bg)), transparent);
+  box-shadow: inset 3px 0 0 var(--df-interactive);
+}
+
+.log-index-meta {
+  display: grid;
+  gap: 5px;
+  margin-top: 14px;
+  padding: 12px 5px;
+  border-top: 1px solid var(--df-border-soft);
+  color: var(--df-text-muted);
+  font-size: 10px;
+}
+
+.logs-document {
+  min-width: 0;
+  padding: 0 10px 20px;
+  border-radius: var(--df-radius-lg);
+  background:
+    radial-gradient(circle at 80% 0, color-mix(in srgb, var(--df-accent) 5%, transparent), transparent 34%),
+    linear-gradient(180deg, color-mix(in srgb, var(--df-surface-1) 34%, transparent), transparent);
+}
+
+.logs-document .lore-system {
+  margin-top: 0;
+}
+
+.logs-document .log-toolbar {
+  justify-content: flex-end;
+  margin: 0 0 10px;
+}
+
+.logs-page .log-reader {
+  gap: 11px;
+}
+
+.logs-page .log-reader article {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--df-accent) 28%, var(--df-border-soft));
+  background: color-mix(in srgb, var(--df-surface-1) 88%, transparent);
+}
+
+.logs-page .log-reader article h2 {
+  margin: 0;
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--df-border-soft);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--df-accent) 8%, transparent), transparent);
+  font-size: 15px;
+}
+
+.logs-page .log-entry-body {
+  padding: 13px 20px 18px;
+}
+
+.logs-page .log-expand {
+  margin: 0 20px 15px;
+}
+
+@media (max-width: 900px) {
+  .logs-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .log-index {
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(190px, 1fr);
+    gap: 10px;
+    min-height: 0;
+  }
+
+  .log-campaign-card {
+    min-height: 130px;
+    padding-top: 48px;
+    grid-row: 1 / 3;
+  }
+
+  .log-index-tabs,
+  .log-index-meta {
+    margin: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .log-index { grid-template-columns: minmax(0, 1fr); }
+  .log-campaign-card { grid-row: auto; min-height: 122px; }
+  .log-index-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .log-index-tabs button { justify-content: center; }
+  .logs-document { padding-inline: 0; }
+  .logs-page .log-entry-body { padding-inline: 14px; }
+}

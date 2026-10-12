@@ -1,0 +1,154 @@
+import { computed, ref, type Ref } from 'vue'
+import { errorMessage } from '@/api/client'
+import { pluginApi } from '@/api/plugins'
+import { useLocale } from '@/composables/useLocale'
+import { useToast } from '@/composables/useToast'
+import type { MessageKey } from '@/i18n'
+import type { PluginContentResource } from '@/api/types'
+
+const CONTENT_GROUPS = [
+  { key: 'character_template', labelKey: 'contentGroupCharacterTemplate' },
+  { key: 'npc', labelKey: 'contentGroupNpc' },
+  { key: 'item', labelKey: 'contentGroupItem' },
+  { key: 'spell', labelKey: 'contentGroupSpell' },
+  { key: 'class', labelKey: 'contentGroupClass' },
+] satisfies { key: string; labelKey: MessageKey }[]
+
+export function usePluginContent(busy: Ref<string>) {
+  const toast = useToast()
+  const { t } = useLocale()
+  const contentResources = ref<Record<string, PluginContentResource[]>>({})
+  const lorebooks = ref<Array<{ id?: string; name?: string }>>([])
+  const contentLoading = ref(false)
+  const contentTargetBookId = ref('')
+
+  const contentGroups = computed(() => CONTENT_GROUPS.map(group => ({
+    ...group,
+    items: contentResources.value[group.key] || [],
+  })))
+
+  // 按插件分组的资源：每个插件一个折叠项，内部再按类型分
+  const contentByPlugin = computed(() => {
+    const plugins = new Map<string, {
+      plugin_id: string
+      plugin_name: string
+      groups: { key: string; labelKey: MessageKey; items: PluginContentResource[] }[]
+    }>()
+    for (const group of CONTENT_GROUPS) {
+      for (const item of contentResources.value[group.key] || []) {
+        const pid = String(item.plugin_id || 'unknown')
+        if (!plugins.has(pid)) {
+          plugins.set(pid, {
+            plugin_id: pid,
+            plugin_name: String(item.plugin_name || pid),
+            groups: CONTENT_GROUPS.map(g => ({ key: g.key, labelKey: g.labelKey, items: [] as PluginContentResource[] })),
+          })
+        }
+        const entry = plugins.get(pid)!
+        const target = entry.groups.find(g => g.key === group.key)!
+        target.items.push(item)
+      }
+    }
+    return [...plugins.values()].sort((a, b) => a.plugin_name.localeCompare(b.plugin_name))
+  })
+
+  const contentGroupCount = computed(() =>
+    Object.values(contentResources.value).reduce((sum, arr) => sum + (arr?.length || 0), 0),
+  )
+  const bookOptions = computed(() => (lorebooks.value || []).map(book => {
+    const id = String(book.id || '')
+    return {
+      label: String(book.name || id),
+      value: id,
+    }
+  }).filter(item => item.value))
+
+  async function loadContentResources() {
+    contentLoading.value = true
+    try {
+      const response = await pluginApi.content()
+      if (!response.ok) throw new Error(response.error || t('pluginContentLoadFailed'))
+      contentResources.value = response.resources || {}
+    } catch (error: unknown) {
+      toast.error(errorMessage(error))
+    } finally {
+      contentLoading.value = false
+    }
+  }
+
+  async function loadLorebooks() {
+    try {
+      const response = await pluginApi.lorebooks()
+      lorebooks.value = response.books || []
+      if (!contentTargetBookId.value && bookOptions.value.length) {
+        contentTargetBookId.value = String(bookOptions.value[0].value)
+      }
+    } catch (error: unknown) {
+      toast.error(errorMessage(error))
+    }
+  }
+
+  const contentTitle = (item: PluginContentResource) =>
+    String(item.character_name || item.name || item.id || t('unnamed'))
+
+  const contentSubtitle = (item: PluginContentResource) =>
+    [item.plugin_name || item.plugin_id || '', item.description || ''].filter(Boolean).join(' · ')
+
+  async function importContent(kind: string, item: PluginContentResource) {
+    if (kind !== 'character_template' && !contentTargetBookId.value) {
+      toast.error(t('selectLorebookTarget'))
+      return
+    }
+    const key = `${kind}:${item.plugin_id}:${item.id || item.name || item.character_name}`
+    busy.value = key
+    try {
+      const response = await pluginApi.importContent(
+        kind,
+        item.id,
+        item.plugin_id || '',
+        kind === 'character_template' ? '' : contentTargetBookId.value,
+      )
+      if (!response.ok) throw new Error(response.error || t('importFailed'))
+      toast.success(kind === 'character_template' ? t('importedCharacterLibrary') : t('importedLorebook'))
+    } catch (error: unknown) {
+      toast.error(errorMessage(error))
+    } finally {
+      busy.value = ''
+    }
+  }
+
+  async function importAllContent(pluginId: string) {
+    if (!contentTargetBookId.value) {
+      toast.error(t('selectLorebookTarget'))
+      return
+    }
+    busy.value = `import-all:${pluginId}`
+    try {
+      const response = await pluginApi.importAllContent(pluginId, contentTargetBookId.value)
+      if (!response.ok) throw new Error(response.error || t('importFailed'))
+      const imported = response.imported_count || 0
+      const errors = response.error_count || 0
+      toast.success(t('importedAllCount', { imported, errors }))
+      await loadContentResources()
+    } catch (error: unknown) {
+      toast.error(errorMessage(error))
+    } finally {
+      busy.value = ''
+    }
+  }
+
+  return {
+    contentGroups,
+    contentByPlugin,
+    contentGroupCount,
+    contentLoading,
+    contentTargetBookId,
+    bookOptions,
+    loadContentResources,
+    loadLorebooks,
+    contentTitle,
+    contentSubtitle,
+    importContent,
+    importAllContent,
+  }
+}

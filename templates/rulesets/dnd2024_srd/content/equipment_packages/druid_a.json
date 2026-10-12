@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "druid_a",
+  "source_ref": "srd-5.2.1:p41:druid_a",
+  "automation_level": "deterministic",
+  "category": "class",
+  "item_refs": [
+    "item:leather_armor",
+    "item:shield",
+    "item:sickle",
+    "item:druidic_focus_staff",
+    "item:explorer_pack",
+    "item:herbalism_kit"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:leather_armor",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:shield",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:sickle",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:druidic_focus_staff",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:explorer_pack",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:herbalism_kit",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 9
+}

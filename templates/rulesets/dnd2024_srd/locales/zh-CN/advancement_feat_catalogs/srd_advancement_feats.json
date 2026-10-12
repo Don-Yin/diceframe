@@ -1,0 +1,23 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {"kind": "advancement_feat_catalog", "id": "srd_advancement_feats"},
+  "fields": {
+    "name": "SRD 成长专长",
+    "labels": {
+      "ability_score_improvement": "属性值提升",
+      "grappler": "擒抱者",
+      "archery": "箭术",
+      "defense": "防御",
+      "great_weapon_fighting": "巨武器战斗",
+      "two_weapon_fighting": "双武器战斗",
+      "boon_of_combat_prowess": "战斗英勇恩惠",
+      "boon_of_dimensional_travel": "维度旅行恩惠",
+      "boon_of_fate": "命运恩惠",
+      "boon_of_irresistible_offense": "无阻攻势恩惠",
+      "boon_of_spell_recall": "法术回想恩惠",
+      "boon_of_the_night_spirit": "夜灵恩惠",
+      "boon_of_truesight": "真实视觉恩惠"
+    }
+  }
+}

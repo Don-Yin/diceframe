@@ -1,0 +1,28 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "feat",
+    "id": "magic_initiate_cleric"
+  },
+  "fields": {
+    "name": "魔法学徒（牧师）",
+    "summary": "从牧师法术列表选择两个戏法与一个一级法术，并选择施法关键属性。",
+    "labels": {
+      "spellcasting_ability": "施法关键属性",
+      "cantrips": "戏法（选择 2 个）",
+      "level_1_spell": "1 环法术（选择 1 个）",
+      "int": "智力", "wis": "感知", "cha": "魅力",
+      "guidance": "神导术", "light": "光亮术", "mending": "修复术",
+      "resistance": "抗力术", "sacred_flame": "圣火术",
+      "spare_the_dying": "维生术", "thaumaturgy": "奇术",
+      "bane": "灾祸术", "bless": "祝福术", "command": "命令术",
+      "create_or_destroy_water": "造水/枯水术", "cure_wounds": "疗伤术",
+      "detect_evil_and_good": "侦测善恶", "detect_magic": "侦测魔法",
+      "detect_poison_and_disease": "侦测毒性与疾病", "guiding_bolt": "曳光弹",
+      "healing_word": "治愈真言", "inflict_wounds": "致伤术",
+      "protection_from_evil_and_good": "防护善恶", "purify_food_and_drink": "净化食粮",
+      "sanctuary": "庇护术", "shield_of_faith": "虔诚护盾"
+    }
+  }
+}

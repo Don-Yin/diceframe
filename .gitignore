@@ -1,0 +1,60 @@
+# data/ 全部为运行时数据与 secrets（config/access_token/secrets/*.db/saves/plugins/sessions/bot/debug/tmp_cards 等），不入库
+data/
+# 联机测试的第二个实例数据副本，同样不入库
+data-test/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# 依赖目录（根目录曾被误提交 Vitest 缓存；frontend-v2 有自己的 .gitignore）
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 前端 build 产物
+static-v2/assets/
+static-v2/index.html
+static-v2/avatars/
+static-v2/ui/
+src/webui/assistant_knowledge_index.json
+
+# 运行日志
+*.log
+logs/
+
+# 调试临时文件
+_play_js.txt
+
+# 发布打包产物
+dist/
+
+# 临时审计数据
+.tmp_audit_data/
+.codex_tmp/
+.coverage
+
+# Claude Code 本地设置
+.claude/
+.claude/settings.local.json
+.claude/skills/
+.codex/
+docs/RELEASE_*.md
+docs/I18N_PLAN_*.md
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+
+# AI 编码助手的本地工作区（会话记录等），不入库
+.zcode/

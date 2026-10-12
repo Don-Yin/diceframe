@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "class",
+    "id": "sorcerer"
+  },
+  "fields": {
+    "name": "术士",
+    "summary": "以魅力施放天生魔法，爆发力强但生命值和法术资源需要谨慎管理。"
+  }
+}

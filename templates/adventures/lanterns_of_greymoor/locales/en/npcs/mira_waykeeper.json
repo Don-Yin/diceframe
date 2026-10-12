@@ -1,0 +1,6 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "npc", "id": "mira_waykeeper"},
+  "fields": {"name": "Mira", "description": "A young waykeeper worried about her missing mentor and the extinguished lanterns."}
+}

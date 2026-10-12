@@ -1,0 +1,20 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {"kind": "encounter_catalog", "id": "srd_training_encounters"},
+  "fields": {
+    "name": "SRD 新手战斗预设",
+    "labels": {
+      "presets": {
+        "goblin_patrol": {"name": "哥布林巡逻兵", "description": "一名能切换近战和远程武器的哥布林战士。"},
+        "crypt_pair": {"name": "地穴伏敌", "description": "一具骷髅与一头狼共同守卫着幽暗地穴。"}
+      },
+      "profiles": {
+        "goblin_warrior": "哥布林战士",
+        "skeleton": "骷髅",
+        "wolf": "狼"
+      },
+      "attacks": {"scimitar": "弯刀", "shortbow": "短弓", "shortsword": "短剑", "bite": "啃咬"}
+    }
+  }
+}

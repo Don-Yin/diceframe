@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "quick_character_preset",
+    "id": "woodland_guide"
+  },
+  "fields": {
+    "name": "Woodland Guide",
+    "summary": "A Wood Elf Ranger who combines scouting, ranged combat, and practical nature magic.",
+    "recommendation_reason": "Choose this if you want to spot danger, track clues, and contribute reliably in both exploration and combat."
+  }
+}

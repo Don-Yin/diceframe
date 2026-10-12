@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "species",
+    "id": "orc"
+  },
+  "fields": {
+    "name": "Orc",
+    "summary": "Dash as a Bonus Action for Temporary Hit Points and refuse to fall once when reduced to 0 HP."
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {"kind": "adventure", "id": "lanterns_of_greymoor"},
+  "fields": {
+    "tutorial": {
+      "name": "灰沼失灯记",
+      "summary": "一场围绕失踪路灯、旧圣坛与守灯人秘密展开的原创短冒险。调查线索、与米拉交涉、突破林地伏击，并决定真相如何被带回灰沼。",
+      "chapters": {
+        "missing_light": {"name": "第一章：失踪的路灯"},
+        "thorn_glade": {"name": "第二章：荆棘林地"},
+        "old_shrine": {"name": "第三章：旧圣坛"}
+      },
+      "steps": {
+        "mistbound_road": {
+          "title": "雾中的熄灯",
+          "narration": "灰沼驿道本该亮着的引路灯只剩冰冷灰烬。远处一辆货车歪在泥里，薄雾正吞没道路。",
+          "objective": "查明路灯为何熄灭，以及货车在雾中停下的原因。",
+          "hint": "灰烬和车辙都可能留下线索。"
+        },
+        "keepers_plea": {
+          "title": "守灯人米拉",
+          "narration": "年轻守灯人米拉从路边小屋跑来。她担心失踪的不只是灯芯，还有昨夜去旧圣坛巡查的导师。",
+          "objective": "取得米拉的信任，并确认导师失踪前的行动路线。",
+          "hint": "可以先安抚米拉，也可以直接追问时间与异常迹象。"
+        },
+        "read_the_trail": {
+          "title": "两条都说得通的路",
+          "narration": "泥地里有细小三趾足迹，树根间则残留着与路灯相似的微光。两条痕迹都指向荆棘林地。",
+          "objective": "沿足迹或路灯余辉找到进入荆棘林地的安全路线。",
+          "hint": "地面足迹和魔法余辉都指向林地深处。"
+        },
+        "thorn_ambush": {
+          "title": "荆棘林地伏击",
+          "narration": "林地中央，一个哥布林仆从正撬动圣坛石板。它发现了你，抓起武器挡在通往灯匣的路上。",
+          "objective": "击退伏击者并控制旧圣坛周围的林地。",
+          "hint": "敌人距你 25 尺；留意武器射程和剩余移动距离。"
+        },
+        "restore_the_lantern": {
+          "title": "圣坛下的真相",
+          "narration": "黄铜钥匙打开了石板下的灯匣。守灯人的导师曾把路灯能量引来封住危险裂隙，却没来得及告诉米拉。你可以只带回光，也可以把完整真相带回去。",
+          "objective": "决定只恢复路灯，还是同时把导师留下的真相告诉米拉。",
+          "hint": "考虑角色更重视眼前的安定、彼此的信任，还是完整的知情权。"
+        }
+      },
+      "choices": {
+        "inspect_cold_ash": {"label": "检查冰冷灰烬", "description": "寻找火焰为何反常熄灭。"},
+        "check_wagon_tracks": {"label": "检查货车与车辙", "description": "先确认这里发生过什么移动。"},
+        "reassure_mira": {"label": "先安抚米拉", "description": "承诺会把人和灯的消息带回来。"},
+        "ask_precise_questions": {"label": "询问精确细节", "description": "确认熄灯时间、导师路线和异常迹象。"},
+        "follow_small_tracks": {"label": "追踪三趾足迹", "description": "依靠地面痕迹穿过林地。"},
+        "follow_arcane_residue": {"label": "追踪微光残留", "description": "沿路灯能量的共鸣前进。"},
+        "secure_the_glade": {"label": "确认林地安全并搜索", "description": "战斗后检查圣坛周围。"},
+        "return_the_light": {"label": "先恢复路灯", "description": "让驿道尽快重新安全通行。"},
+        "share_the_truth": {"label": "恢复路灯并说明真相", "description": "把导师的决定与裂隙风险一并告诉米拉。"}
+      },
+      "entities": {
+        "clue:cold_silver_ash": {"title": "银白冷灰", "summary": "灰烬没有余温，像是光被从灯芯中抽走。"},
+        "clue:three_toed_tracks": {"title": "三趾足迹", "summary": "小型人形生物的足迹从货车旁通往荆棘林地。"},
+        "relationship:mira_trust": {"title": "米拉的信任", "summary": "守灯人米拉相信冒险者会认真寻找导师与路灯。"},
+        "task:recover_way_lantern": {"title": "找回引路灯", "summary": "查明路灯熄灭与守灯导师失踪的原因。"},
+        "fact:lantern_failed_at_midnight": {"title": "午夜熄灯", "summary": "米拉确认路灯在午夜同时熄灭，导师随后前往旧圣坛。"},
+        "clue:thorn_glade_route": {"title": "荆棘林地路线", "summary": "足迹绕过沼地，最终进入旧圣坛所在林地。"},
+        "clue:lantern_resonance": {"title": "路灯共鸣", "summary": "微光残留与林地深处的旧圣坛产生共鸣。"},
+        "item:brass_shrine_key": {"title": "黄铜圣坛钥匙", "summary": "从林地中找到的旧钥匙，可以打开圣坛石板下的灯匣。"},
+        "fact:greymoor_light_restored": {"title": "灰沼路灯复明", "summary": "路灯能量被送回驿道，夜路重新安全。"},
+        "fact:shrine_truth_shared": {"title": "圣坛真相公开", "summary": "米拉得知导师用路灯能量封印裂隙的完整原因。"}
+      }
+    }
+  }
+}

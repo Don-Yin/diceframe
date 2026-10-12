@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "rogue_a",
+  "source_ref": "srd-5.2.1:p61:rogue_a",
+  "automation_level": "deterministic",
+  "category": "class",
+  "item_refs": [
+    "item:leather_armor",
+    "item:dagger",
+    "item:shortsword",
+    "item:shortbow",
+    "item:arrows",
+    "item:quiver",
+    "item:thieves_tools",
+    "item:burglar_pack"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:leather_armor",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:dagger",
+      "quantity": 2
+    },
+    {
+      "item_ref": "item:shortsword",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:shortbow",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:arrows",
+      "quantity": 20
+    },
+    {
+      "item_ref": "item:quiver",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:thieves_tools",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:burglar_pack",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 8
+}

@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "quick_character_preset",
+    "id": "relentless_vanguard"
+  },
+  "fields": {
+    "name": "Relentless Vanguard",
+    "summary": "An Orc Barbarian who opens the way with Rage, high Hit Points, and forceful melee attacks.",
+    "recommendation_reason": "Choose this if you want few complicated decisions, a clear job each turn, and the durability to lead from the front."
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "class",
+  "id": "paladin",
+  "source_ref": "srd-5.2.1:p53:paladin-core-traits",
+  "class_progression_ref": "progression_catalog:srd_classes",
+  "automation_level": "guided",
+  "hit_die": 10,
+  "fixed_hp_per_level": 6,
+  "spellcasting_ability": "cha",
+  "recommended_spell_choices": {
+    "cantrip_ids": [],
+    "prepared_spell_ids": ["heroism", "searing_smite"]
+  },
+  "primary_ability_refs": [
+    "ability:str",
+    "ability:cha"
+  ],
+  "saving_throw_refs": [
+    "ability:wis",
+    "ability:cha"
+  ],
+  "skill_choice": {
+    "count": 2,
+    "allowed_refs": [
+      "skill:athletics",
+      "skill:insight",
+      "skill:intimidation",
+      "skill:medicine",
+      "skill:persuasion",
+      "skill:religion"
+    ]
+  },
+  "armor_proficiencies": [
+    "light",
+    "medium",
+    "heavy",
+    "shield"
+  ],
+  "weapon_proficiencies": [
+    "simple",
+    "martial"
+  ],
+  "equipment_package_refs": [
+    "equipment_package:paladin_a",
+    "equipment_package:paladin_b"
+  ],
+  "recommended_standard_array": {
+    "str": 15,
+    "dex": 10,
+    "con": 13,
+    "int": 8,
+    "wis": 12,
+    "cha": 14
+  },
+  "level_1_feature_ids": [
+    "lay_on_hands",
+    "spellcasting",
+    "weapon_mastery"
+  ],
+  "experience": {
+    "difficulty": "beginner"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "investigation"
+  },
+  "fields": {
+    "name": "调查",
+    "summary": "寻找隐晦资料，或推断事物如何运作。"
+  }
+}

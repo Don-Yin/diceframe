@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "kind": "quick_character_preset",
+  "id": "woodland_guide",
+  "source_ref": "diceframe-original:dnd2024-presets/woodland_guide",
+  "automation_level": "deterministic",
+  "draft": {
+    "class_ref": "class:ranger",
+    "species_ref": "species:elf",
+    "background_ref": "background:sage",
+    "species_size": "medium",
+    "species_choice_answers": {
+      "elven_lineage": "wood_elf",
+      "lineage_spellcasting_ability": "wis"
+    },
+    "species_skill_refs": [
+      "skill:insight"
+    ],
+    "class_skill_refs": [
+      "skill:animal_handling",
+      "skill:perception",
+      "skill:stealth"
+    ],
+    "equipment_package_ref": "equipment_package:ranger_a",
+    "background_equipment_package_ref": "equipment_package:sage_a",
+    "ability_method": "standard_array",
+    "base_abilities": {
+      "str": 12,
+      "dex": 15,
+      "con": 13,
+      "int": 8,
+      "wis": 14,
+      "cha": 10
+    },
+    "background_ability_bonuses": {
+      "wis": 2,
+      "con": 1
+    },
+    "feat_choice_answers": {
+      "feat:magic_initiate_wizard": {
+        "spellcasting_ability": ["wis"],
+        "cantrips": ["message", "mage_hand"],
+        "level_1_spell": ["find_familiar"]
+      }
+    },
+    "class_spell_choices": {
+      "cantrip_ids": [],
+      "prepared_spell_ids": ["cure_wounds", "ensnaring_strike"]
+    },
+    "language_refs": [
+      "language:common",
+      "language:elvish",
+      "language:gnomish"
+    ],
+    "alignment": "neutral_good"
+  },
+  "fantasy_tags": [
+    "ranged",
+    "exploration",
+    "magic"
+  ],
+  "difficulty": "intermediate"
+}

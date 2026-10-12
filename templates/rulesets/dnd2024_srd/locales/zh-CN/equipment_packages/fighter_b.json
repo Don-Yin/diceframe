@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "equipment_package",
+    "id": "fighter_b"
+  },
+  "fields": {
+    "name": "战士装备 B"
+  }
+}

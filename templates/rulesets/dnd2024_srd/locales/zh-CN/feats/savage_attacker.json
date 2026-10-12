@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "feat",
+    "id": "savage_attacker"
+  },
+  "fields": {
+    "name": "凶蛮打手",
+    "summary": "每回合一次，武器命中时可将武器伤害骰掷两次并采用其中一次。"
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "kind": "advancement_feat_catalog",
+  "id": "srd_advancement_feats",
+  "source_ref": "srd-5.2.1:p87-p88:feats",
+  "automation_level": "guided",
+  "feats": {
+    "ability_score_improvement": {
+      "category": "general",
+      "source_ref": "srd-5.2.1:p87:ability-score-improvement",
+      "minimum_level": 4,
+      "repeatable": true,
+      "ability_choice": {"allowed": "any", "points": 2, "pattern": "2_or_1_1", "maximum": 20}
+    },
+    "grappler": {
+      "category": "general",
+      "source_ref": "srd-5.2.1:p87:grappler",
+      "minimum_level": 4,
+      "repeatable": false,
+      "any_ability_minimum": {"str": 13, "dex": 13},
+      "ability_choice": {"allowed": ["str", "dex"], "points": 1, "pattern": "1", "maximum": 20}
+    },
+    "archery": {
+      "category": "fighting_style",
+      "source_ref": "srd-5.2.1:p87:archery",
+      "requires_feature": "fighting_style",
+      "repeatable": false
+    },
+    "defense": {
+      "category": "fighting_style",
+      "source_ref": "srd-5.2.1:p88:defense",
+      "requires_feature": "fighting_style",
+      "repeatable": false
+    },
+    "great_weapon_fighting": {
+      "category": "fighting_style",
+      "source_ref": "srd-5.2.1:p88:great-weapon-fighting",
+      "requires_feature": "fighting_style",
+      "repeatable": false
+    },
+    "two_weapon_fighting": {
+      "category": "fighting_style",
+      "source_ref": "srd-5.2.1:p88:two-weapon-fighting",
+      "requires_feature": "fighting_style",
+      "repeatable": false
+    },
+    "boon_of_combat_prowess": {
+      "category": "epic_boon",
+      "source_ref": "srd-5.2.1:p88:boon-of-combat-prowess",
+      "minimum_level": 19,
+      "repeatable": false,
+      "ability_choice": {"allowed": "any", "points": 1, "pattern": "1", "maximum": 30}
+    },
+    "boon_of_dimensional_travel": {
+      "category": "epic_boon",
+      "source_ref": "srd-5.2.1:p88:boon-of-dimensional-travel",
+      "minimum_level": 19,
+      "repeatable": false,
+      "ability_choice": {"allowed": "any", "points": 1, "pattern": "1", "maximum": 30}
+    },
+    "boon_of_fate": {
+      "category": "epic_boon",
+      "source_ref": "srd-5.2.1:p88:boon-of-fate",
+      "minimum_level": 19,
+      "repeatable": false,
+      "ability_choice": {"allowed": "any", "points": 1, "pattern": "1", "maximum": 30}
+    },
+    "boon_of_irresistible_offense": {
+      "category": "epic_boon",
+      "source_ref": "srd-5.2.1:p88:boon-of-irresistible-offense",
+      "minimum_level": 19,
+      "repeatable": false,
+      "ability_choice": {"allowed": ["str", "dex"], "points": 1, "pattern": "1", "maximum": 30}
+    },
+    "boon_of_spell_recall": {
+      "category": "epic_boon",
+      "source_ref": "srd-5.2.1:p88:boon-of-spell-recall",
+      "minimum_level": 19,
+      "requires_spellcasting": true,
+      "repeatable": false,
+      "ability_choice": {"allowed": ["int", "wis", "cha"], "points": 1, "pattern": "1", "maximum": 30}
+    },
+    "boon_of_the_night_spirit": {
+      "category": "epic_boon",
+      "source_ref": "srd-5.2.1:p88:boon-of-the-night-spirit",
+      "minimum_level": 19,
+      "repeatable": false,
+      "ability_choice": {"allowed": "any", "points": 1, "pattern": "1", "maximum": 30}
+    },
+    "boon_of_truesight": {
+      "category": "epic_boon",
+      "source_ref": "srd-5.2.1:p88:boon-of-truesight",
+      "minimum_level": 19,
+      "repeatable": false,
+      "ability_choice": {"allowed": "any", "points": 1, "pattern": "1", "maximum": 30}
+    }
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "rule",
+    "id": "freeform_fantasy"
+  },
+  "items": {
+    "iron_sword": {
+      "name": "Iron Sword"
+    },
+    "leather_armor": {
+      "name": "Leather Armor"
+    },
+    "staff": {
+      "name": "Staff"
+    },
+    "spellbook": {
+      "name": "Spellbook"
+    },
+    "longbow": {
+      "name": "Longbow"
+    },
+    "arrows": {
+      "name": "Arrows x20"
+    },
+    "dagger": {
+      "name": "Dagger"
+    },
+    "lockpicks": {
+      "name": "Lockpicks"
+    }
+  },
+  "rule": {
+    "rule_name": "Classic Fantasy Freeform",
+    "description": "A lightweight freeform sword-and-sorcery rule based on D&D.",
+    "attr_hint": "Attributes use 3-18 values; 10 is roughly average, 14+ means clear aptitude. Concentrating points leaves clear weaknesses.",
+    "skill_hint": "Skills tell the GM what the character excels at. Write as \"Skill Name (20-80)\" or just the name; higher values mean more reliability in narrative and checks.",
+    "gm_prompt_appendix": "You are the GM of a classic fantasy world. The world is full of magic, monsters, and adventure. Players can freely explore dungeons, interact with NPCs, and solve puzzles. Combat uses the d20 resolution system.",
+    "difficulty_instructions": {
+      "轻松": "Easy fights, ample resources, friendly NPCs",
+      "标准": "Challenging but fair, limited resources, strategy needed",
+      "硬核": "Scarce resources, fierce enemies, permanent death possible"
+    },
+    "currency": "Gold"
+  },
+  "attributes": {
+    "str": {
+      "name": "Strength"
+    },
+    "dex": {
+      "name": "Dexterity"
+    },
+    "con": {
+      "name": "Constitution"
+    },
+    "int": {
+      "name": "Intelligence"
+    },
+    "wis": {
+      "name": "Wisdom"
+    },
+    "cha": {
+      "name": "Charisma"
+    }
+  },
+  "classes": {
+    "warrior": {
+      "name": "Warrior",
+      "description": "Frontline melee specialist"
+    },
+    "mage": {
+      "name": "Mage",
+      "description": "Arcane spellcaster"
+    },
+    "ranger": {
+      "name": "Ranger",
+      "description": "Ranged and tracking specialist"
+    },
+    "rogue": {
+      "name": "Rogue",
+      "description": "Stealth and lockpicking expert"
+    }
+  },
+  "skills": {
+    "heavy_strike": {
+      "name": "Heavy Strike"
+    },
+    "defensive_stance": {
+      "name": "Defensive Stance"
+    },
+    "charge": {
+      "name": "Charge"
+    },
+    "fireball": {
+      "name": "Fireball"
+    },
+    "magic_shield": {
+      "name": "Magic Shield"
+    },
+    "arcana": {
+      "name": "Arcana"
+    },
+    "precise_shot": {
+      "name": "Precise Shot"
+    },
+    "tracking": {
+      "name": "Tracking"
+    },
+    "nature_sense": {
+      "name": "Nature Sense"
+    },
+    "stealth": {
+      "name": "Stealth"
+    },
+    "lockpicking": {
+      "name": "Lockpicking"
+    },
+    "sneak_attack": {
+      "name": "Sneak Attack"
+    }
+  }
+}

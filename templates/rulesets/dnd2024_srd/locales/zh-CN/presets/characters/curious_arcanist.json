@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "quick_character_preset",
+    "id": "curious_arcanist"
+  },
+  "fields": {
+    "name": "好奇奥术师",
+    "summary": "森林侏儒法师，以高智力、知识技能和丰富法术解决问题。",
+    "recommendation_reason": "如果你喜欢研究规则、准备多种解法并用魔法改变局面，法师会提供最深的成长空间。"
+  }
+}

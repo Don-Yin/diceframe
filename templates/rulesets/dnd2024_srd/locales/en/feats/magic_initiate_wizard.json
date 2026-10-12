@@ -1,0 +1,36 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "feat",
+    "id": "magic_initiate_wizard"
+  },
+  "fields": {
+    "name": "Magic Initiate (Wizard)",
+    "summary": "Choose two cantrips and one level 1 spell from the Wizard list, plus the ability used to cast them.",
+    "labels": {
+      "spellcasting_ability": "Spellcasting ability",
+      "cantrips": "Cantrips (choose 2)",
+      "level_1_spell": "Level 1 spell (choose 1)",
+      "int": "Intelligence", "wis": "Wisdom", "cha": "Charisma",
+      "acid_splash": "Acid Splash", "chill_touch": "Chill Touch", "dancing_lights": "Dancing Lights",
+      "elementalism": "Elementalism", "fire_bolt": "Fire Bolt", "light": "Light",
+      "mage_hand": "Mage Hand", "mending": "Mending", "message": "Message",
+      "minor_illusion": "Minor Illusion", "poison_spray": "Poison Spray",
+      "prestidigitation": "Prestidigitation", "ray_of_frost": "Ray of Frost",
+      "shocking_grasp": "Shocking Grasp", "true_strike": "True Strike",
+      "alarm": "Alarm", "burning_hands": "Burning Hands", "charm_person": "Charm Person",
+      "chromatic_orb": "Chromatic Orb", "color_spray": "Color Spray",
+      "comprehend_languages": "Comprehend Languages", "detect_magic": "Detect Magic",
+      "disguise_self": "Disguise Self", "expeditious_retreat": "Expeditious Retreat",
+      "false_life": "False Life", "feather_fall": "Feather Fall", "find_familiar": "Find Familiar",
+      "floating_disk": "Floating Disk", "fog_cloud": "Fog Cloud", "grease": "Grease",
+      "hideous_laughter": "Hideous Laughter", "ice_knife": "Ice Knife", "identify": "Identify",
+      "illusory_script": "Illusory Script", "jump": "Jump", "longstrider": "Longstrider",
+      "mage_armor": "Mage Armor", "magic_missile": "Magic Missile",
+      "protection_from_evil_and_good": "Protection from Evil and Good",
+      "ray_of_sickness": "Ray of Sickness", "shield": "Shield", "silent_image": "Silent Image",
+      "sleep": "Sleep", "thunderwave": "Thunderwave", "unseen_servant": "Unseen Servant"
+    }
+  }
+}

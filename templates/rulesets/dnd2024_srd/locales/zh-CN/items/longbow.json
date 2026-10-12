@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "item",
+    "id": "longbow"
+  },
+  "fields": {
+    "name": "长弓"
+  }
+}

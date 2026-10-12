@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "kind": "feat",
+  "id": "skilled",
+  "automation_level": "deterministic",
+  "category": "origin",
+  "proficiency_choice": {
+    "count": 3,
+    "allowed_kinds": [
+      "skill",
+      "tool"
+    ]
+  },
+  "source_ref": "srd-5.2.1:p87:skilled"
+}

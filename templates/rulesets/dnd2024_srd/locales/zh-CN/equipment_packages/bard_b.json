@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "equipment_package",
+    "id": "bard_b"
+  },
+  "fields": {
+    "name": "吟游诗人装备 B（90 GP）"
+  }
+}

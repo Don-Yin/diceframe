@@ -1,0 +1,6 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "scene", "id": "greymoor_old_shrine"},
+  "fields": {"name": "Old Shrine", "description": "A sealed lantern chamber beneath the weathered shrine holds the truth of the missing light."}
+}

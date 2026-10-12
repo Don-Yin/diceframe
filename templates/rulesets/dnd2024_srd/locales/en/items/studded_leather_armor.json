@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "item",
+    "id": "studded_leather_armor"
+  },
+  "fields": {
+    "name": "Studded Leather Armor"
+  }
+}

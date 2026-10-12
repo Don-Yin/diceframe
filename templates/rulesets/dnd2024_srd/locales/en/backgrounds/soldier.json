@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "background",
+    "id": "soldier"
+  },
+  "fields": {
+    "name": "Soldier",
+    "summary": "Military training taught you Athletics, Intimidation, and how to hold your ground."
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "history"
+  },
+  "fields": {
+    "name": "历史",
+    "summary": "回忆历史事件、人物、国家与文化。"
+  }
+}

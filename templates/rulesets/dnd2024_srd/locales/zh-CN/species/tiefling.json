@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "species",
+    "id": "tiefling"
+  },
+  "fields": {
+    "name": "提夫林",
+    "summary": "选择深渊、冥府或炼狱魔族遗泽，获得相应抗性与法术。"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "class",
+    "id": "ranger"
+  },
+  "fields": {
+    "name": "Ranger",
+    "summary": "An explorer and martial specialist with ranged or two-weapon options and practical nature magic."
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "tool",
+    "id": "artisans_tools"
+  },
+  "fields": {
+    "name": "Artisan's Tools"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "feat",
+    "id": "savage_attacker"
+  },
+  "fields": {
+    "name": "Savage Attacker",
+    "summary": "Once per turn when a weapon hits, roll its damage dice twice and use either result."
+  }
+}

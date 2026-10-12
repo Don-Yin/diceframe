@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "item",
+    "id": "healers_kit"
+  },
+  "fields": {
+    "name": "Healer's Kit"
+  }
+}

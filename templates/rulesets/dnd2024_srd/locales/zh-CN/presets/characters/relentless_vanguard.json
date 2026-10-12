@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "quick_character_preset",
+    "id": "relentless_vanguard"
+  },
+  "fields": {
+    "name": "不屈先锋",
+    "summary": "兽人野蛮人，以狂暴、强大生命值和近战压迫感打开道路。",
+    "recommendation_reason": "如果你想少做复杂选择、冲在最前面并承受重击，这个构筑的每回合目标都很明确。"
+  }
+}

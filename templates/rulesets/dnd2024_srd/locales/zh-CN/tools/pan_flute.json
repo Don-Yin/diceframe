@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "tool",
+    "id": "pan_flute"
+  },
+  "fields": {
+    "name": "排箫"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "skill",
+    "id": "sleight_of_hand"
+  },
+  "fields": {
+    "name": "Sleight of Hand",
+    "summary": "Pick a pocket, conceal a small object, or perform manual trickery."
+  }
+}

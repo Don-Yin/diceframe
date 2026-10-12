@@ -1,0 +1,35 @@
+{
+  "schema_version": 2,
+  "id": "paper-theme",
+  "name": "Paper Theme",
+  "description": "A restrained paper-like DiceFrame theme example using the v2 semantic token contract.",
+  "tokens": {
+    "base": {
+      "--df-font-title": "Palatino Linotype, Noto Serif SC, serif",
+      "--df-accent": "#b47a32",
+      "--df-accent-strong": "#d59a3a",
+      "--df-interactive": "#347d78",
+      "--df-border-soft": "rgba(180, 122, 50, .28)"
+    },
+    "dark": {
+      "--df-canvas": "#17130f",
+      "--df-canvas-glow": "#32261b",
+      "--df-surface-1": "#251f19",
+      "--df-surface-2": "#191613",
+      "--df-surface-3": "#31291f",
+      "--df-control-bg": "#100e0c",
+      "--df-text": "#f1e4ce",
+      "--df-text-muted": "#baa98e"
+    },
+    "light": {
+      "--df-canvas": "#eadbb9",
+      "--df-canvas-glow": "#fff2cf",
+      "--df-surface-1": "#fff8e8",
+      "--df-surface-2": "#f2dfb5",
+      "--df-surface-3": "#ead2a2",
+      "--df-control-bg": "#fffdf6",
+      "--df-text": "#33281c",
+      "--df-text-muted": "#745d3e"
+    }
+  }
+}

@@ -1,0 +1,87 @@
+/* Rule gallery: readable at a glance, with actions anchored consistently. */
+.rules-page > .card-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 13px;
+}
+
+.rules-page .rule-card {
+  position: relative;
+  min-height: 300px;
+  padding: 18px 16px 14px;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--df-accent) 34%, var(--df-border-soft));
+  background:
+    radial-gradient(circle at 100% 0, color-mix(in srgb, var(--df-accent) 8%, transparent), transparent 38%),
+    linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
+}
+
+.rules-page .rule-card::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 36px;
+  height: 36px;
+  border-top: 1px solid var(--df-accent);
+  border-left: 1px solid var(--df-accent);
+  content: "";
+  opacity: .7;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+  background: color-mix(in srgb, var(--df-accent) 13%, transparent);
+}
+
+.rules-page .rule-card h2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  min-height: 56px;
+  margin: 6px 0 14px;
+  font-size: 20px;
+}
+
+.rules-page .rule-card h2 > span {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.rules-page .rule-card h2 > .badge {
+  flex: 0 0 auto;
+  margin: 2px 0 0;
+  white-space: nowrap;
+}
+
+.rules-page .rule-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 13px;
+  padding: 10px 0;
+  border-block: 1px solid var(--df-border-soft);
+}
+
+.rules-page .rule-meta-row span {
+  font-size: 11px;
+}
+
+.rules-page .rule-meta-row span:last-child {
+  flex-basis: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rules-page .rule-card > div:first-child > p {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--df-text-muted);
+  line-height: 1.7;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.rules-page .rule-card .actions {
+  margin-top: auto;
+}

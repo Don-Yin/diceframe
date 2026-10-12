@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "kind": "item",
+  "id": "history_book",
+  "source_ref": "srd-5.2.1:p95:equipment",
+  "automation_level": "reference",
+  "item_type": "book"
+}

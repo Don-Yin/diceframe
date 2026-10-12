@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "sage_a",
+  "source_ref": "srd-5.2.1:p83:sage_a",
+  "automation_level": "deterministic",
+  "category": "background",
+  "item_refs": [
+    "item:quarterstaff",
+    "item:calligraphers_supplies",
+    "item:history_book",
+    "item:parchment",
+    "item:robe"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:quarterstaff",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:calligraphers_supplies",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:history_book",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:parchment",
+      "quantity": 8
+    },
+    {
+      "item_ref": "item:robe",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 8
+}

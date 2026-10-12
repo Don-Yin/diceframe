@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "quick_character_preset",
+    "id": "stalwart_guardian"
+  },
+  "fields": {
+    "name": "Stalwart Guardian",
+    "summary": "A Human Fighter with straightforward rules, steady Hit Points, and dependable Armor Class.",
+    "recommendation_reason": "Choose this if you want to protect allies, swing a weapon, and learn the combat round from a stable starting point."
+  }
+}

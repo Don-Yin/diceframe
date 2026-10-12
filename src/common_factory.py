@@ -1,0 +1,119 @@
+"""TRPG 子系统工厂 —— WebUI 和插件宿主共用初始化逻辑。"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+
+from src.commands.game_handler import GameHandler
+from src.engine.game_instance import GameRegistry
+from src.llm.client import LLMClient, ProviderConfig
+from src.lorebook.bootstrap import seed_builtin_worlds
+from src.lorebook.matcher import KeywordMatcher
+from src.lorebook.store import LorebookStore
+from src.memory.delta import MemoryStore
+from src.rulesets.builtin import build_default_ruleset_registry
+from src.rulesets.registry import RulesetRuntimeRegistry
+
+logger = logging.getLogger("trpg")
+
+
+@dataclass
+class TRPGSubsystems:
+    registry: GameRegistry
+    llm_client: LLMClient
+    lorebook_store: LorebookStore
+    lorebook_matcher: KeywordMatcher
+    memory_store: MemoryStore
+    ruleset_registry: RulesetRuntimeRegistry
+    handler: GameHandler
+
+
+def create_trpg_subsystems(
+    data_dir: Path,
+    prompts_dir: Path,
+    rules_dir: Path,
+    worlds_dir: Path,
+    providers: list[ProviderConfig],
+    default_provider: str,
+    *,
+    adventures_dir: Path | None = None,
+    embedding_enabled: bool = False,
+    embedding_base_url: str = "",
+    embedding_api_key: str = "",
+    embedding_model: str = "",
+    embedding_max_input: int = 0,
+    proxy_url: str = "",
+    auto_recover: bool = False,
+    narrative_max_tokens: int = 4096,
+    character_gen_max_tokens: int = 4096,
+    summary_max_tokens: int = 4096,
+    brief_max_tokens: int = 4096,
+    analysis_max_tokens: int = 4096,
+    model_request_timeout_seconds: float = 120,
+    reuse: TRPGSubsystems | None = None,
+) -> TRPGSubsystems:
+    save_dir = data_dir / "saves"
+
+    registry = reuse.registry if reuse is not None else GameRegistry(save_dir)
+
+    llm_client = LLMClient(
+        providers=providers,
+        default=default_provider,
+        proxy_url=proxy_url,
+        request_timeout_seconds=model_request_timeout_seconds,
+    )
+
+    if reuse is not None:
+        lorebook_store = reuse.lorebook_store
+        lorebook_matcher = reuse.lorebook_matcher
+        memory_store = reuse.memory_store
+    else:
+        lorebook_store = LorebookStore(data_dir / "lorebook.db")
+        lorebook_store.open()
+        seed_builtin_worlds(lorebook_store, worlds_dir)
+        lorebook_matcher = KeywordMatcher()
+
+        memory_store = MemoryStore(data_dir / "memory.db")
+        memory_store.open()
+
+    embedding_client = None
+    if embedding_enabled and embedding_base_url:
+        from src.memory.embedding import EmbeddingClient
+        emb_key = embedding_api_key
+        embedding_client = EmbeddingClient(
+            embedding_base_url, emb_key, embedding_model or "nomic-embed-text",
+            max_input_override=embedding_max_input,
+            proxy_url=proxy_url,
+        )
+
+    ruleset_registry = build_default_ruleset_registry(adventures_dir)
+    handler = GameHandler(
+        registry=registry,
+        llm_client=llm_client,
+        lorebook_matcher=lorebook_matcher,
+        lorebook_store=lorebook_store,
+        memory_store=memory_store,
+        prompts_dir=prompts_dir,
+        rules_dir=rules_dir,
+        worlds_dir=worlds_dir,
+        ruleset_registry=ruleset_registry,
+        narrative_max_tokens=narrative_max_tokens,
+        summary_max_tokens=summary_max_tokens,
+        brief_max_tokens=brief_max_tokens,
+        analysis_max_tokens=analysis_max_tokens,
+    )
+    # 仅在新运行时已经完整构建后切换 embedding 客户端，避免构建失败时
+    # 破坏仍在服务请求的旧运行时。GameRegistry 与数据库连接始终复用。
+    memory_store.embedding_client = embedding_client
+
+    return TRPGSubsystems(
+        registry=registry,
+        llm_client=llm_client,
+        lorebook_store=lorebook_store,
+        lorebook_matcher=lorebook_matcher,
+        memory_store=memory_store,
+        ruleset_registry=ruleset_registry,
+        handler=handler,
+    )

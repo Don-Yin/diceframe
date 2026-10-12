@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "kind": "species",
+  "creature_type": "humanoid",
+  "automation_level": "guided",
+  "id": "elf",
+  "size_options": [
+    "medium"
+  ],
+  "speed": 30,
+  "source_ref": "srd-5.2.1:p84-85:elf",
+  "choice_specs": [
+    {
+      "id": "elven_lineage",
+      "count": 1,
+      "option_ids": [
+        "drow",
+        "high_elf",
+        "wood_elf"
+      ]
+    },
+    {
+      "id": "lineage_spellcasting_ability",
+      "count": 1,
+      "option_ids": [
+        "int",
+        "wis",
+        "cha"
+      ]
+    }
+  ],
+  "skill_choice": {
+    "count": 1,
+    "allowed_refs": [
+      "skill:insight",
+      "skill:perception",
+      "skill:survival"
+    ]
+  },
+  "traits": [
+    {
+      "id": "darkvision_60",
+      "source_ref": "srd-5.2.1:p84-85:elf",
+      "automation_level": "deterministic"
+    },
+    {
+      "id": "elven_lineage",
+      "source_ref": "srd-5.2.1:p84-85:elf",
+      "automation_level": "guided"
+    },
+    {
+      "id": "fey_ancestry",
+      "source_ref": "srd-5.2.1:p84-85:elf",
+      "automation_level": "guided"
+    },
+    {
+      "id": "keen_senses",
+      "source_ref": "srd-5.2.1:p84-85:elf",
+      "automation_level": "deterministic"
+    },
+    {
+      "id": "trance",
+      "source_ref": "srd-5.2.1:p84-85:elf",
+      "automation_level": "guided"
+    }
+  ]
+}

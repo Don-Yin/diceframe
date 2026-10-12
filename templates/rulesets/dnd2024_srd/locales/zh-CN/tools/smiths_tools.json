@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "tool",
+    "id": "smiths_tools"
+  },
+  "fields": {
+    "name": "铁匠工具"
+  }
+}

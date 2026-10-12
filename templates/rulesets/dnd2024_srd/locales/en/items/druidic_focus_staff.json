@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "item",
+    "id": "druidic_focus_staff"
+  },
+  "fields": {
+    "name": "Druidic Focus (Wooden Staff)"
+  }
+}

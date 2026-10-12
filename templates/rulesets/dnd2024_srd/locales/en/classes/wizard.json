@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "class",
+    "id": "wizard"
+  },
+  "fields": {
+    "name": "Wizard",
+    "summary": "A scholarly spellcaster with the broadest spell selection, high rewards, and a steeper learning curve."
+  }
+}

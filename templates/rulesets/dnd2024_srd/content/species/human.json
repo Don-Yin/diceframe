@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "species",
+  "creature_type": "humanoid",
+  "automation_level": "guided",
+  "id": "human",
+  "size_options": [
+    "small",
+    "medium"
+  ],
+  "speed": 30,
+  "source_ref": "srd-5.2.1:p86:human",
+  "skill_choice": {
+    "count": 1,
+    "allowed_refs": [
+      "skill:acrobatics",
+      "skill:animal_handling",
+      "skill:arcana",
+      "skill:athletics",
+      "skill:deception",
+      "skill:history",
+      "skill:insight",
+      "skill:intimidation",
+      "skill:investigation",
+      "skill:medicine",
+      "skill:nature",
+      "skill:perception",
+      "skill:performance",
+      "skill:persuasion",
+      "skill:religion",
+      "skill:sleight_of_hand",
+      "skill:stealth",
+      "skill:survival"
+    ]
+  },
+  "feat_choice": {
+    "count": 1,
+    "allowed_refs": [
+      "feat:alert",
+      "feat:magic_initiate_cleric",
+      "feat:magic_initiate_druid",
+      "feat:magic_initiate_wizard",
+      "feat:savage_attacker",
+      "feat:skilled"
+    ]
+  },
+  "traits": [
+    {
+      "id": "resourceful",
+      "source_ref": "srd-5.2.1:p86:human",
+      "automation_level": "deterministic"
+    },
+    {
+      "id": "skillful",
+      "source_ref": "srd-5.2.1:p86:human",
+      "automation_level": "deterministic"
+    },
+    {
+      "id": "versatile",
+      "source_ref": "srd-5.2.1:p86:human",
+      "automation_level": "deterministic"
+    }
+  ]
+}

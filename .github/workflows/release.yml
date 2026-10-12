@@ -1,0 +1,278 @@
+name: Build Release Package
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-zip:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend-v2/package-lock.json
+
+      - name: Build release zip
+        run: python scripts/build_release.py
+
+      - name: Generate SHA-256 sidecar
+        shell: bash
+        run: |
+          cd dist
+          for f in *.zip; do sha256sum "$f" > "$f.sha256"; done
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: diceframe-windows-zip
+          if-no-files-found: error
+          path: |
+            dist/*.zip
+            dist/*.sha256
+
+  windows-portable:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend-v2/package-lock.json
+
+      - name: Build portable zip
+        run: python scripts/build_portable.py
+
+      - name: Generate SHA-256 sidecar
+        shell: bash
+        run: |
+          cd dist
+          for f in *.zip; do sha256sum "$f" > "$f.sha256"; done
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: diceframe-windows-portable
+          if-no-files-found: error
+          path: |
+            dist/*portable*.zip
+            dist/*portable*.sha256
+
+  docker-update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend-v2/package-lock.json
+
+      - name: Build managed Docker update
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python -c 'from src.version import __version__; print(__version__)')"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            test "${GITHUB_REF_NAME}" = "v${version}"
+          fi
+          python scripts/build_docker_update.py \
+            --version "${version}" --commit "${GITHUB_SHA}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: diceframe-docker-update-linux-amd64
+          if-no-files-found: error
+          path: |
+            dist/*-docker-update-linux-amd64.zip
+            dist/*-docker-update-linux-amd64.zip.sha256
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [windows-zip, windows-portable, docker-update]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Download source package
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: diceframe-windows-zip
+          path: dist
+
+      - name: Download portable package
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: diceframe-windows-portable
+          path: dist
+
+      - name: Download Docker update package
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: diceframe-docker-update-linux-amd64
+          path: dist
+
+      - name: Verify release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_zip="DiceFrame-${GITHUB_REF_NAME}-windows.zip"
+          portable_zip="DiceFrame-${GITHUB_REF_NAME}-windows-portable.zip"
+          docker_zip="DiceFrame-${GITHUB_REF_NAME}-docker-update-linux-amd64.zip"
+          cd dist
+          for file in \
+            "$source_zip" \
+            "$source_zip.sha256" \
+            "$portable_zip" \
+            "$portable_zip.sha256" \
+            "$docker_zip" \
+            "$docker_zip.sha256"
+          do
+            test -s "$file"
+          done
+          sha256sum --check "$source_zip.sha256" "$portable_zip.sha256" "$docker_zip.sha256"
+          python ../scripts/validate_docker_update.py "$docker_zip" --version "${GITHUB_REF_NAME#v}"
+          sha256sum "$source_zip" "$portable_zip" "$docker_zip" > SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        with:
+          body_path: RELEASE_NOTES.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+
+      - name: Upload release assets in user-facing order
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          gh release upload "$tag" \
+            "dist/DiceFrame-${tag}-windows-portable.zip" \
+            --clobber
+          gh release upload "$tag" \
+            "dist/DiceFrame-${tag}-windows.zip" \
+            --clobber
+          gh release upload "$tag" \
+            "dist/DiceFrame-${tag}-docker-update-linux-amd64.zip" \
+            --clobber
+          gh release upload "$tag" \
+            "dist/SHA256SUMS" \
+            --clobber
+
+  publish-docker:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [docker-update]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Download Docker update package
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: diceframe-docker-update-linux-amd64
+          path: dist/source
+
+      - name: Prepare seed and image tags
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          archive="dist/source/DiceFrame-v${version}-docker-update-linux-amd64.zip"
+          test -s "$archive"
+          cp "$archive" dist/docker-update.zip
+          (cd dist && sha256sum docker-update.zip | sed 's/  docker-update\.zip$/  update.zip/' > docker-update.sha256)
+          seed_sha="$(sha256sum "$archive" | cut -d' ' -f1)"
+          owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          tags="ghcr.io/${owner}/diceframe:${version},docker.io/falconku/diceframe:${version}"
+          if [[ "$version" != *-* ]]; then
+            tags="${tags},ghcr.io/${owner}/diceframe:latest,docker.io/falconku/diceframe:latest"
+          fi
+          {
+            echo "version=${version}"
+            echo "seed_sha=${seed_sha}"
+            echo "tags=${tags}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push artifact-backed image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          target: managed-artifact
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            io.diceframe.seed.version=${{ steps.meta.outputs.version }}
+            io.diceframe.seed.sha256=${{ steps.meta.outputs.seed_sha }}
+            io.diceframe.launcher.schema=1
+            io.diceframe.runtime.api=1

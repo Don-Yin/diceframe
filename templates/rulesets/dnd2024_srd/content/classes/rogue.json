@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "kind": "class",
+  "id": "rogue",
+  "source_ref": "srd-5.2.1:p61:rogue-core-traits",
+  "class_progression_ref": "progression_catalog:srd_classes",
+  "automation_level": "guided",
+  "hit_die": 8,
+  "fixed_hp_per_level": 5,
+  "primary_ability_refs": [
+    "ability:dex"
+  ],
+  "saving_throw_refs": [
+    "ability:dex",
+    "ability:int"
+  ],
+  "skill_choice": {
+    "count": 4,
+    "allowed_refs": [
+      "skill:acrobatics",
+      "skill:athletics",
+      "skill:deception",
+      "skill:insight",
+      "skill:intimidation",
+      "skill:investigation",
+      "skill:perception",
+      "skill:persuasion",
+      "skill:sleight_of_hand",
+      "skill:stealth"
+    ]
+  },
+  "armor_proficiencies": [
+    "light"
+  ],
+  "weapon_proficiencies": [
+    "simple",
+    "martial_finesse_light"
+  ],
+  "tool_proficiency_refs": [
+    "tool:thieves_tools"
+  ],
+  "equipment_package_refs": [
+    "equipment_package:rogue_a",
+    "equipment_package:rogue_b"
+  ],
+  "recommended_standard_array": {
+    "str": 12,
+    "dex": 15,
+    "con": 13,
+    "int": 14,
+    "wis": 10,
+    "cha": 8
+  },
+  "level_1_feature_ids": [
+    "expertise",
+    "sneak_attack",
+    "thieves_cant",
+    "weapon_mastery"
+  ],
+  "experience": {
+    "difficulty": "beginner"
+  }
+}

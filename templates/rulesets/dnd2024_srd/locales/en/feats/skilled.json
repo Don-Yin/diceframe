@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "feat",
+    "id": "skilled"
+  },
+  "fields": {
+    "name": "Skilled",
+    "summary": "Gain proficiency in any combination of three skills or tools; this feat is repeatable."
+  }
+}

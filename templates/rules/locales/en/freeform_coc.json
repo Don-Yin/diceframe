@@ -1,0 +1,163 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "rule",
+    "id": "freeform_coc"
+  },
+  "rule": {
+    "rule_name": "CoC 7e Investigation Freeform",
+    "description": "A lightweight Call of Cthulhu 7e-inspired investigation-horror rule using d100 percentile attributes, skills, SAN, luck, and pushed rolls; suited for narrative investigation, not a full rulebook recreation.",
+    "attr_hint": "CoC 7e-style uses percentile attributes. STR/CON/DEX/APP/POW are usually 3d6x5, SIZ/INT/EDU are usually (2d6+6)x5; for quick creation distribute roughly 460 total.",
+    "skill_hint": "CoC skills use d100 thresholds: regular success <= skill value, hard success <= half, extreme success <= one-fifth. Players may add custom skills; at creation keep any single skill at or below 85, and skill points only count the portion above the base value.",
+    "gm_prompt_appendix": "You are the GM of a 1920s investigation horror story. Players face unknowable entities and combat is often lethal; encourage the party to gather clues and reason out the truth rather than frontal confrontation. CoC attributes and skills use the d100 percentile system: regular success <= threshold, hard success <= threshold/2, extreme success <= threshold/5. Failure may advance the story but must carry a cost. Each time the party encounters the supernatural, require a Sanity check (only after `---`, use the SAN_CHECK:PlayerID:loss-die tag, e.g. SAN_CHECK:PlayerID:1d6; never expose the tag, player ID, or dice protocol in the narration).\n\nSanity change rules:\n- Direct modification uses SAN:PlayerID:delta (e.g. SAN:PlayerID:-5)\n- Rest recovery: an in-game overnight rest may use SAN:PlayerID:+1d6 to restore a little Sanity\n- Psychotherapy: after a successful Psychology or Psychoanalysis check, use SAN:PlayerID:+1d3 to restore\n- Reaching zero Sanity may cause permanent insanity; the character may become unplayable\n- Pushed rolls use the PUSH:PlayerID:skill-name tag\n- Luck expenditure uses LUCK:PlayerID:-amount to reduce check consequences",
+    "difficulty_instructions": {
+      "轻松": "Clues are plentiful, combat is avoidable, Sanity loss halved.",
+      "标准": "Clues must be pieced together, combat is risky, Sanity loss normal.",
+      "硬核": "Clues are scarce and possibly misleading, combat is highly lethal, Sanity loss doubled."
+    },
+    "currency": "Dollars"
+  },
+  "attributes": {
+    "str": {
+      "name": "STR"
+    },
+    "con": {
+      "name": "CON"
+    },
+    "siz": {
+      "name": "SIZ"
+    },
+    "dex": {
+      "name": "DEX"
+    },
+    "app": {
+      "name": "APP"
+    },
+    "int": {
+      "name": "INT"
+    },
+    "pow": {
+      "name": "POW"
+    },
+    "edu": {
+      "name": "EDU"
+    }
+  },
+  "classes": {
+    "private_detective": {
+      "name": "Private Detective",
+      "description": "Hired to investigate disappearances, extortion, murder, and unexplained events."
+    },
+    "scholar": {
+      "name": "Scholar",
+      "description": "University professor, researcher, or library expert, skilled in references, languages, and ancient texts."
+    },
+    "doctor": {
+      "name": "Doctor",
+      "description": "Surgeon, psychiatrist, or field medic, able to handle injuries and mental breakdowns."
+    },
+    "veteran": {
+      "name": "Veteran",
+      "description": "Someone who has been through war, familiar with weapons, vigilance, and dangerous environments."
+    },
+    "journalist": {
+      "name": "Journalist",
+      "description": "Someone chasing news and truth, skilled at gathering intel, interviewing, and sneaking into scenes."
+    },
+    "antiquarian": {
+      "name": "Antiquarian",
+      "description": "Dealer in antiques, collectibles, and black-market leads, often in contact with forbidden objects."
+    }
+  },
+  "special_stats": {
+    "sanity": {
+      "name": "Sanity",
+      "description": "Usually starts at POW; contact with the horrific lowers it, and reaching zero may cause permanent insanity."
+    },
+    "luck": {
+      "name": "Luck",
+      "description": "Per house rules, luck may be spent to turn a failure into a success or reduce consequences."
+    }
+  },
+  "skills": {
+    "spot_hidden": {
+      "name": "Spot Hidden"
+    },
+    "listen": {
+      "name": "Listen"
+    },
+    "library_use": {
+      "name": "Library Use"
+    },
+    "psychology": {
+      "name": "Psychology"
+    },
+    "fast_talk": {
+      "name": "Fast Talk"
+    },
+    "stealth": {
+      "name": "Stealth"
+    },
+    "track": {
+      "name": "Track"
+    },
+    "firearms": {
+      "name": "Firearms"
+    },
+    "history": {
+      "name": "History"
+    },
+    "foreign_language": {
+      "name": "Foreign Language"
+    },
+    "own_language": {
+      "name": "Own Language"
+    },
+    "occult": {
+      "name": "Occult"
+    },
+    "archaeology": {
+      "name": "Archaeology"
+    },
+    "anthropology": {
+      "name": "Anthropology"
+    },
+    "persuade": {
+      "name": "Persuade"
+    },
+    "first_aid": {
+      "name": "First Aid"
+    },
+    "medicine": {
+      "name": "Medicine"
+    },
+    "psychoanalysis": {
+      "name": "Psychoanalysis"
+    },
+    "natural_world": {
+      "name": "Natural World"
+    },
+    "fighting": {
+      "name": "Fighting"
+    },
+    "dodge": {
+      "name": "Dodge"
+    },
+    "drive": {
+      "name": "Drive"
+    },
+    "survival": {
+      "name": "Survival"
+    },
+    "photography": {
+      "name": "Photography"
+    },
+    "accounting": {
+      "name": "Accounting"
+    },
+    "appraise": {
+      "name": "Appraise"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "quick_character_preset",
+    "id": "stalwart_guardian"
+  },
+  "fields": {
+    "name": "可靠守护者",
+    "summary": "人类战士，规则直观、生命与护甲稳定，适合第一次进入战斗。",
+    "recommendation_reason": "如果你想站在队友前面、直接挥舞武器并快速理解战斗回合，这是最稳妥的起点。"
+  }
+}

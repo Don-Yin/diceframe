@@ -1,0 +1,14 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "world",
+    "id": "freeform_sandbox"
+  },
+  "fields": {
+    "world_name": "Freeform Sandbox",
+    "description": "A blank world with no preset era, location, factions, or NPCs. Players and the GM build it together from their character concepts.",
+    "world_setting": "",
+    "starter_scene": ""
+  }
+}

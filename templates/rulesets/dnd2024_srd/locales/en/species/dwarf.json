@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "species",
+    "id": "dwarf"
+  },
+  "fields": {
+    "name": "Dwarf",
+    "summary": "Tough and resilient, with extra Hit Points and the ability to sense vibrations through stone."
+  }
+}

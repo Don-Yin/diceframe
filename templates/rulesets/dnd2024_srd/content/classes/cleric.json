@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "kind": "class",
+  "id": "cleric",
+  "source_ref": "srd-5.2.1:p36:cleric-core-traits",
+  "class_progression_ref": "progression_catalog:srd_classes",
+  "automation_level": "guided",
+  "hit_die": 8,
+  "fixed_hp_per_level": 5,
+  "spellcasting_ability": "wis",
+  "recommended_spell_choices": {
+    "cantrip_ids": ["guidance", "sacred_flame", "thaumaturgy"],
+    "prepared_spell_ids": ["bless", "cure_wounds", "guiding_bolt", "shield_of_faith"]
+  },
+  "primary_ability_refs": [
+    "ability:wis"
+  ],
+  "saving_throw_refs": [
+    "ability:wis",
+    "ability:cha"
+  ],
+  "skill_choice": {
+    "count": 2,
+    "allowed_refs": [
+      "skill:history",
+      "skill:insight",
+      "skill:medicine",
+      "skill:persuasion",
+      "skill:religion"
+    ]
+  },
+  "armor_proficiencies": [
+    "light",
+    "medium",
+    "shield"
+  ],
+  "weapon_proficiencies": [
+    "simple"
+  ],
+  "equipment_package_refs": [
+    "equipment_package:cleric_a",
+    "equipment_package:cleric_b"
+  ],
+  "recommended_standard_array": {
+    "str": 14,
+    "dex": 8,
+    "con": 13,
+    "int": 10,
+    "wis": 15,
+    "cha": 12
+  },
+  "level_1_feature_ids": [
+    "divine_order",
+    "spellcasting"
+  ],
+  "experience": {
+    "difficulty": "intermediate"
+  }
+}

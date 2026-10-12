@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "background",
+  "id": "acolyte",
+  "source_ref": "srd-5.2.1:p83:acolyte",
+  "automation_level": "deterministic",
+  "ability_refs": [
+    "ability:int",
+    "ability:wis",
+    "ability:cha"
+  ],
+  "skill_refs": [
+    "skill:insight",
+    "skill:religion"
+  ],
+  "tool_proficiency_refs": [
+    "tool:calligraphers_supplies"
+  ],
+  "feat_ref": "feat:magic_initiate_cleric",
+  "equipment_package_refs": [
+    "equipment_package:acolyte_a",
+    "equipment_package:acolyte_b"
+  ]
+}

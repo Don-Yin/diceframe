@@ -1,0 +1,6 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {"kind": "map_location", "id": "greymoor_route"},
+  "fields": {"name": "灰沼驿道", "description": "从雾中驿路延伸到旧圣坛的引路灯道路。"}
+}

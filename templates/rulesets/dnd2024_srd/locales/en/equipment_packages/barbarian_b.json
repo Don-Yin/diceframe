@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "equipment_package",
+    "id": "barbarian_b"
+  },
+  "fields": {
+    "name": "Barbarian Equipment B (75 GP)"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "equipment_package",
+    "id": "wizard_b"
+  },
+  "fields": {
+    "name": "法师装备 B（55 GP）"
+  }
+}

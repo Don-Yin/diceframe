@@ -1,0 +1,25 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "class_feature_catalog",
+    "id": "srd_class_features"
+  },
+  "fields": {
+    "labels": {
+      "monk": "武僧",
+      "martial_arts": "武艺",
+      "monks_focus": "武僧专注",
+      "flurry_of_blows": "疾风连击",
+      "patient_defense": "坚守防御",
+      "patient_defense_focus": "坚守防御（专注）",
+      "step_of_the_wind": "疾风步",
+      "step_of_the_wind_focus": "疾风步（专注）",
+      "bonus_unarmed_strike": "附赠徒手打击",
+      "focus_points": "专注点",
+      "unarmed_strike": "徒手打击",
+      "action": "动作",
+      "bonus_action": "附赠动作"
+    }
+  }
+}

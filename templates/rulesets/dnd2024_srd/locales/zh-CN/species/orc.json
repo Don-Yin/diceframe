@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "species",
+    "id": "orc"
+  },
+  "fields": {
+    "name": "兽人",
+    "summary": "能以附赠动作疾走并获得临时生命值，也能在倒下时凭意志撑住。"
+  }
+}

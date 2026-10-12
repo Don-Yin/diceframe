@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "kind": "item",
+  "id": "chain_shirt",
+  "source_ref": "srd-5.2.1:p92:equipment",
+  "automation_level": "deterministic",
+  "item_type": "armor",
+  "ac_base": 13,
+  "use_dex": true,
+  "dex_cap": 2
+}

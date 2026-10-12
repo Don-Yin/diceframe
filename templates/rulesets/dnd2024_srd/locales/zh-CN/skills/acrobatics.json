@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "acrobatics"
+  },
+  "fields": {
+    "name": "杂技",
+    "summary": "保持平衡、完成翻滚或其他需要身体协调的动作。"
+  }
+}

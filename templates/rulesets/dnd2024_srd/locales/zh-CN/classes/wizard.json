@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "class",
+    "id": "wizard"
+  },
+  "fields": {
+    "name": "法师",
+    "summary": "法术选择最丰富的学术型施法者，回报很高但需要更多规则学习。"
+  }
+}

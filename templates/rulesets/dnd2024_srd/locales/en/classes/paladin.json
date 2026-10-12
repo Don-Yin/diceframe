@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "class",
+    "id": "paladin"
+  },
+  "fields": {
+    "name": "Paladin",
+    "summary": "A heroic armored warrior who combines strong melee attacks with healing and support."
+  }
+}

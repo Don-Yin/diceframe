@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "equipment_package",
+    "id": "rogue_b"
+  },
+  "fields": {
+    "name": "游荡者装备 B（100 GP）"
+  }
+}

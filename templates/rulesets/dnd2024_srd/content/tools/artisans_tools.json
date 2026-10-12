@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "kind": "tool",
+  "id": "artisans_tools",
+  "source_ref": "srd-5.2.1:p24-27:class-core-traits",
+  "automation_level": "deterministic"
+}

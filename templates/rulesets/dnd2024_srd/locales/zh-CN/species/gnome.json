@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "species",
+    "id": "gnome"
+  },
+  "fields": {
+    "name": "侏儒",
+    "summary": "选择森林或岩石谱系，擅长抵抗心智影响并拥有独特魔法。"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "item",
+    "id": "studded_leather_armor"
+  },
+  "fields": {
+    "name": "镶钉皮甲"
+  }
+}

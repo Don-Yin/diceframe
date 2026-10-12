@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "background",
+    "id": "sage"
+  },
+  "fields": {
+    "name": "Sage",
+    "summary": "Years spent studying books and mysteries trained you in Arcana and History."
+  }
+}

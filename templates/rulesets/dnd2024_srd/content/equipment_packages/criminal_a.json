@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "criminal_a",
+  "source_ref": "srd-5.2.1:p83:criminal_a",
+  "automation_level": "deterministic",
+  "category": "background",
+  "item_refs": [
+    "item:dagger",
+    "item:thieves_tools",
+    "item:crowbar",
+    "item:pouch",
+    "item:travelers_clothes"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:dagger",
+      "quantity": 2
+    },
+    {
+      "item_ref": "item:thieves_tools",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:crowbar",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:pouch",
+      "quantity": 2
+    },
+    {
+      "item_ref": "item:travelers_clothes",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 16
+}

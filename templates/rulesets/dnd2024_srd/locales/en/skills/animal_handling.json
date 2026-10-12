@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "skill",
+    "id": "animal_handling"
+  },
+  "fields": {
+    "name": "Animal Handling",
+    "summary": "Calm or train an animal, or judge how an animal is likely to behave."
+  }
+}

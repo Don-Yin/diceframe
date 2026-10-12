@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "kind": "species",
+  "creature_type": "humanoid",
+  "automation_level": "guided",
+  "id": "dwarf",
+  "size_options": [
+    "medium"
+  ],
+  "speed": 30,
+  "hp_per_level_bonus": 1,
+  "source_ref": "srd-5.2.1:p84:dwarf",
+  "traits": [
+    {
+      "id": "darkvision_120",
+      "source_ref": "srd-5.2.1:p84:dwarf",
+      "automation_level": "deterministic"
+    },
+    {
+      "id": "dwarven_resilience",
+      "source_ref": "srd-5.2.1:p84:dwarf",
+      "automation_level": "guided"
+    },
+    {
+      "id": "dwarven_toughness",
+      "source_ref": "srd-5.2.1:p84:dwarf",
+      "automation_level": "deterministic"
+    },
+    {
+      "id": "stonecunning",
+      "source_ref": "srd-5.2.1:p84:dwarf",
+      "automation_level": "guided"
+    }
+  ]
+}

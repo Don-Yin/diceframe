@@ -1,0 +1,490 @@
+"""Read-only projections for game lists, detail views, logs, and health."""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Any, Callable
+
+from src.engine.game_instance import GameState
+from src.engine.health import health_payload
+from src.engine.language import DEFAULT_LANGUAGE, normalize_language
+from src.engine.modules import (
+    adventure_runtime_state, checks, economy_state, legacy_combat, media, narrative_notes, private_channels,
+    progression_state, room_access, round_presentation, ruleset_runtime, session_stats, table_settings,
+)
+from src.engine.player_control import away_control_policy
+from src.engine.visibility_rules import manual_roll_visible_to, proposal_visible_to
+from src.llm.parser import sanitize_narration
+from src.rulesets.contracts import GameDetailProjectionRuntime
+from src.rulesets.registry import RulesetRuntimeRegistry
+from src.webui.services._common import _GAME_KEY_SEP
+from src.webui.ruleset_rest_projection import public_rest_session
+
+logger = logging.getLogger("trpg")
+
+
+@dataclass(frozen=True)
+class GameQueryDependencies:
+    list_instances: Callable[[], list[Any]]
+    get_instance: Callable[[tuple[str, ...]], Any | None]
+    parse_game_key: Callable[[str], tuple[str, ...]]
+    load_world_template: Callable[[str], dict[str, Any] | None] | None
+    load_rule_for_game: Callable[[Any], Any | None]
+    ruleset_registry: RulesetRuntimeRegistry
+
+
+def projected_rule_id(
+    dependencies: GameQueryDependencies,
+    instance: Any,
+) -> str:
+    """Resolve a legacy save's effective rule ID without modifying the save."""
+
+    rule_id = str(getattr(instance, "rule_id", "") or "").strip()
+    if rule_id:
+        return rule_id
+    try:
+        template = (
+            dependencies.load_world_template(str(instance.world_id or ""))
+            if dependencies.load_world_template
+            else None
+        )
+        rule_id = str((template or {}).get("default_rule") or "").strip()
+    except Exception:
+        logger.warning(
+            "读取旧对局的默认规则失败: %s",
+            getattr(instance, "world_id", ""),
+            exc_info=True,
+        )
+    return rule_id or "freeform_fantasy"
+
+
+def list_games(dependencies: GameQueryDependencies) -> dict[str, Any]:
+    active = []
+    for instance in dependencies.list_instances():
+        multiplayer = instance.multiplayer_status()
+        active.append({
+            "game_key": _GAME_KEY_SEP.join(instance.game_key),
+            "world_id": instance.world_id,
+            "world_name": instance.world_name,
+            "rule_id": projected_rule_id(dependencies, instance),
+            "scene_image": dict(media.scene_image(instance) or {}),
+            "map_background": dict(media.map_background(instance) or {}),
+            "group_name": instance.group_name,
+            "state": instance.state.value,
+            "round_number": progression_state.round_value(instance),
+            "player_count": len(instance.players),
+            "max_players": max(1, int(room_access.max_players(instance) or 6)),
+            "combat_active": legacy_combat.combat_active(instance),
+            "scene": narrative_notes.scene(instance),
+            "total_llm_calls": session_stats.total_llm_calls(instance),
+            "total_tokens": session_stats.total_tokens(instance),
+            "started_at": session_stats.started_at(instance),
+            "last_activity": session_stats.last_activity(instance),
+            "seed_code": table_settings.seed_code(instance),
+            "language": normalize_language(
+                getattr(instance, "language", DEFAULT_LANGUAGE)
+            ),
+            "solo_mode": table_settings.solo_mode(instance),
+            "narrative_perspective": table_settings.narrative_perspective(instance),
+            "gm_uid": instance.gm_uid or "",
+            "ready_count": multiplayer["ready_count"],
+            "alive_count": multiplayer["alive_count"],
+        })
+    active.sort(
+        key=lambda game: str(
+            game.get("last_activity") or game.get("started_at") or ""
+        ),
+        reverse=True,
+    )
+    return {"games": active, "total": len(active)}
+
+
+def _combat_extension_projection(
+    instance: Any, dependencies: Any, viewer_uid: str,
+) -> dict[str, Any] | None:
+    """声明了 combat 能力的规则返回动作/资源/调度器投影；其余返回 None。"""
+
+    from src.webui.services import combat_extension as combat_extension_service
+
+    try:
+        rule = dependencies.load_rule_for_game(instance)
+    except Exception:
+        return None
+    if rule is None:
+        return None
+    viewer_is_gm = bool(viewer_uid) and viewer_uid == (instance.gm_uid or "")
+    return combat_extension_service.combat_extension_projection(
+        instance, rule, viewer_uid=viewer_uid, viewer_is_gm=viewer_is_gm,
+    )
+
+
+# What a visitor who holds no seat may see before joining: enough to render
+# the join page, nothing about who sits at the table or how the story goes.
+LOBBY_DETAIL_FIELDS = (
+    "game_key", "player_access_open", "player_count", "max_players",
+    "has_room_password", "world_name", "scene", "rule_id", "solo_mode",
+)
+# Lobby fields that carry story text: behind a room password they are only for
+# visitors who already passed it (hold a valid room_token).
+LOBBY_NARRATIVE_FIELDS = ("scene",)
+LOBBY_MULTIPLAYER_FIELDS = (
+    "state", "round_number", "solo_mode", "player_count", "max_players",
+    "ready_count", "alive_count", "active_count", "away_count", "ai_count",
+    "unclaimed_count", "can_accept_actions", "can_advance", "action_count",
+    "pending_action_count", "player_access_open",
+)
+
+
+# The public ruleset bootstrap a visitor needs to build a character (mirrors
+# the P2P bridge's JOIN_CHARACTER_FIELDS). No roster, sheets or NPCs.
+JOIN_CHARACTER_FIELDS = (
+    "rule_attrs", "rule_attrs_total", "rule_classes",
+    "rule_special_stats", "rule_meta", "ruleset_runtime",
+)
+
+
+def join_characters(characters: dict[str, Any]) -> dict[str, Any]:
+    projected: dict[str, Any] = {"players": [], "npcs": []}
+    for key in JOIN_CHARACTER_FIELDS:
+        if key in characters:
+            projected[key] = characters[key]
+    return projected
+
+
+def lobby_detail(detail: dict[str, Any]) -> dict[str, Any]:
+    """Project a full detail down to the visitor lobby view (no identities)."""
+
+    lobby = {key: detail[key] for key in LOBBY_DETAIL_FIELDS if key in detail}
+    multiplayer = detail.get("multiplayer")
+    if isinstance(multiplayer, dict):
+        lobby["multiplayer"] = {
+            key: multiplayer[key] for key in LOBBY_MULTIPLAYER_FIELDS if key in multiplayer
+        }
+    lobby["viewer"] = {"kind": "outsider"}
+    return lobby
+
+
+def game_detail(
+    dependencies: GameQueryDependencies,
+    game_key: str,
+    viewer_uid: str = "",
+    viewer_is_gm: bool = False,
+) -> dict[str, Any] | None:
+    instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
+    if not instance:
+        return None
+    economy_proposals = [
+        dict(proposal)
+        for proposal in (economy_state.state(instance).get("proposals", []) or [])
+        if isinstance(proposal, dict)
+        and proposal.get("status") == "pending"
+        and proposal_visible_to(
+            proposal, viewer_uid=viewer_uid,
+            viewer_is_gm=viewer_is_gm or (bool(viewer_uid) and viewer_uid == instance.gm_uid),
+        )
+    ]
+    detail = {
+        "game_key": _GAME_KEY_SEP.join(instance.game_key),
+        "run_id": instance.run_id,
+        "world_id": instance.world_id or "",
+        "rule_id": projected_rule_id(dependencies, instance),
+        "scene_image": dict(media.scene_image(instance) or {}),
+        "map_background": dict(media.map_background(instance) or {}),
+        "world_name": instance.world_name,
+        "group_name": instance.group_name,
+        "state": instance.state.value,
+        "round_number": progression_state.round_value(instance),
+        "player_count": len(instance.players),
+        "scene": narrative_notes.scene(instance),
+        "total_llm_calls": session_stats.total_llm_calls(instance),
+        "total_tokens": session_stats.total_tokens(instance),
+        "started_at": session_stats.started_at(instance),
+        "last_activity": session_stats.last_activity(instance),
+        "seed_code": table_settings.seed_code(instance),
+        "language": normalize_language(
+            getattr(instance, "language", DEFAULT_LANGUAGE)
+        ),
+        "gm_uid": instance.gm_uid or "",
+        "player_access_open": bool(room_access.player_access_open(instance)),
+        # 房间级暂离语义（pause 默认 / ai_takeover）：前端房间设置要显示当前值。
+        "away_control_policy": away_control_policy(instance),
+        "has_room_password": bool(room_access.has_room_password(instance)),
+        "economy_reward_policy": dict(
+            table_settings.economy_reward_policy(instance) or {}
+        ),
+        "combat_extension": _combat_extension_projection(instance, dependencies, viewer_uid),
+        "quick_actions": round_presentation.quick_actions(instance),
+        "economy_proposals": economy_proposals,
+        "pending_luck_decisions": instance.pending_luck_checks(),
+        "round_check_results": (
+            [dict(item) for item in checks.last_checks(instance)]
+            if (
+                instance.state == GameState.ACTIVE_JUDGMENT
+                and checks.round_checks_prepared(instance)
+            )
+            else []
+        ),
+        "difficulty": table_settings.difficulty(instance),
+        "solo_mode": table_settings.solo_mode(instance),
+        "narrative_perspective": table_settings.narrative_perspective(instance),
+        # custom_instructions 可能包含剧透级 GM 笔记：gm_style_override 只下发给 GM。
+        "gm_style_override": (
+            table_settings.gm_style_override(instance)
+            if viewer_is_gm or (viewer_uid and viewer_uid == (instance.gm_uid or ""))
+            else None
+        ),
+        "max_players": room_access.max_players(instance),
+        "multiplayer": instance.multiplayer_status(),
+        "rest_session": public_rest_session(instance),
+        "plot_tracker": (
+            instance.plot_tracker.to_dict() if instance.plot_tracker else None
+        ),
+        "recap": _public_recap(instance),
+        "token_budget_bump": round_presentation.last_token_budget_bump(instance),
+        "adventure_binding": dict(
+            getattr(instance, "adventure_binding", {}) or {}
+        ),
+        "play_mode": str(adventure_runtime_state.play_mode(instance) or "free"),
+        "manual_rolls": _public_manual_rolls(instance, viewer_uid),
+    }
+    if ruleset_runtime.binding(instance):
+        binding = dict(ruleset_runtime.binding(instance))
+        rule = dependencies.load_rule_for_game(instance)
+        runtime = None
+        if rule is not None:
+            try:
+                binding = {
+                    **binding,
+                    **dependencies.ruleset_registry.describe(rule.template).to_dict(),
+                }
+                runtime = dependencies.ruleset_registry.resolve(rule.template)
+            except ValueError:
+                logger.warning(
+                    "对局规则运行时元数据不可用: %s",
+                    instance.game_key,
+                    exc_info=True,
+                )
+        detail["ruleset_runtime"] = binding
+        if isinstance(runtime, GameDetailProjectionRuntime):
+            detail.update(runtime.game_detail_projection(instance))
+    return detail
+
+
+def _public_manual_rolls(instance: Any, viewer_uid: str) -> list[dict[str, Any]]:
+    """Project resolved manual rolls for the shared timeline without exposing private rolls."""
+
+    viewer = str(viewer_uid or "")
+    gm_uid = str(getattr(instance, "gm_uid", "") or "")
+    projected: list[dict[str, Any]] = []
+    for request in checks.manual_roll_requests(instance):
+        if not isinstance(request, dict) or not isinstance(request.get("results"), dict):
+            continue
+        target_uids = [str(uid) for uid in request.get("target_uids") or [] if str(uid)]
+        if not manual_roll_visible_to(
+            request, viewer_uid=viewer, viewer_is_gm=bool(viewer) and viewer == gm_uid,
+        ):
+            continue
+        results = {
+            str(uid): {
+                "total": result.get("total"),
+                "rolls": list(result.get("rolls") or []),
+                "modifier": result.get("modifier", 0),
+                "natural": result.get("natural"),
+                "target": result.get("target"),
+                "comparison": result.get("comparison"),
+                "verdict": result.get("verdict"),
+            }
+            for uid, result in request["results"].items()
+            if str(uid) in target_uids and isinstance(result, dict)
+        }
+        if not results:
+            continue
+        projected.append({
+            "id": str(request.get("id") or ""),
+            "round_number": int(request.get("round_number", 0) or 0),
+            "label": str(request.get("label") or ""),
+            "formula": str(request.get("formula") or ""),
+            "purpose": str(request.get("purpose") or "free"),
+            "target": request.get("target"),
+            "comparison": str(request.get("comparison") or "at_least"),
+            "status": str(request.get("status") or "pending"),
+            "target_names": {
+                uid: str((request.get("target_names") or {}).get(uid) or uid)
+                for uid in results
+            },
+            "results": results,
+            "created_at": str(request.get("created_at") or ""),
+        })
+    projected.sort(key=lambda item: (item["round_number"], item["created_at"], item["id"]))
+    return projected
+
+
+def clean_public_narration(text: str) -> str:
+    """Return public narration without structured tags after the separator."""
+
+    return sanitize_narration(str(text or ""))
+
+
+def _public_recap(instance: Any) -> dict[str, Any]:
+    """Build a public recap without exposing private logs."""
+
+    def action_view(action: dict) -> dict[str, Any] | None:
+        if not isinstance(action, dict):
+            return None
+        user_id = str(action.get("user_id") or "")
+        if user_id == "system":
+            return None
+        name = (
+            instance.players.get(user_id, {}).get("character_name")
+            or user_id
+            or "冒险者"
+        )
+        action_text = str(action.get("text") or "").strip()
+        if not action_text:
+            return None
+        signature = f"{user_id}:{action.get('timestamp') or action_text[:32]}"
+        return {
+            "character_name": name,
+            "text": action_text,
+            "signature": signature,
+            "source": str(action.get("source") or ""),
+            "dice_pending": bool(action.get("dice_pending")),
+            "dice_roll_source": str(action.get("dice_roll_source") or ""),
+        }
+
+    recent_rounds: list[dict[str, Any]] = []
+    for entry in (instance.log or [])[-3:]:
+        actions = [
+            view
+            for action in entry.get("actions", []) or []
+            if (view := action_view(action))
+        ]
+        recent_rounds.append({
+            "round": entry.get("round", "?"),
+            "actions": actions,
+            "gm_response": clean_public_narration(entry.get("gm_response", "")),
+            "state_changes": list(entry.get("state_changes", []) or []),
+        })
+    pending_actions = [
+        view
+        for action in (instance.action_queue or [])
+        if (view := action_view(action))
+    ]
+    return {
+        "narrative": clean_public_narration(
+            (narrative_notes.summary(instance) or {}).get("narrative") or ""
+        ),
+        "key_facts": list(narrative_notes.key_facts(instance) or [])[-8:],
+        "recent_rounds": recent_rounds,
+        "pending_actions": pending_actions,
+        "current_scene": narrative_notes.scene(instance),
+        "round_number": progression_state.round_value(instance),
+    }
+
+
+def multiplayer_status(
+    dependencies: GameQueryDependencies,
+    game_key: str,
+) -> dict[str, Any]:
+    instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
+    if not instance:
+        return {"ok": False, "error": "游戏不存在"}
+    return {"ok": True, **instance.multiplayer_status()}
+
+
+def player_context(
+    *, preview: bool = False, delegate: bool = False, user_id: str = "",
+) -> dict[str, Any]:
+    """Project server-authenticated player context without accepting client claims."""
+
+    return {
+        "ok": True,
+        "preview": bool(preview),
+        "delegate": bool(delegate),
+        "user_id": user_id,
+    }
+
+
+def private_log(
+    dependencies: GameQueryDependencies,
+    game_key: str,
+) -> dict[str, Any]:
+    instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
+    if not instance:
+        return {"ok": False, "error": "游戏不存在"}
+    return {"ok": True, "messages": _private_log_messages(instance)[-50:]}
+
+
+def private_log_for_user(
+    dependencies: GameQueryDependencies,
+    game_key: str,
+    user_id: str,
+) -> dict[str, Any]:
+    instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
+    if not instance:
+        return {"ok": False, "error": "游戏不存在"}
+    if user_id not in instance.players:
+        return {"ok": False, "error": "玩家不存在"}
+    return {
+        "ok": True,
+        "messages": _private_log_messages(instance, user_id)[-50:],
+    }
+
+
+def table_talk(
+    dependencies: GameQueryDependencies,
+    game_key: str,
+) -> dict[str, Any]:
+    """Return the bounded public table-talk channel, separate from round logs."""
+
+    instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
+    if not instance:
+        return {"ok": False, "error": "游戏不存在"}
+    exchanges = [
+        dict(item)
+        for item in (private_channels.table_talk(instance) or [])
+        if isinstance(item, dict) and item.get("visibility") == "party"
+    ]
+    return {"ok": True, "exchanges": exchanges[-50:]}
+
+
+def _private_log_messages(
+    instance: Any, only_user_id: str = "",
+) -> list[dict[str, Any]]:
+    def player_name(user_id: str) -> str:
+        return (
+            instance.players.get(user_id, {}).get("character_name") or user_id
+        )
+
+    messages: list[dict[str, Any]] = []
+    for user_id, items in (private_channels.private_log(instance) or {}).items():
+        if only_user_id and user_id != only_user_id:
+            continue
+        for item in items or []:
+            messages.append({
+                "user_id": user_id,
+                "character_name": player_name(user_id),
+                "round": item.get("round", 0),
+                "text": item.get("text", ""),
+                "source": item.get("source", "system"),
+                "timestamp": item.get("timestamp", ""),
+            })
+    messages.sort(
+        key=lambda item: (
+            int(item.get("round", 0) or 0),
+            str(item.get("timestamp", "")),
+        )
+    )
+    return messages
+
+
+def game_health(
+    dependencies: GameQueryDependencies,
+    game_key: str,
+    include_resolved: bool = False,
+) -> dict[str, Any]:
+    instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
+    if not instance:
+        return {"ok": False, "error": "game not found"}
+    return health_payload(instance, include_resolved)

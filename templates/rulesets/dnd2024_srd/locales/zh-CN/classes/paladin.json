@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "class",
+    "id": "paladin"
+  },
+  "fields": {
+    "name": "圣武士",
+    "summary": "重装近战与治疗支援兼备，资源使用清晰而有英雄感。"
+  }
+}

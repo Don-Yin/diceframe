@@ -1,0 +1,6 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {"kind": "scene", "id": "greymoor_mistbound_road"},
+  "fields": {"name": "雾中的灰沼驿道", "description": "冰冷的引路灯、陷在泥里的货车，以及正吞没道路的薄雾。"}
+}

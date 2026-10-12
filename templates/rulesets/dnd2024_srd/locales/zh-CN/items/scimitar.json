@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "item",
+    "id": "scimitar"
+  },
+  "fields": {
+    "name": "弯刀"
+  }
+}

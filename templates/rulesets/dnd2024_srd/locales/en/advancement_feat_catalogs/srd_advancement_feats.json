@@ -1,0 +1,23 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "advancement_feat_catalog", "id": "srd_advancement_feats"},
+  "fields": {
+    "name": "SRD Advancement Feats",
+    "labels": {
+      "ability_score_improvement": "Ability Score Improvement",
+      "grappler": "Grappler",
+      "archery": "Archery",
+      "defense": "Defense",
+      "great_weapon_fighting": "Great Weapon Fighting",
+      "two_weapon_fighting": "Two-Weapon Fighting",
+      "boon_of_combat_prowess": "Boon of Combat Prowess",
+      "boon_of_dimensional_travel": "Boon of Dimensional Travel",
+      "boon_of_fate": "Boon of Fate",
+      "boon_of_irresistible_offense": "Boon of Irresistible Offense",
+      "boon_of_spell_recall": "Boon of Spell Recall",
+      "boon_of_the_night_spirit": "Boon of the Night Spirit",
+      "boon_of_truesight": "Boon of Truesight"
+    }
+  }
+}

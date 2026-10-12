@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "kind": "npc",
+  "id": "mira_waykeeper",
+  "source_ref": "diceframe-original:dnd2024-adventures/lanterns-of-greymoor",
+  "automation_level": "guided",
+  "role": "waykeeper",
+  "disposition": "worried_ally"
+}

@@ -1,0 +1,15 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {"kind": "encounter_catalog", "id": "greymoor_encounters"},
+  "fields": {
+    "name": "灰沼失落灯火遭遇",
+    "labels": {
+      "presets": {
+        "first_skirmish": {"name": "荆棘林地伏击", "description": "失落灯火冒险中的剧情遭遇。"}
+      },
+      "profiles": {"goblin_minion": "哥布林仆从"},
+      "attacks": {"dagger": "匕首"}
+    }
+  }
+}

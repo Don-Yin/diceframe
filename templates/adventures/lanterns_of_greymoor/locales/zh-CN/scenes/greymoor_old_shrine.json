@@ -1,0 +1,6 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {"kind": "scene", "id": "greymoor_old_shrine"},
+  "fields": {"name": "灰沼旧圣坛", "description": "风化圣坛下封闭的灯匣，保存着失灯与导师失踪的真相。"}
+}

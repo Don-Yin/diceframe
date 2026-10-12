@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "class",
+    "id": "rogue"
+  },
+  "fields": {
+    "name": "游荡者",
+    "summary": "技能丰富、行动灵活，以寻找优势并打出偷袭为核心。"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "skill",
+    "id": "athletics"
+  },
+  "fields": {
+    "name": "Athletics",
+    "summary": "Climb, jump, swim, or overcome an obstacle with physical force."
+  }
+}

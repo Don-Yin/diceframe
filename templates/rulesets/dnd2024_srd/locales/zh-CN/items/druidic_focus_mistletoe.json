@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "item",
+    "id": "druidic_focus_mistletoe"
+  },
+  "fields": {
+    "name": "德鲁伊法器（槲寄生）"
+  }
+}

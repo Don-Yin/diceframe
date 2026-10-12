@@ -1,0 +1,15 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "encounter_catalog", "id": "greymoor_encounters"},
+  "fields": {
+    "name": "Lost Lanterns encounters",
+    "labels": {
+      "presets": {
+        "first_skirmish": {"name": "Thorn Glade Ambush", "description": "The story encounter from The Lost Lanterns of Greymoor."}
+      },
+      "profiles": {"goblin_minion": "Goblin Minion"},
+      "attacks": {"dagger": "Dagger"}
+    }
+  }
+}

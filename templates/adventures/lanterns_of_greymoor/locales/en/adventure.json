@@ -1,0 +1,72 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "adventure", "id": "lanterns_of_greymoor"},
+  "fields": {
+    "tutorial": {
+      "name": "The Lost Lanterns of Greymoor",
+      "summary": "An original short adventure about a missing road lantern, an old shrine, and a keeper's secret. Investigate the trail, deal with Mira, survive the glade ambush, and decide which truth returns to Greymoor.",
+      "chapters": {
+        "missing_light": {"name": "Chapter 1: The Missing Light"},
+        "thorn_glade": {"name": "Chapter 2: Thorn Glade"},
+        "old_shrine": {"name": "Chapter 3: The Old Shrine"}
+      },
+      "steps": {
+        "mistbound_road": {
+          "title": "A Light Out in the Mist",
+          "narration": "The Greymoor road lantern is cold ash. A wagon leans in the mud while thin fog swallows the road ahead.",
+          "objective": "Discover why the lantern failed and why the wagon stopped in the fog.",
+          "hint": "The ash and wagon tracks may both hold useful evidence."
+        },
+        "keepers_plea": {
+          "title": "Mira the Lantern Keeper",
+          "narration": "Young keeper Mira runs from a roadside cottage. She fears both the lantern core and her mentor, who checked the old shrine last night, are missing.",
+          "objective": "Earn Mira's trust and establish the route her mentor took before disappearing.",
+          "hint": "You can reassure Mira first or press for the timeline and unusual signs."
+        },
+        "read_the_trail": {
+          "title": "Two Good Trails",
+          "narration": "Small three-toed prints mark the mud. A faint glow matching the lantern lingers among the roots. Both trails lead toward Thorn Glade.",
+          "objective": "Follow the tracks or fading lantern glow into Thorn Glade.",
+          "hint": "Both the ground trail and magical residue lead deeper into the woods."
+        },
+        "thorn_ambush": {
+          "title": "Thorn Glade Ambush",
+          "narration": "A goblin minion is prying at the shrine stones. It spots you, draws a weapon, and blocks the path to the lantern box.",
+          "objective": "Drive off the ambusher and secure the old shrine.",
+          "hint": "The enemy begins 25 feet away. Watch weapon range and remaining movement."
+        },
+        "restore_the_lantern": {
+          "title": "The Truth Beneath the Shrine",
+          "narration": "A brass key opens the lantern box. Mira's mentor diverted its light to seal a dangerous rift, but vanished before explaining why. You can return only the light, or return with the full truth.",
+          "objective": "Decide whether to restore only the light or also tell Mira the full truth her mentor left behind.",
+          "hint": "Consider immediate safety, mutual trust, and Mira's right to know."
+        }
+      },
+      "choices": {
+        "inspect_cold_ash": {"label": "Inspect the cold ash", "description": "Learn why an ordinary flame did not simply burn out."},
+        "check_wagon_tracks": {"label": "Check the wagon tracks", "description": "Establish what moved through the scene."},
+        "reassure_mira": {"label": "Reassure Mira first", "description": "Promise to return with news of her mentor and the lantern."},
+        "ask_precise_questions": {"label": "Ask precise questions", "description": "Confirm the time, route, and unusual signs."},
+        "follow_small_tracks": {"label": "Follow the small tracks", "description": "Read the ground through the glade."},
+        "follow_arcane_residue": {"label": "Follow the fading glow", "description": "Track the lantern's magical resonance."},
+        "secure_the_glade": {"label": "Secure and search the glade", "description": "Inspect the shrine after the encounter."},
+        "return_the_light": {"label": "Return the light first", "description": "Make the road safe again as quickly as possible."},
+        "share_the_truth": {"label": "Return the light and the truth", "description": "Tell Mira about the mentor's choice and the rift."
+        }
+      },
+      "entities": {
+        "clue:cold_silver_ash": {"title": "Cold Silver Ash", "summary": "The ash has no warmth, as if light was drawn out of the wick."},
+        "clue:three_toed_tracks": {"title": "Three-Toed Tracks", "summary": "Tracks from a small humanoid lead from the wagon toward Thorn Glade."},
+        "relationship:mira_trust": {"title": "Mira's Trust", "summary": "Mira believes the adventurers will take her mentor's disappearance seriously."},
+        "task:recover_way_lantern": {"title": "Recover the Way Lantern", "summary": "Discover why the lantern failed and what happened to its keeper."},
+        "fact:lantern_failed_at_midnight": {"title": "Midnight Failure", "summary": "Mira confirms every light failed at midnight and her mentor went to the old shrine."},
+        "clue:thorn_glade_route": {"title": "Route to Thorn Glade", "summary": "The tracks avoid the bog and end at the old shrine's glade."},
+        "clue:lantern_resonance": {"title": "Lantern Resonance", "summary": "The fading glow resonates with the old shrine deep in the glade."},
+        "item:brass_shrine_key": {"title": "Brass Shrine Key", "summary": "An old key from the glade opens the lantern box beneath the shrine."},
+        "fact:greymoor_light_restored": {"title": "Greymoor's Light Restored", "summary": "The lantern's power returned to the road and made night travel safe."},
+        "fact:shrine_truth_shared": {"title": "The Shrine Truth Shared", "summary": "Mira learned why her mentor used the lantern to seal the rift."}
+      }
+    }
+  }
+}

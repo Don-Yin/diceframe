@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "kind": "class",
+  "id": "monk",
+  "source_ref": "srd-5.2.1:p49:monk-core-traits",
+  "class_progression_ref": "progression_catalog:srd_classes",
+  "automation_level": "guided",
+  "hit_die": 8,
+  "fixed_hp_per_level": 5,
+  "primary_ability_refs": [
+    "ability:dex",
+    "ability:wis"
+  ],
+  "saving_throw_refs": [
+    "ability:str",
+    "ability:dex"
+  ],
+  "skill_choice": {
+    "count": 2,
+    "allowed_refs": [
+      "skill:acrobatics",
+      "skill:athletics",
+      "skill:history",
+      "skill:insight",
+      "skill:religion",
+      "skill:stealth"
+    ]
+  },
+  "armor_proficiencies": [],
+  "weapon_proficiencies": [
+    "simple",
+    "martial_light"
+  ],
+  "tool_choice": {
+    "count": 1,
+    "allowed_categories": [
+      "artisan",
+      "musical_instrument"
+    ]
+  },
+  "equipment_package_refs": [
+    "equipment_package:monk_a",
+    "equipment_package:monk_b"
+  ],
+  "recommended_standard_array": {
+    "str": 12,
+    "dex": 15,
+    "con": 13,
+    "int": 10,
+    "wis": 14,
+    "cha": 8
+  },
+  "level_1_feature_ids": [
+    "martial_arts",
+    "unarmored_defense"
+  ],
+  "experience": {
+    "difficulty": "intermediate"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "warlock_a",
+  "source_ref": "srd-5.2.1:p70:warlock_a",
+  "automation_level": "deterministic",
+  "category": "class",
+  "item_refs": [
+    "item:leather_armor",
+    "item:sickle",
+    "item:dagger",
+    "item:arcane_focus_orb",
+    "item:occult_book",
+    "item:scholar_pack"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:leather_armor",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:sickle",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:dagger",
+      "quantity": 2
+    },
+    {
+      "item_ref": "item:arcane_focus_orb",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:occult_book",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:scholar_pack",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 15
+}

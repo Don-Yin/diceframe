@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "background",
+    "id": "criminal"
+  },
+  "fields": {
+    "name": "罪犯",
+    "summary": "熟悉隐秘行动与地下门路，擅长巧手和隐匿。"
+  }
+}

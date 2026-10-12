@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "item",
+    "id": "druidic_focus_mistletoe"
+  },
+  "fields": {
+    "name": "Druidic Focus (Mistletoe)"
+  }
+}

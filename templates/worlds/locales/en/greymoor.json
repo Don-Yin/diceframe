@@ -1,0 +1,38 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "world", "id": "greymoor"},
+  "fields": {
+    "world_name": "The Greymoor Frontier",
+    "description": "An original borderland fantasy setting of fog, old roads, and lost way-lanterns.",
+    "world_setting": "Greymoor is a wet, fogbound frontier at the kingdom's edge. Isolated settlements depend on ancient way-lanterns, and the Waykeepers maintain the lights, markers, and safe routes through the marsh. Old shrines, drowned causeways, and occasional magical fractures suggest that these roads are older than the kingdom itself.",
+    "starter_scene": "You reach the Greymoor road beneath a low bank of fog. The way-lantern at the fork is dark, and a wagon leans in the mud. There is no preset tavern or innkeeper here; the bound adventure or the players' actions determine what happens next."
+  },
+  "starter_lorebook": {
+    "region_greymoor": {
+      "name": "Greymoor",
+      "keywords": ["Greymoor", "marsh", "frontier", "fog"],
+      "content": "A wet frontier of reeds, black water, peat bogs, and scattered wooded ridges. Fog hides distant landmarks at dawn and dusk, so travelers rely on way-lanterns and Waykeeper route records."
+    },
+    "loc_mistbound_road": {
+      "name": "Greymoor Road",
+      "keywords": ["Greymoor Road", "road", "wagon", "tracks"],
+      "content": "An old raised road joining the frontier settlements. Marsh and reed beds lie on either side, and wagons that leave the narrow firm track quickly sink into mud."
+    },
+    "faction_waykeepers": {
+      "name": "Waykeepers",
+      "keywords": ["Waykeepers", "way-lantern", "lantern", "patrol"],
+      "content": "A local organization that maintains way-lanterns, route markers, and safe paths. They are not soldiers, but they keep the best road records and search for lost travelers during fog season."
+    },
+    "npc_mira": {
+      "name": "Mira",
+      "keywords": ["Mira", "young Waykeeper", "Waykeeper apprentice"],
+      "content": "A young Waykeeper apprentice who knows the road and its patrol routes. She is earnest and direct. Since her mentor vanished, she has kept the lantern network running but lacks experience with ancient magical failures."
+    },
+    "loc_old_shrine": {
+      "name": "Old Shrine",
+      "keywords": ["Old Shrine", "shrine", "lantern vault", "fracture"],
+      "content": "A stone ruin deep in the thorn wood, older than the Waykeepers. A buried lantern vault resonates with the road lights, but local records avoid explaining its original purpose."
+    }
+  }
+}

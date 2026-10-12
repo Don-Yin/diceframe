@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "cleric_a",
+  "source_ref": "srd-5.2.1:p36:cleric_a",
+  "automation_level": "deterministic",
+  "category": "class",
+  "item_refs": [
+    "item:chain_shirt",
+    "item:shield",
+    "item:mace",
+    "item:holy_symbol",
+    "item:priest_pack"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:chain_shirt",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:shield",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:mace",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:holy_symbol",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:priest_pack",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 7
+}

@@ -1,0 +1,6 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {"kind": "scene", "id": "greymoor_thorn_glade"},
+  "fields": {"name": "荆棘林地", "description": "被荆棘挤压的空地中央，旧圣坛石板已被撬动，追踪在此变成遭遇。"}
+}

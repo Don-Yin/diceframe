@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "tool",
+    "id": "brewers_supplies"
+  },
+  "fields": {
+    "name": "酿酒工具"
+  }
+}

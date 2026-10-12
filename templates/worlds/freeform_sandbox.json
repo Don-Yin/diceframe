@@ -1,0 +1,20 @@
+{
+  "world_id": "freeform_sandbox",
+  "world_name": "自由沙盒",
+  "description": "不预设时代、地点、阵营或 NPC 的空白世界，让玩家和 GM 从角色设定开始共同建立世界。",
+  "language": "zh-CN",
+  "sandbox": true,
+  "world_setting": "",
+  "starter_scene": "",
+  "suggested_difficulty": "自由",
+  "default_rule": "tavern_free",
+  "starter_lorebook": [],
+  "item_categories": {
+    "equipment": [],
+    "consumable": [],
+    "misc": []
+  },
+  "world_schema_version": 2,
+  "locale_schema_version": 1,
+  "default_locale": "zh-CN"
+}

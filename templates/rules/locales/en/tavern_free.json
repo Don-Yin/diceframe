@@ -1,0 +1,37 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "rule",
+    "id": "tavern_free"
+  },
+  "rule": {
+    "rule_name": "Tavern Free RP",
+    "description": "A no-dice, no-attribute, pure-narrative roleplay mode-free conversation like a tavern session.",
+    "attr_hint": "Tavern mode needs no attribute allocation; just write the character concept.",
+    "skill_hint": "Write 1-5 things you're good at; descriptive only, no numeric checks.",
+    "currency": "Gold"
+  },
+  "classes": {
+    "adventurer": {
+      "name": "Adventurer",
+      "description": "Free adventurer"
+    },
+    "merchant": {
+      "name": "Merchant",
+      "description": "Traveling merchant"
+    },
+    "bard": {
+      "name": "Bard",
+      "description": "Bard"
+    },
+    "mercenary": {
+      "name": "Mercenary",
+      "description": "Hired fighter"
+    },
+    "scholar": {
+      "name": "Scholar",
+      "description": "Traveling scholar"
+    }
+  }
+}

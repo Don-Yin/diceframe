@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "kind": "quick_character_preset",
+  "id": "relentless_vanguard",
+  "source_ref": "diceframe-original:dnd2024-presets/relentless_vanguard",
+  "automation_level": "deterministic",
+  "draft": {
+    "class_ref": "class:barbarian",
+    "species_ref": "species:orc",
+    "background_ref": "background:soldier",
+    "species_size": "medium",
+    "class_skill_refs": [
+      "skill:perception",
+      "skill:survival"
+    ],
+    "equipment_package_ref": "equipment_package:barbarian_a",
+    "background_equipment_package_ref": "equipment_package:soldier_a",
+    "ability_method": "standard_array",
+    "base_abilities": {
+      "str": 15,
+      "dex": 13,
+      "con": 14,
+      "int": 10,
+      "wis": 12,
+      "cha": 8
+    },
+    "background_ability_bonuses": {
+      "str": 2,
+      "con": 1
+    },
+    "language_refs": [
+      "language:common",
+      "language:orc",
+      "language:giant"
+    ],
+    "alignment": "chaotic_good"
+  },
+  "fantasy_tags": [
+    "melee",
+    "durable",
+    "aggressive"
+  ],
+  "difficulty": "beginner"
+}

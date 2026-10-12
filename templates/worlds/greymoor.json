@@ -1,0 +1,64 @@
+{
+  "world_schema_version": 2,
+  "locale_schema_version": 1,
+  "default_locale": "zh-CN",
+  "world_id": "greymoor",
+  "world_name": "灰沼边境",
+  "description": "雾、古驿道与失落路灯构成的原创边境奇幻世界。",
+  "world_setting": "灰沼是王国边缘一片低湿而多雾的边境。聚落依靠古老引路灯连接，守灯人负责维护灯火、路标与沼地中的安全路线。旧圣坛、沉没石道和偶尔出现的魔力裂隙提醒当地人：这里的道路比王国本身更古老。",
+  "starter_scene": "你来到灰沼驿道。薄雾压在芦苇与黑水之间，原本应照亮岔路的引路灯已经熄灭，一辆货车歪在泥里。这里没有预设的酒馆，也没有老汤姆；接下来发生什么，由当前冒险或玩家行动决定。",
+  "suggested_difficulty": "标准",
+  "default_rule": "dnd2024_srd",
+  "recommended_rules": ["dnd2024_srd", "dnd5e", "freeform_fantasy"],
+  "starter_lorebook": [
+    {
+      "id": "region_greymoor",
+      "visible_to": ["*"],
+      "name": "灰沼",
+      "type": "region",
+      "keywords": ["灰沼", "沼泽", "边境", "薄雾"],
+      "content": "王国边缘的低湿边境，遍布芦苇、黑水、泥炭地和零散林丘。晨昏的雾会吞没远处地标，旅行者通常依赖引路灯与守灯人的路线记录。",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_mistbound_road",
+      "visible_to": ["*"],
+      "name": "灰沼驿道",
+      "type": "location",
+      "keywords": ["灰沼驿道", "驿道", "货车", "车辙"],
+      "content": "一条连接边境聚落的古老高埂路。道路两旁是浅沼和芦苇地，坚实路面很窄；货车离开车辙后很容易陷入泥中。",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "faction_waykeepers",
+      "visible_to": ["*"],
+      "name": "守灯人",
+      "type": "faction",
+      "keywords": ["守灯人", "路灯", "引路灯", "巡灯"],
+      "content": "维护灰沼引路灯、路标和安全路线的地方组织。他们不是军队，却掌握最可靠的道路记录，也负责在雾季寻找迷路者。",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "npc_mira",
+      "visible_to": ["*"],
+      "name": "米拉",
+      "type": "npc",
+      "keywords": ["米拉", "年轻守灯人", "守灯学徒"],
+      "content": "年轻的守灯学徒，熟悉灰沼驿道和日常巡灯路线。她认真、直率，在导师失踪后努力维持路灯系统，但缺少独自处理古老魔法异常的经验。",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_old_shrine",
+      "name": "旧圣坛",
+      "type": "location",
+      "keywords": ["旧圣坛", "圣坛", "灯匣", "裂隙"],
+      "content": "位于荆棘林地深处的石制遗迹，年代早于现存守灯人组织。圣坛下方藏有与引路灯共鸣的古老灯匣，当地记录对其真正用途语焉不详。",
+      "tier": "background",
+      "unreliable": false
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "performance"
+  },
+  "fields": {
+    "name": "表演",
+    "summary": "演戏、讲故事、演奏或舞蹈。"
+  }
+}

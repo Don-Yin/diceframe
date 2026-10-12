@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "survival"
+  },
+  "fields": {
+    "name": "求生",
+    "summary": "追踪、觅食、辨路或避开自然危险。"
+  }
+}

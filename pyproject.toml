@@ -1,0 +1,135 @@
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# The repository still contains a backlog of style-only findings.  Keep the
+# mandatory gate focused on correctness while those are paid down separately.
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.pytest.ini_options]
+# 插件自带测试依赖插件源码在 PYTHONPATH，主程序 CI 不提供；插件测试归插件仓库自跑。
+# 只收集主程序 tests/，避免本机 data/plugin-packages 中用户安装插件的顶层 src 包
+# 污染主程序的 src namespace。
+testpaths = ["tests"]
+norecursedirs = ["plugins", "data/plugin-packages"]
+addopts = ["--strict-markers"]
+markers = [
+    "integration: crosses multiple application layers or persistence boundaries",
+    "optional: depends on a local or unreleased fixture and may be skipped",
+]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+follow_imports = "skip"
+check_untyped_defs = true
+files = [
+    "scripts/architecture_fitness.py",
+    "src/engine/action_gate.py",
+    "src/engine/participant_view.py",
+    "src/engine/visibility_rules.py",
+    "src/webui/viewer.py",
+    "src/engine/contracts.py",
+    "src/engine/currency/codec.py",
+    "src/engine/currency/migration.py",
+    "src/engine/currency/models.py",
+    "src/engine/currency/validation.py",
+    "src/engine/game_context_projector.py",
+    "src/engine/game_instance.py",
+    "src/engine/game_state_codec.py",
+    "src/engine/game_state_contracts.py",
+    "src/engine/legacy_game_projection.py",
+    "src/engine/luck_resolver.py",
+    "src/engine/module_state.py",
+    "src/engine/modules/__init__.py",
+    "src/engine/modules/combat_extension_state.py",
+    "src/engine/modules/economy_state.py",
+    "src/engine/modules/health.py",
+    "src/engine/modules/lorebook_runtime.py",
+    "src/engine/modules/media.py",
+    "src/engine/modules/narrative_notes.py",
+    "src/engine/modules/room_access.py",
+    "src/engine/modules/session_stats.py",
+    "src/engine/modules/checks.py",
+    "src/engine/modules/check_reveals.py",
+    "src/engine/modules/round_safety.py",
+    "src/engine/modules/legacy_combat.py",
+    "src/engine/modules/ruleset_runtime.py",
+    "src/engine/modules/round_presentation.py",
+    "src/engine/modules/world_reports.py",
+    "src/engine/modules/table_settings.py",
+    "src/engine/modules/player_control_state.py",
+    "src/engine/modules/private_channels.py",
+    "src/engine/modules/progression_state.py",
+    "src/engine/persistence.py",
+    "src/engine/progression.py",
+    "src/migrations/instance.py",
+    "src/password_hashing.py",
+    "src/lorebook/retrieval.py",
+    "src/plugin_host/capabilities.py",
+    "src/plugin_host/content.py",
+    "src/plugin_host/contracts.py",
+    "src/plugin_host/descriptors.py",
+    "src/plugin_host/host.py",
+    "src/plugin_host/models.py",
+    "src/plugin_host/registry.py",
+    "src/plugin_host/support.py",
+    "src/plugin_sdk/bridge_runtime.py",
+    "src/plugin_sdk/contracts.py",
+    "src/plugin_sdk/provider_runtime.py",
+    "src/plugin_sdk/tool_runtime.py",
+    "src/rulesets/contracts.py",
+    "src/rulesets/bundle.py",
+    "src/rulesets/builtin.py",
+    "src/rulesets/dnd2024/runtime.py",
+    "src/rulesets/dnd2024/binding.py",
+    "src/rulesets/dnd2024/character/builder.py",
+    "src/rulesets/dnd2024/features/__init__.py",
+    "src/rulesets/dnd2024/features/combat.py",
+    "src/rulesets/dnd2024/features/equipment.py",
+    "src/rulesets/dnd2024/features/models.py",
+    "src/rulesets/dnd2024/features/resolver.py",
+    "src/rulesets/dnd2024/features/resources.py",
+    "src/rulesets/registry.py",
+    "src/rulesets/legacy_adapter.py",
+    "src/webui/config_update.py",
+    "src/webui/application.py",
+    "src/webui/access_control.py",
+    "src/webui/access_password.py",
+    "src/webui/abuse_guard.py",
+    "src/webui/bootstrap.py",
+    "src/webui/composition.py",
+    "src/webui/config_controller.py",
+    "src/webui/host_credentials.py",
+    "src/webui/runtime_config.py",
+    "src/webui/services/adventures.py",
+    "src/webui/services/assistant.py",
+    "src/webui/services/character_cards.py",
+    "src/webui/services/characters.py",
+    "src/webui/services/content_pack_maps.py",
+    "src/webui/services/game_queries.py",
+    "src/webui/services/room_password.py",
+    "src/webui/services/generation.py",
+    "src/webui/services/lorebooks.py",
+    "src/webui/services/check_reveals.py",
+    "src/webui/services/maps.py",
+    "src/webui/services/plugins.py",
+    "src/webui/services/rules.py",
+    "src/webui/services/ruleset_gameplay.py",
+    "src/webui/services/ruleset_advancement.py",
+    "src/webui/services/ruleset_characters.py",
+    "src/webui/services/ruleset_rest.py",
+    "src/webui/services/tunnel.py",
+    "src/webui/services/turns.py",
+    "src/webui/services/worlds.py",
+    "src/webui/services/ruleset_builder.py",
+]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 60

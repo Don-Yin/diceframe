@@ -1,0 +1,34 @@
+{
+  "extends": "base_d20",
+  "rule_version": "0.1.0",
+  "rule_id": "dnd2024_srd",
+  "rule_schema_version": 2,
+  "default_locale": "zh-CN",
+  "locale_schema_version": 1,
+  "runtime": {"id": "core:dnd2024", "minimum_version": 1},
+  "scene_image": {"kind": "builtin", "id": "dnd5e"},
+  "rule_name": "5E 2024 SRD 高级规则",
+  "description": "基于 SRD 5.2.1 的独立高级体验：引导式车卡、版本化角色、权威动作与服务端战斗结算。与 D&D 5e 轻量规则相互独立。",
+  "mechanics": "dnd2024_srd_authoritative",
+  "ruleset_level": "authoritative",
+  "attributes": [
+    {"key": "str", "name": "力量", "min": 3, "max": 20},
+    {"key": "dex", "name": "敏捷", "min": 3, "max": 20},
+    {"key": "con", "name": "体质", "min": 3, "max": 20},
+    {"key": "int", "name": "智力", "min": 3, "max": 20},
+    {"key": "wis", "name": "感知", "min": 3, "max": 20},
+    {"key": "cha", "name": "魅力", "min": 3, "max": 20}
+  ],
+  "attribute_points": 72,
+  "max_skills": 18,
+  "skill_point_total": 0,
+  "max_skill_value": 0,
+  "skill_mode": "proficiency",
+  "combat_model": "authoritative_event_batch",
+  "gm_prompt_appendix": "这是 5E 2024 SRD 高级规则。角色、动作经济、骰点、命中、豁免、伤害、治疗、条件、专注、反应与濒死由规则运行时权威结算。你只能叙述已经提交的 EventBatch，不得自行修改 HP、法术位、资源、装备或条件，也不得覆盖运行时的合法性结论。普通探索中，只有当敌对遭遇已经实际爆发、下一步必须进入先攻时，才在状态标签区输出 COMBAT:start；不要为威胁、争吵或尚可回避的危险触发它。触发时只叙述交战态势，不得提前结算攻击、伤害或敌方回合，系统会唤醒权威战斗工具。",
+  "difficulty_instructions": {
+    "轻松": "使用教程遭遇和清晰提示，不暗改权威骰点与数值。",
+    "标准": "使用标准遭遇与教学提示，不暗改权威骰点与数值。",
+    "硬核": "提高遭遇设计压力，但不暗改权威骰点与数值。"
+  }
+}

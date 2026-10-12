@@ -1,0 +1,115 @@
+{
+  "locale_schema_version": 1,
+  "locale": "ja",
+  "target": {
+    "kind": "rule",
+    "id": "freeform_wuxia"
+  },
+  "rule": {
+    "rule_name": "武侠・仙侠フリーフォーム",
+    "description": "架空の武侠・仙侠世界のための軽量フリーフォームルール。",
+    "attr_hint": "属性は3〜18の値を使います。10が凡人の平均です。内功・身法・悟性などの実力は、対応する属性に応じて強くなります。",
+    "skill_hint": "スキルには武術の技、軽功、医術・毒術、江湖の技法を書けます。「スキル名（20-80）」の形式で、値が高いほど修行が深いことを示します。",
+    "gm_prompt_appendix": "あなたは架空の武侠・仙侠世界のGMです。江湖の因縁、宗門の争い、仙道を求める修行、降妖除魔――義侠心と奇縁に満ちた世界です。プレイヤーは江湖を自由に歩き、宗門に入門し、達人に挑み、秘境を探索できます。内力の消耗と回復に注意してください。軽功で地形の障害を越えられます。",
+    "difficulty_instructions": {
+      "轻松": "敵は弱く、宗門は友好的、機縁に恵まれている",
+      "标准": "江湖は危険だが公平、修行と戦略が必要",
+      "硬核": "強敵に囲まれ、走火入魔のリスクが高く、傷の回復も遅い"
+    },
+    "currency": "霊石"
+  },
+  "attributes": {
+    "str": {
+      "name": "筋力"
+    },
+    "dex": {
+      "name": "敏捷力"
+    },
+    "con": {
+      "name": "耐久力"
+    },
+    "int": {
+      "name": "知力"
+    },
+    "wis": {
+      "name": "判断力"
+    },
+    "cha": {
+      "name": "魅力"
+    }
+  },
+  "classes": {
+    "swordsman": {
+      "name": "剣客",
+      "description": "剣道に入り込んだ武人"
+    },
+    "daoist": {
+      "name": "道士",
+      "description": "道術と符を用いる修行者"
+    },
+    "assassin": {
+      "name": "刺客",
+      "description": "暗闇で暗器を操る達人"
+    },
+    "wanderer": {
+      "name": "遊侠",
+      "description": "天涯を流浪し義を貫く者"
+    }
+  },
+  "special_stats": {
+    "qi": {
+      "name": "内力",
+      "description": "内功や軽功を使うと内力が消費され、瞑想や休息で回復します。"
+    }
+  },
+  "skills": {
+    "sword_control": {
+      "name": "御剣術"
+    },
+    "sword_aura": {
+      "name": "剣気"
+    },
+    "sword_shield": {
+      "name": "剣盾"
+    },
+    "parry_break": {
+      "name": "破招"
+    },
+    "exorcism": {
+      "name": "退魔"
+    },
+    "talismans": {
+      "name": "符咒"
+    },
+    "alchemy": {
+      "name": "錬丹"
+    },
+    "qi_sight": {
+      "name": "望気"
+    },
+    "hidden_weapons": {
+      "name": "暗器"
+    },
+    "lightness_arts": {
+      "name": "軽功"
+    },
+    "poisons": {
+      "name": "毒術"
+    },
+    "disguise": {
+      "name": "易容"
+    },
+    "staff_arts": {
+      "name": "棍術"
+    },
+    "tracking": {
+      "name": "追跡"
+    },
+    "healing": {
+      "name": "療傷"
+    },
+    "persuasion": {
+      "name": "交渉"
+    }
+  }
+}

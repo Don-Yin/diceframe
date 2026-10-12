@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "item",
+    "id": "scholar_pack"
+  },
+  "fields": {
+    "name": "Scholar's Pack"
+  }
+}

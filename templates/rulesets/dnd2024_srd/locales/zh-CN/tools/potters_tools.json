@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "tool",
+    "id": "potters_tools"
+  },
+  "fields": {
+    "name": "陶匠工具"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "quick_character_preset",
+    "id": "lucky_scout"
+  },
+  "fields": {
+    "name": "Lucky Scout",
+    "summary": "A Halfling Rogue skilled at stealth, investigation, and one precise Sneak Attack.",
+    "recommendation_reason": "Choose this if you like observing the environment, finding opportunities, and acting at the decisive moment."
+  }
+}

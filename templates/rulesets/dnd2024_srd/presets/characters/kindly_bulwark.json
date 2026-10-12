@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "kind": "quick_character_preset",
+  "id": "kindly_bulwark",
+  "source_ref": "diceframe-original:dnd2024-presets/kindly_bulwark",
+  "automation_level": "deterministic",
+  "draft": {
+    "class_ref": "class:cleric",
+    "species_ref": "species:dwarf",
+    "background_ref": "background:acolyte",
+    "species_size": "medium",
+    "class_skill_refs": [
+      "skill:medicine",
+      "skill:persuasion"
+    ],
+    "equipment_package_ref": "equipment_package:cleric_a",
+    "background_equipment_package_ref": "equipment_package:acolyte_a",
+    "ability_method": "standard_array",
+    "base_abilities": {
+      "str": 14,
+      "dex": 8,
+      "con": 13,
+      "int": 10,
+      "wis": 15,
+      "cha": 12
+    },
+    "background_ability_bonuses": {
+      "wis": 2,
+      "cha": 1
+    },
+    "feat_choice_answers": {
+      "feat:magic_initiate_cleric": {
+        "spellcasting_ability": ["wis"],
+        "cantrips": ["guidance", "sacred_flame"],
+        "level_1_spell": ["healing_word"]
+      }
+    },
+    "class_spell_choices": {
+      "cantrip_ids": ["guidance", "sacred_flame", "thaumaturgy"],
+      "prepared_spell_ids": ["bless", "cure_wounds", "guiding_bolt", "shield_of_faith"]
+    },
+    "language_refs": [
+      "language:common",
+      "language:dwarvish",
+      "language:giant"
+    ],
+    "alignment": "lawful_good"
+  },
+  "fantasy_tags": [
+    "support",
+    "healing",
+    "durable"
+  ],
+  "difficulty": "intermediate"
+}

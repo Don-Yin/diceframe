@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "item",
+    "id": "holy_symbol"
+  },
+  "fields": {
+    "name": "圣徽"
+  }
+}

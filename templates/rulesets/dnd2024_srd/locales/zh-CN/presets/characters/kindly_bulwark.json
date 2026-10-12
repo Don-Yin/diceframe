@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "quick_character_preset",
+    "id": "kindly_bulwark"
+  },
+  "fields": {
+    "name": "仁心壁垒",
+    "summary": "矮人牧师，能治疗队友，也能穿甲站稳前线。",
+    "recommendation_reason": "如果你想照顾队友又不愿一碰就倒，牧师能用清晰的治疗与支援选择建立安全感。"
+  }
+}

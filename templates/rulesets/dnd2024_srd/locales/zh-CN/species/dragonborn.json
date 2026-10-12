@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "species",
+    "id": "dragonborn"
+  },
+  "fields": {
+    "name": "龙裔",
+    "summary": "以龙族血统、吐息武器和伤害抗性见长；5级获得短时飞行。"
+  }
+}

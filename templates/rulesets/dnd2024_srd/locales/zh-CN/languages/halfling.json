@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "language",
+    "id": "halfling"
+  },
+  "fields": {
+    "name": "半身人语"
+  }
+}

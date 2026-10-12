@@ -1,0 +1,22 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "subclass_catalog", "id": "srd_subclasses"},
+  "fields": {
+    "name": "SRD Subclasses",
+    "labels": {
+      "path_of_the_berserker": "Path of the Berserker",
+      "college_of_lore": "College of Lore",
+      "life_domain": "Life Domain",
+      "circle_of_the_land": "Circle of the Land",
+      "champion": "Champion",
+      "warrior_of_the_open_hand": "Warrior of the Open Hand",
+      "oath_of_devotion": "Oath of Devotion",
+      "hunter": "Hunter",
+      "thief": "Thief",
+      "draconic_sorcery": "Draconic Sorcery",
+      "fiend_patron": "Fiend Patron",
+      "evoker": "Evoker"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "skill",
+    "id": "perception"
+  },
+  "fields": {
+    "name": "Perception",
+    "summary": "Use your senses to notice something that is easy to miss."
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "quick_character_preset",
+    "id": "curious_arcanist"
+  },
+  "fields": {
+    "name": "Curious Arcanist",
+    "summary": "A Forest Gnome Wizard who solves problems with high Intelligence, knowledge skills, and varied magic.",
+    "recommendation_reason": "Choose this if you enjoy learning rules, preparing several solutions, and reshaping a scene with magic."
+  }
+}

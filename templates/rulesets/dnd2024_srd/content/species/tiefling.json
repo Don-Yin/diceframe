@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "kind": "species",
+  "creature_type": "humanoid",
+  "automation_level": "guided",
+  "id": "tiefling",
+  "size_options": [
+    "small",
+    "medium"
+  ],
+  "speed": 30,
+  "source_ref": "srd-5.2.1:p86:tiefling",
+  "choice_specs": [
+    {
+      "id": "fiendish_legacy",
+      "count": 1,
+      "option_ids": [
+        "abyssal",
+        "chthonic",
+        "infernal"
+      ]
+    },
+    {
+      "id": "legacy_spellcasting_ability",
+      "count": 1,
+      "option_ids": [
+        "int",
+        "wis",
+        "cha"
+      ]
+    }
+  ],
+  "traits": [
+    {
+      "id": "darkvision_60",
+      "source_ref": "srd-5.2.1:p86:tiefling",
+      "automation_level": "deterministic"
+    },
+    {
+      "id": "fiendish_legacy",
+      "source_ref": "srd-5.2.1:p86:tiefling",
+      "automation_level": "guided"
+    },
+    {
+      "id": "otherworldly_presence",
+      "source_ref": "srd-5.2.1:p86:tiefling",
+      "automation_level": "guided"
+    }
+  ]
+}

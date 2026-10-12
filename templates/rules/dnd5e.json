@@ -1,0 +1,766 @@
+{
+  "extends": "base_d20",
+  "rule_version": "1.2",
+  "rule_id": "dnd5e",
+  "rule_schema_version": 2,
+  "default_locale": "zh-CN",
+  "locale_schema_version": 1,
+  "scene_image": {
+    "kind": "builtin",
+    "id": "dnd5e"
+  },
+  "rule_name": "D&D 5e 轻量规则",
+  "description": "基于龙与地下城第五版SRD风格的轻量辅助规则：12职业、熟练加值、d20检定与简化战斗；适合叙事跑团，不承诺完整RAW复刻。",
+  "mechanics": "dnd5e_core",
+  "ruleset_level": "assisted",
+  "check_mechanic": {
+    "critical": {
+      "success": null,
+      "failure": null
+    },
+    "attack_critical": {
+      "success": 20,
+      "failure": 1
+    },
+    "attack_target": {
+      "type": "armor_class",
+      "base": 10,
+      "attribute": "dex",
+      "include_armor": true,
+      "min": 1,
+      "max": 40
+    }
+  },
+  "dc_table": {
+    "easy": 10,
+    "normal": 15,
+    "hard": 20,
+    "extreme": 25
+  },
+  "max_check_dc": 30,
+  "armor_model": "category_lite",
+  "damage_mechanic": {
+    "armor_reduces_damage": false,
+    "degree_affects_damage": false,
+    "critical_damage": "double_damage_dice",
+    "minimum_damage": 0
+  },
+  "death_mechanic": {
+    "hp_zero": "downed_death_saves"
+  },
+  "attributes": [
+    {
+      "key": "str",
+      "name": "力量",
+      "min": 3,
+      "max": 20
+    },
+    {
+      "key": "dex",
+      "name": "敏捷",
+      "min": 3,
+      "max": 20
+    },
+    {
+      "key": "con",
+      "name": "体质",
+      "min": 3,
+      "max": 20
+    },
+    {
+      "key": "int",
+      "name": "智力",
+      "min": 3,
+      "max": 20
+    },
+    {
+      "key": "wis",
+      "name": "感知",
+      "min": 3,
+      "max": 20
+    },
+    {
+      "key": "cha",
+      "name": "魅力",
+      "min": 3,
+      "max": 20
+    }
+  ],
+  "special_stats": [],
+  "attribute_points": 72,
+  "attr_hint": "D&D 属性使用 3-20 数值，10 约等于普通人平均水平；偶数提升通常会带来更好的 d20 修正。",
+  "dice_system": "d20",
+  "combat_model": "hp_based",
+  "proficiency_formula": "max(2, 2 + (level - 1) // 4)",
+  "hp_formula": "max(class_hp_die + con_mod, 1)",
+  "valid_qualities": [
+    "common",
+    "uncommon",
+    "rare",
+    "very_rare",
+    "legendary"
+  ],
+  "max_skills": 4,
+  "skill_point_total": 0,
+  "max_skill_value": 0,
+  "skill_mode": "proficiency",
+  "attack_proficiency": true,
+  "skill_hint": "D&D 技能更接近“熟练项/职业能力”。可以写擅长的技能或职业能力名，数值可省略；熟练加值主要由等级决定。检定小抄：优势=2d20取高，劣势=2d20取低；同时出现会抵消。",
+  "currency": "金币",
+  "item_categories": {
+    "equipment": [
+      "剑",
+      "弓",
+      "法杖",
+      "匕首",
+      "弯刀",
+      "巨剑",
+      "长矛",
+      "钉头锤",
+      "战锤",
+      "盾",
+      "皮甲",
+      "链甲",
+      "板甲",
+      "袍",
+      "靴子",
+      "手套",
+      "头盔",
+      "披风",
+      "护腕",
+      "项链",
+      "戒指",
+      "铠甲",
+      "鳞甲",
+      "胸甲",
+      "短剑",
+      "长剑",
+      "细剑",
+      "短弓",
+      "长弓",
+      "弩",
+      "圣徽",
+      "法器",
+      "乐器",
+      "短棍",
+      "飞镖",
+      "槲寄生",
+      "盗贼工具"
+    ],
+    "consumable": [
+      "药水",
+      "卷轴",
+      "药剂",
+      "干粮",
+      "绷带",
+      "解毒剂",
+      "火把",
+      "箭矢",
+      "弩箭",
+      "法术卷轴",
+      "治疗药水",
+      "圣水"
+    ],
+    "misc": [
+      "钥匙",
+      "地图",
+      "信",
+      "宝石",
+      "水晶",
+      "书",
+      "背包",
+      "绳索",
+      "灯笼",
+      "睡袋",
+      "铲子",
+      "口粮",
+      "水袋"
+    ]
+  },
+  "classes": [
+    {
+      "id": "barbarian",
+      "name": "野蛮人",
+      "description": "狂怒的近战战士，愤怒是他们的武器",
+      "starter_equipment_ids": [
+        "greataxe",
+        "leather_armor"
+      ],
+      "starter_equipment": [
+        "巨斧",
+        "皮甲"
+      ],
+      "hp_die": 12
+    },
+    {
+      "id": "bard",
+      "name": "吟游诗人",
+      "description": "用音乐和言辞编织魔法的艺术家",
+      "starter_equipment_ids": [
+        "rapier",
+        "lute"
+      ],
+      "starter_equipment": [
+        "细剑",
+        "鲁特琴"
+      ],
+      "hp_die": 8
+    },
+    {
+      "id": "cleric",
+      "name": "牧师",
+      "description": "侍奉神明的神圣施法者，治疗与驱邪",
+      "starter_equipment_ids": [
+        "mace",
+        "shield",
+        "holy_symbol"
+      ],
+      "starter_equipment": [
+        "钉头锤",
+        "盾牌",
+        "圣徽"
+      ],
+      "hp_die": 8
+    },
+    {
+      "id": "druid",
+      "name": "德鲁伊",
+      "description": "自然之力的守护者，可变身野兽",
+      "starter_equipment_ids": [
+        "wooden_shield",
+        "mistletoe"
+      ],
+      "starter_equipment": [
+        "木盾",
+        "槲寄生"
+      ],
+      "hp_die": 8
+    },
+    {
+      "id": "fighter",
+      "name": "战士",
+      "description": "精通所有武器和护甲的战术大师",
+      "starter_equipment_ids": [
+        "longsword",
+        "shield",
+        "chain_mail"
+      ],
+      "starter_equipment": [
+        "长剑",
+        "盾牌",
+        "链甲"
+      ],
+      "hp_die": 10
+    },
+    {
+      "id": "monk",
+      "name": "武僧",
+      "description": "以身体为武器的修行者，精通徒手格斗",
+      "starter_equipment_ids": [
+        "quarterstaff",
+        "dart"
+      ],
+      "starter_equipment": [
+        "短棍",
+        "飞镖x10"
+      ],
+      "hp_die": 8
+    },
+    {
+      "id": "paladin",
+      "name": "圣骑士",
+      "description": "背负神圣誓言的重甲骑士，惩恶扬善",
+      "starter_equipment_ids": [
+        "longsword",
+        "shield",
+        "holy_symbol"
+      ],
+      "starter_equipment": [
+        "长剑",
+        "盾牌",
+        "圣徽"
+      ],
+      "hp_die": 10
+    },
+    {
+      "id": "ranger",
+      "name": "游侠",
+      "description": "荒野中的猎人和追踪者，精通远程和双武器",
+      "starter_equipment_ids": [
+        "longbow",
+        "arrows",
+        "leather_armor"
+      ],
+      "starter_equipment": [
+        "长弓",
+        "箭矢x20",
+        "皮甲"
+      ],
+      "hp_die": 10
+    },
+    {
+      "id": "rogue",
+      "name": "游荡者",
+      "description": "暗影中的潜行者，开锁和偷袭的专家",
+      "starter_equipment_ids": [
+        "shortsword",
+        "shortbow",
+        "thieves_tools"
+      ],
+      "starter_equipment": [
+        "短剑",
+        "短弓",
+        "盗贼工具"
+      ],
+      "hp_die": 8
+    },
+    {
+      "id": "sorcerer",
+      "name": "术士",
+      "description": "血脉中流淌着魔法力量的先天施法者",
+      "starter_equipment_ids": [
+        "arcane_focus"
+      ],
+      "starter_equipment": {
+        "name": "法器",
+        "description": "奥术法器"
+      },
+      "hp_die": 6
+    },
+    {
+      "id": "warlock",
+      "name": "邪术师",
+      "description": "与异界存在签订契约获得黑暗力量",
+      "starter_equipment_ids": [
+        "leather_armor",
+        "arcane_focus"
+      ],
+      "starter_equipment": [
+        "皮甲",
+        "法器"
+      ],
+      "hp_die": 8
+    },
+    {
+      "id": "wizard",
+      "name": "法师",
+      "description": "通过长年学习掌握奥术的学院派施法者",
+      "starter_equipment_ids": [
+        "staff",
+        "spellbook"
+      ],
+      "starter_equipment": [
+        "法杖",
+        "法术书"
+      ],
+      "hp_die": 6
+    }
+  ],
+  "items": {
+    "dagger": {
+      "type": "weapon",
+      "damage_dice": "1d4"
+    },
+    "shortsword": {
+      "type": "weapon",
+      "damage_dice": "1d6"
+    },
+    "longsword": {
+      "type": "weapon",
+      "damage_dice": "1d8"
+    },
+    "scimitar": {
+      "type": "weapon",
+      "damage_dice": "1d6"
+    },
+    "rapier": {
+      "type": "weapon",
+      "damage_dice": "1d8"
+    },
+    "greatsword": {
+      "type": "weapon",
+      "damage_dice": "2d6"
+    },
+    "greataxe": {
+      "type": "weapon",
+      "damage_dice": "1d12"
+    },
+    "mace": {
+      "type": "weapon",
+      "damage_dice": "1d6"
+    },
+    "warhammer": {
+      "type": "weapon",
+      "damage_dice": "1d8"
+    },
+    "quarterstaff": {
+      "type": "weapon",
+      "damage_dice": "1d6"
+    },
+    "spear": {
+      "type": "weapon",
+      "damage_dice": "1d6"
+    },
+    "longbow": {
+      "type": "weapon",
+      "damage_dice": "1d8"
+    },
+    "shortbow": {
+      "type": "weapon",
+      "damage_dice": "1d6"
+    },
+    "crossbow": {
+      "type": "weapon",
+      "damage_dice": "1d8"
+    },
+    "leather_armor": {
+      "type": "armor",
+      "armor_category": "light",
+      "ac_base": 11
+    },
+    "chain_mail": {
+      "type": "armor",
+      "armor_category": "heavy",
+      "ac_base": 16,
+      "dex_cap": 0
+    },
+    "scale_mail": {
+      "type": "armor",
+      "armor_category": "medium",
+      "ac_base": 14,
+      "dex_cap": 2
+    },
+    "breastplate": {
+      "type": "armor",
+      "armor_category": "medium",
+      "ac_base": 14,
+      "dex_cap": 2
+    },
+    "plate_armor": {
+      "type": "armor",
+      "armor_category": "heavy",
+      "ac_base": 18,
+      "dex_cap": 0
+    },
+    "shield": {
+      "type": "shield",
+      "ac_bonus": 2
+    },
+    "wooden_shield": {
+      "type": "shield",
+      "ac_bonus": 2
+    },
+    "arcane_focus": {
+      "type": "focus"
+    },
+    "lute": {
+      "name": "鲁特琴",
+      "type": "focus"
+    },
+    "holy_symbol": {
+      "name": "圣徽",
+      "type": "focus"
+    },
+    "mistletoe": {
+      "name": "槲寄生",
+      "type": "focus"
+    },
+    "dart": {
+      "name": "飞镖",
+      "type": "weapon",
+      "damage_dice": "1d4"
+    },
+    "arrows": {
+      "name": "箭矢×20",
+      "type": "ammunition",
+      "quantity": 20
+    },
+    "thieves_tools": {
+      "name": "盗贼工具",
+      "type": "tool"
+    },
+    "staff": {
+      "name": "法杖",
+      "type": "weapon",
+      "damage_dice": "1d6"
+    },
+    "spellbook": {
+      "name": "法术书",
+      "type": "tool"
+    }
+  },
+  "skills": {
+    "athletics": {
+      "attribute": "str"
+    },
+    "acrobatics": {
+      "attribute": "dex"
+    },
+    "stealth": {
+      "attribute": "dex"
+    },
+    "arcana": {
+      "attribute": "int"
+    },
+    "history": {
+      "attribute": "int"
+    },
+    "investigation": {
+      "attribute": "int"
+    },
+    "nature": {
+      "attribute": "int"
+    },
+    "religion": {
+      "attribute": "int"
+    },
+    "insight": {
+      "attribute": "wis"
+    },
+    "medicine": {
+      "attribute": "wis"
+    },
+    "perception": {
+      "attribute": "wis"
+    },
+    "survival": {
+      "attribute": "wis"
+    },
+    "animal_handling": {
+      "attribute": "wis"
+    },
+    "deception": {
+      "attribute": "cha"
+    },
+    "intimidation": {
+      "attribute": "cha"
+    },
+    "performance": {
+      "attribute": "cha"
+    },
+    "persuasion": {
+      "attribute": "cha"
+    },
+    "sleight_of_hand": {
+      "attribute": "dex"
+    },
+    "rage": {
+      "name": "狂怒"
+    },
+    "reckless_attack": {
+      "name": "鲁莽攻击"
+    },
+    "danger_sense": {
+      "name": "危险感知"
+    },
+    "brutal_critical": {
+      "name": "蛮力"
+    },
+    "bardic_inspiration": {
+      "name": "吟游激励"
+    },
+    "hypnotic_pattern": {
+      "name": "迷惑曲"
+    },
+    "jack_of_all_trades": {
+      "name": "逸闻知识"
+    },
+    "counterspell": {
+      "name": "反制咒法"
+    },
+    "healing_word": {
+      "name": "治疗伤口"
+    },
+    "turn_undead": {
+      "name": "驱散不死"
+    },
+    "guiding_bolt": {
+      "name": "神圣惩击"
+    },
+    "shield_of_faith": {
+      "name": "虔信护盾"
+    },
+    "wild_shape": {
+      "name": "荒野变形"
+    },
+    "entangle": {
+      "name": "纠缠术"
+    },
+    "nature_sense": {
+      "name": "自然感知"
+    },
+    "barkskin": {
+      "name": "树肤术"
+    },
+    "action_surge": {
+      "name": "动作如潮"
+    },
+    "second_wind": {
+      "name": "回气"
+    },
+    "improved_critical": {
+      "name": "重击强化"
+    },
+    "battle_master": {
+      "name": "战术大师"
+    },
+    "flurry_of_blows": {
+      "name": "疾风连击"
+    },
+    "deflect_missiles": {
+      "name": "拨挡飞弹"
+    },
+    "stunning_strike": {
+      "name": "震慑拳"
+    },
+    "step_of_the_wind": {
+      "name": "轻身步"
+    },
+    "divine_smite": {
+      "name": "至圣斩"
+    },
+    "lay_on_hands": {
+      "name": "圣疗"
+    },
+    "aura_of_protection": {
+      "name": "虔诚护盾"
+    },
+    "divine_sense": {
+      "name": "制裁"
+    },
+    "favored_enemy": {
+      "name": "宿敌标记"
+    },
+    "hunter_s_mark": {
+      "name": "猎人印记"
+    },
+    "natural_explorer": {
+      "name": "自然行者"
+    },
+    "multiattack": {
+      "name": "多重射击"
+    },
+    "sneak_attack": {
+      "name": "偷袭"
+    },
+    "uncanny_dodge": {
+      "name": "灵巧闪避"
+    },
+    "thieves_tools": {
+      "name": "开锁精通"
+    },
+    "stealth_expertise": {
+      "name": "潜行大师"
+    },
+    "magic_missile": {
+      "name": "魔法飞弹"
+    },
+    "shield": {
+      "name": "护盾术"
+    },
+    "scorching_ray": {
+      "name": "灼热射线"
+    },
+    "metamagic": {
+      "name": "超魔法"
+    },
+    "eldritch_blast": {
+      "name": "魔能爆"
+    },
+    "pact_boon": {
+      "name": "邪魔契约"
+    },
+    "devil_s_sight": {
+      "name": "黑暗视觉"
+    },
+    "charm_person": {
+      "name": "魅惑"
+    },
+    "fireball": {
+      "name": "火球术"
+    },
+    "counterspell_wizard": {
+      "name": "法术反制"
+    }
+  },
+  "skill_pools": {
+    "barbarian": [
+      "rage",
+      "reckless_attack",
+      "danger_sense",
+      "brutal_critical"
+    ],
+    "bard": [
+      "bardic_inspiration",
+      "hypnotic_pattern",
+      "jack_of_all_trades",
+      "counterspell"
+    ],
+    "cleric": [
+      "healing_word",
+      "turn_undead",
+      "guiding_bolt",
+      "shield_of_faith"
+    ],
+    "druid": [
+      "wild_shape",
+      "entangle",
+      "nature_sense",
+      "barkskin"
+    ],
+    "fighter": [
+      "action_surge",
+      "second_wind",
+      "improved_critical",
+      "battle_master"
+    ],
+    "monk": [
+      "flurry_of_blows",
+      "deflect_missiles",
+      "stunning_strike",
+      "step_of_the_wind"
+    ],
+    "paladin": [
+      "divine_smite",
+      "lay_on_hands",
+      "aura_of_protection",
+      "divine_sense"
+    ],
+    "ranger": [
+      "favored_enemy",
+      "hunter_s_mark",
+      "natural_explorer",
+      "multiattack"
+    ],
+    "rogue": [
+      "sneak_attack",
+      "uncanny_dodge",
+      "thieves_tools",
+      "stealth_expertise"
+    ],
+    "sorcerer": [
+      "magic_missile",
+      "shield",
+      "scorching_ray",
+      "metamagic"
+    ],
+    "warlock": [
+      "eldritch_blast",
+      "pact_boon",
+      "devil_s_sight",
+      "charm_person"
+    ],
+    "wizard": [
+      "fireball",
+      "magic_missile",
+      "shield",
+      "counterspell_wizard"
+    ]
+  },
+  "gm_prompt_appendix": "你使用龙与地下城第5版规则。角色有熟练加值（proficiency_bonus = 2 + (等级-1)//4），检定格式：(力量检定: d20+属性修正+熟练加值 vs DC)。优势/劣势按 D&D 5e 处理：优势掷 2 个 d20 取高，劣势掷 2 个 d20 取低；优势和劣势同时存在时互相抵消，不叠加。战斗中：攻击检定决定命中（d20+力量/敏捷修正+熟练加值 vs AC，AC 由护甲类别与敏捷决定），命中后掷伤害骰+属性修正；暴击只翻倍伤害骰，不翻倍固定修正。DC 25/30 只用于有明确依据的近乎不可能情境，不得默认使用。每轮角色通常可以移动并执行 1 个动作；附赠动作只有在职业特性或法术明确允许时才能额外使用。只有具备施法能力的职业才使用法术位，数量以角色当前职业/等级资源为准，GM 不得为非施法职业凭空生成法术位。短休回复部分HP（掷生命骰+体质修正），长休全回复+回复法术位。HP 归零的角色陷入昏迷，由系统每回合自动结算死亡豁免（3 次成功稳定、3 次失败死亡、自然 20 恢复 1HP 苏醒、自然 1 记两次失败）；治疗可结束昏迷，GM 不得直接宣告其死亡。昏迷角色受击受伤时累加 1 次死亡豁免失败（暴击 2 次）。",
+  "difficulty_instructions": {
+    "轻松": "怪物CR低于队伍1级，DC-2，战利品丰富",
+    "标准": "怪物CR等于队伍等级，DC如常，战利品合理",
+    "硬核": "怪物CR高于队伍1-2级，DC+2，资源稀缺"
+  }
+}

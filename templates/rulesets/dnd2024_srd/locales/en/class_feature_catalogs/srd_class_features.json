@@ -1,0 +1,25 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "class_feature_catalog",
+    "id": "srd_class_features"
+  },
+  "fields": {
+    "labels": {
+      "monk": "Monk",
+      "martial_arts": "Martial Arts",
+      "monks_focus": "Monk's Focus",
+      "flurry_of_blows": "Flurry of Blows",
+      "patient_defense": "Patient Defense",
+      "patient_defense_focus": "Patient Defense (Focus)",
+      "step_of_the_wind": "Step of the Wind",
+      "step_of_the_wind_focus": "Step of the Wind (Focus)",
+      "bonus_unarmed_strike": "Bonus Unarmed Strike",
+      "focus_points": "Focus Points",
+      "unarmed_strike": "Unarmed Strike",
+      "action": "Action",
+      "bonus_action": "Bonus Action"
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "class",
+  "id": "druid",
+  "source_ref": "srd-5.2.1:p41:druid-core-traits",
+  "class_progression_ref": "progression_catalog:srd_classes",
+  "automation_level": "guided",
+  "hit_die": 8,
+  "fixed_hp_per_level": 5,
+  "spellcasting_ability": "wis",
+  "recommended_spell_choices": {
+    "cantrip_ids": ["druidcraft", "produce_flame"],
+    "prepared_spell_ids": ["animal_friendship", "cure_wounds", "faerie_fire", "thunderwave"]
+  },
+  "primary_ability_refs": [
+    "ability:wis"
+  ],
+  "saving_throw_refs": [
+    "ability:int",
+    "ability:wis"
+  ],
+  "skill_choice": {
+    "count": 2,
+    "allowed_refs": [
+      "skill:animal_handling",
+      "skill:arcana",
+      "skill:insight",
+      "skill:medicine",
+      "skill:nature",
+      "skill:perception",
+      "skill:religion",
+      "skill:survival"
+    ]
+  },
+  "armor_proficiencies": [
+    "light",
+    "shield"
+  ],
+  "weapon_proficiencies": [
+    "simple"
+  ],
+  "tool_proficiency_refs": [
+    "tool:herbalism_kit"
+  ],
+  "equipment_package_refs": [
+    "equipment_package:druid_a",
+    "equipment_package:druid_b"
+  ],
+  "recommended_standard_array": {
+    "str": 8,
+    "dex": 12,
+    "con": 14,
+    "int": 13,
+    "wis": 15,
+    "cha": 10
+  },
+  "level_1_feature_ids": [
+    "druidic",
+    "primal_order",
+    "spellcasting"
+  ],
+  "experience": {
+    "difficulty": "intermediate"
+  }
+}

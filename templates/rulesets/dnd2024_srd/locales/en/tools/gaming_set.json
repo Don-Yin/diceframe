@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "tool",
+    "id": "gaming_set"
+  },
+  "fields": {
+    "name": "Gaming Set"
+  }
+}

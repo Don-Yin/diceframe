@@ -1,0 +1,31 @@
+/* 扫码弹窗外壳：「手机扫码登录」与「邀请 / 接管链接」共用。
+
+   两者本质是同一条流程——挑一个对方能访问到的地址，出一张给手机看的二维码，
+   再留一份可手输/可转发的原文——所以外壳只有一套：同一宽度、同一滚动与窄屏
+   行为。内容差异走各自的组件，不再各写一套 dialog 尺寸。
+
+   窄卡片而不是通用设置弹窗宽度：套 760px 的设置弹窗宽度只会在二维码右侧留出
+   一大块空白。 */
+.dialog.qr-share-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 配对面板在设置页里带上边距与分隔线；作为弹窗主体时这两样都是多余的。 */
+.dialog.qr-share-dialog .pairing-panel {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+@media (max-width: 720px) {
+  .dialog.qr-share-dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: 10px;
+  }
+}

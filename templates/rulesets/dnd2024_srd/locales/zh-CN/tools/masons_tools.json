@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "tool",
+    "id": "masons_tools"
+  },
+  "fields": {
+    "name": "石匠工具"
+  }
+}

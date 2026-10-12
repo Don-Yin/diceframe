@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "species",
+    "id": "dragonborn"
+  },
+  "fields": {
+    "name": "Dragonborn",
+    "summary": "Choose a draconic ancestry for a breath weapon and damage resistance; at level 5, gain brief flight."
+  }
+}

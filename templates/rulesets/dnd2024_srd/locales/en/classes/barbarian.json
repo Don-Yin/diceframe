@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "class",
+    "id": "barbarian"
+  },
+  "fields": {
+    "name": "Barbarian",
+    "summary": "A high-HP melee warrior who uses Rage to endure punishment and hit harder."
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "species",
+    "id": "elf"
+  },
+  "fields": {
+    "name": "精灵",
+    "summary": "从卓尔、高等精灵或木精灵谱系中选择，拥有敏锐感官与妖精血统。"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "equipment_package",
+    "id": "wizard_a"
+  },
+  "fields": {
+    "name": "Wizard Equipment A"
+  }
+}

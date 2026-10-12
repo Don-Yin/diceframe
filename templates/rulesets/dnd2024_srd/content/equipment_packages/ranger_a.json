@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "ranger_a",
+  "source_ref": "srd-5.2.1:p57:ranger_a",
+  "automation_level": "deterministic",
+  "category": "class",
+  "item_refs": [
+    "item:studded_leather_armor",
+    "item:scimitar",
+    "item:shortsword",
+    "item:longbow",
+    "item:arrows",
+    "item:quiver",
+    "item:druidic_focus_mistletoe",
+    "item:explorer_pack"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:studded_leather_armor",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:scimitar",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:shortsword",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:longbow",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:arrows",
+      "quantity": 20
+    },
+    {
+      "item_ref": "item:quiver",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:druidic_focus_mistletoe",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:explorer_pack",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 7
+}

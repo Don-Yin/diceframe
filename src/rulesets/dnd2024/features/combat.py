@@ -1,0 +1,204 @@
+"""Combat capability projection for D&D 2024 class features.
+
+The combat engine consumes a *capability id*, its action/resource cost, whether
+it needs a hostile target, and the underlying canonical actions it performs.
+Which class grants that capability, and from which level, is answered here --
+never by the combat engine, and never by the frontend.
+"""
+
+from __future__ import annotations
+
+import re
+from copy import deepcopy
+from dataclasses import dataclass
+from typing import Any, Iterable, Mapping
+
+from .models import (
+    ClassFeatureDefinition,
+    CombatCapabilityView,
+    Dnd2024ClassFeatureCatalog,
+    CapabilityCostView,
+    FeatureCapability,
+)
+from .resources import ResourceDefinition
+
+
+_DICE_FORMULA_RE = re.compile(r"^(\d+)d(\d+)(?:\+(\d+))?$")
+_FLAT_FORMULA_RE = re.compile(r"^(\d+)$")
+
+
+def damage_mean(formula: str) -> float | None:
+    """Expected value of a canonical damage formula, or ``None`` if unparsed."""
+
+    text = str(formula or "").strip()
+    match = _DICE_FORMULA_RE.fullmatch(text)
+    if match is not None:
+        count, sides = int(match.group(1)), int(match.group(2))
+        return count * (sides + 1) / 2 + int(match.group(3) or 0)
+    match = _FLAT_FORMULA_RE.fullmatch(text)
+    if match is not None:
+        return float(match.group(1))
+    return None
+
+
+def martial_arts_die_is_better(candidate: str, current: str) -> bool:
+    """Whether the feature die improves on the profile's own damage formula.
+
+    V1 deterministic automation must never *downgrade* a weapon: when the
+    profile's own dice are at least as good, or cannot be compared at all, the
+    weapon keeps its own damage formula and only the ability choice applies.
+    """
+
+    candidate_mean = damage_mean(candidate)
+    current_mean = damage_mean(current)
+    if candidate_mean is None or current_mean is None:
+        return False
+    return candidate_mean > current_mean
+
+
+@dataclass(frozen=True, slots=True)
+class CombatContext:
+    """The action-economy budget a capability is evaluated against."""
+
+    action: int = 0
+    bonus_action: int = 0
+    reaction: int = 0
+
+    @classmethod
+    def from_economy(cls, economy: Mapping[str, Any] | None) -> CombatContext:
+        source: Mapping[str, Any] = economy if isinstance(economy, Mapping) else {}
+
+        def budget(key: str) -> int:
+            value = source.get(key, 0)
+            if isinstance(value, bool) or not isinstance(value, int):
+                return 0
+            return max(0, value)
+
+        return cls(
+            action=budget("action"),
+            bonus_action=budget("bonus_action"),
+            reaction=budget("reaction"),
+        )
+
+    def remaining(self, action: str) -> int:
+        if action == "bonus_action":
+            return self.bonus_action
+        if action == "action":
+            return self.action
+        return 0
+
+
+def _cost_views(
+    catalog: Dnd2024ClassFeatureCatalog,
+    capability: FeatureCapability,
+    context: CombatContext,
+    definitions: Mapping[str, ResourceDefinition],
+) -> tuple[CapabilityCostView, ...]:
+    views: list[CapabilityCostView] = []
+    if capability.cost.action:
+        views.append(CapabilityCostView(
+            kind=capability.cost.action,
+            name=catalog.label(capability.cost.action, capability.cost.action),
+            amount=1,
+            current=context.remaining(capability.cost.action),
+            maximum=1,
+        ))
+    for resource_cost in capability.cost.resources:
+        definition = definitions.get(resource_cost.resource_id)
+        views.append(CapabilityCostView(
+            kind="resource",
+            name=catalog.label(resource_cost.resource_id, resource_cost.resource_id),
+            amount=resource_cost.amount,
+            current=int(definition.current) if definition is not None else 0,
+            maximum=int(definition.maximum) if definition is not None else 0,
+        ))
+    return tuple(views)
+
+
+def _blocked_reason(
+    catalog: Dnd2024ClassFeatureCatalog,
+    capability: FeatureCapability,
+    context: CombatContext,
+    definitions: Mapping[str, ResourceDefinition],
+) -> str:
+    for resource_cost in capability.cost.resources:
+        definition = definitions.get(resource_cost.resource_id)
+        name = catalog.label(resource_cost.resource_id, resource_cost.resource_id)
+        if definition is None:
+            return f"{name} is not available to this character"
+        if int(definition.current) < resource_cost.amount:
+            return (
+                f"not enough {name}: this capability needs {resource_cost.amount}, "
+                f"the character has {int(definition.current)}"
+            )
+    action = capability.cost.action
+    if action and context.remaining(action) < 1:
+        return f"the {action.replace('_', ' ')} has already been spent"
+    return ""
+
+
+def combat_capabilities(
+    catalog: Dnd2024ClassFeatureCatalog,
+    owned: tuple[ClassFeatureDefinition, ...],
+    context: CombatContext,
+    definitions: Mapping[str, ResourceDefinition],
+    *,
+    include_unavailable: bool = False,
+) -> tuple[CombatCapabilityView, ...]:
+    """Project the capabilities the character may declare right now.
+
+    Only capabilities the character actually owns are considered; a capability
+    whose action or resource cost cannot be paid is returned with a reason when
+    ``include_unavailable`` is set, and omitted otherwise.  The combat layer
+    therefore never has to re-derive class level, feature ownership, or
+    resource maxima.
+    """
+
+    result: list[CombatCapabilityView] = []
+    for definition in owned:
+        for capability in definition.capabilities:
+            blocked = _blocked_reason(catalog, capability, context, definitions)
+            if blocked and not include_unavailable:
+                continue
+            result.append(CombatCapabilityView(
+                id=capability.id,
+                feature_id=definition.id,
+                name=catalog.label(capability.id, capability.id),
+                available=not blocked,
+                blocked_reason=blocked,
+                requires_hostile_target=capability.requires_hostile_target,
+                costs=_cost_views(catalog, capability, context, definitions),
+            ))
+    return tuple(result)
+
+
+def martial_arts_profile(
+    base: Mapping[str, Any],
+    *,
+    damage_die: str,
+    ability_choice: Iterable[str] = (),
+) -> dict[str, Any]:
+    """Return the actor-specific effective profile of a canonical attack.
+
+    Used for the canonical Unarmed Strike and for a wielded Monk Weapon: the
+    canonical identity, damage type, properties, range and proficiency still
+    come from the combat catalog, and only the *effective* base damage and
+    attack-ability choice are feature-derived.  No new attack identity is ever
+    created here.
+
+    V1 自动化是确定性的：属性取投影给出的选择中修正值更高者，伤害骰只在
+    Martial Arts Die 更优时才替换，绝不把武器自己的伤害骰降级。
+    """
+
+    profile = deepcopy(dict(base))
+    applied = False
+    if damage_die and martial_arts_die_is_better(damage_die, str(base.get("damage") or "")):
+        profile["damage"] = damage_die
+        applied = True
+    choice = [str(item) for item in ability_choice if str(item)]
+    if choice:
+        profile["ability_choice"] = choice
+        applied = True
+    if applied:
+        profile["martial_arts"] = True
+    return profile

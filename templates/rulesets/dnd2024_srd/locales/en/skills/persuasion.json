@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "skill",
+    "id": "persuasion"
+  },
+  "fields": {
+    "name": "Persuasion",
+    "summary": "Influence someone through honest, tactful communication."
+  }
+}

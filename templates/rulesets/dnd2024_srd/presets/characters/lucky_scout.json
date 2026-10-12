@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "kind": "quick_character_preset",
+  "id": "lucky_scout",
+  "source_ref": "diceframe-original:dnd2024-presets/lucky_scout",
+  "automation_level": "deterministic",
+  "draft": {
+    "class_ref": "class:rogue",
+    "species_ref": "species:halfling",
+    "background_ref": "background:criminal",
+    "species_size": "small",
+    "class_skill_refs": [
+      "skill:deception",
+      "skill:insight",
+      "skill:investigation",
+      "skill:perception"
+    ],
+    "equipment_package_ref": "equipment_package:rogue_a",
+    "background_equipment_package_ref": "equipment_package:criminal_a",
+    "ability_method": "standard_array",
+    "base_abilities": {
+      "str": 12,
+      "dex": 15,
+      "con": 13,
+      "int": 14,
+      "wis": 10,
+      "cha": 8
+    },
+    "background_ability_bonuses": {
+      "dex": 2,
+      "con": 1
+    },
+    "language_refs": [
+      "language:common",
+      "language:halfling",
+      "language:goblin"
+    ],
+    "alignment": "chaotic_good"
+  },
+  "fantasy_tags": [
+    "stealth",
+    "skills",
+    "ranged"
+  ],
+  "difficulty": "beginner"
+}

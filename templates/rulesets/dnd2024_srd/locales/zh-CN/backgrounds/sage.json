@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "background",
+    "id": "sage"
+  },
+  "fields": {
+    "name": "贤者",
+    "summary": "长期研习典籍与奥秘，擅长奥秘和历史。"
+  }
+}

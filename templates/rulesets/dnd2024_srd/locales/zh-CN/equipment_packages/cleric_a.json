@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "equipment_package",
+    "id": "cleric_a"
+  },
+  "fields": {
+    "name": "牧师装备 A"
+  }
+}

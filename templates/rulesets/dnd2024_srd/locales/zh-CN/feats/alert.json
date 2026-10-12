@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "feat",
+    "id": "alert"
+  },
+  "fields": {
+    "name": "警觉",
+    "summary": "先攻检定加入熟练加值；战斗开始后可与一名自愿盟友交换先攻。"
+  }
+}

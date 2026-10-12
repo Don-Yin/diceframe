@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "kind": "class",
+  "id": "warlock",
+  "source_ref": "srd-5.2.1:p70:warlock-core-traits",
+  "class_progression_ref": "progression_catalog:srd_classes",
+  "automation_level": "guided",
+  "hit_die": 8,
+  "fixed_hp_per_level": 5,
+  "spellcasting_ability": "cha",
+  "recommended_spell_choices": {
+    "cantrip_ids": ["eldritch_blast", "prestidigitation"],
+    "prepared_spell_ids": ["charm_person", "hex"]
+  },
+  "primary_ability_refs": [
+    "ability:cha"
+  ],
+  "saving_throw_refs": [
+    "ability:wis",
+    "ability:cha"
+  ],
+  "skill_choice": {
+    "count": 2,
+    "allowed_refs": [
+      "skill:arcana",
+      "skill:deception",
+      "skill:history",
+      "skill:intimidation",
+      "skill:investigation",
+      "skill:nature",
+      "skill:religion"
+    ]
+  },
+  "armor_proficiencies": [
+    "light"
+  ],
+  "weapon_proficiencies": [
+    "simple"
+  ],
+  "equipment_package_refs": [
+    "equipment_package:warlock_a",
+    "equipment_package:warlock_b"
+  ],
+  "recommended_standard_array": {
+    "str": 8,
+    "dex": 14,
+    "con": 13,
+    "int": 12,
+    "wis": 10,
+    "cha": 15
+  },
+  "level_1_feature_ids": [
+    "eldritch_invocations",
+    "pact_magic"
+  ],
+  "experience": {
+    "difficulty": "advanced"
+  }
+}

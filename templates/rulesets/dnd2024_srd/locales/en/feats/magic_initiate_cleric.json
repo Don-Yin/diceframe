@@ -1,0 +1,29 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "feat",
+    "id": "magic_initiate_cleric"
+  },
+  "fields": {
+    "name": "Magic Initiate (Cleric)",
+    "summary": "Choose two cantrips and one level 1 spell from the Cleric list, plus the ability used to cast them.",
+    "labels": {
+      "spellcasting_ability": "Spellcasting ability",
+      "cantrips": "Cantrips (choose 2)",
+      "level_1_spell": "Level 1 spell (choose 1)",
+      "int": "Intelligence", "wis": "Wisdom", "cha": "Charisma",
+      "guidance": "Guidance", "light": "Light", "mending": "Mending",
+      "resistance": "Resistance", "sacred_flame": "Sacred Flame",
+      "spare_the_dying": "Spare the Dying", "thaumaturgy": "Thaumaturgy",
+      "bane": "Bane", "bless": "Bless", "command": "Command",
+      "create_or_destroy_water": "Create or Destroy Water", "cure_wounds": "Cure Wounds",
+      "detect_evil_and_good": "Detect Evil and Good", "detect_magic": "Detect Magic",
+      "detect_poison_and_disease": "Detect Poison and Disease", "guiding_bolt": "Guiding Bolt",
+      "healing_word": "Healing Word", "inflict_wounds": "Inflict Wounds",
+      "protection_from_evil_and_good": "Protection from Evil and Good",
+      "purify_food_and_drink": "Purify Food and Drink", "sanctuary": "Sanctuary",
+      "shield_of_faith": "Shield of Faith"
+    }
+  }
+}

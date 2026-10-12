@@ -1,0 +1,6 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {"kind": "scene", "id": "greymoor_forked_trail"},
+  "fields": {"name": "分岔林径", "description": "三趾足迹与苍白的路灯余辉一同指向荆棘林。"}
+}

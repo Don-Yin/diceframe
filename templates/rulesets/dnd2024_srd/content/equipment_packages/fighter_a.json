@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "fighter_a",
+  "source_ref": "srd-5.2.1:p47:fighter_a",
+  "automation_level": "deterministic",
+  "category": "class",
+  "item_refs": [
+    "item:chain_mail",
+    "item:greatsword",
+    "item:flail",
+    "item:javelin",
+    "item:dungeoneer_pack"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:chain_mail",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:greatsword",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:flail",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:javelin",
+      "quantity": 8
+    },
+    {
+      "item_ref": "item:dungeoneer_pack",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 4
+}

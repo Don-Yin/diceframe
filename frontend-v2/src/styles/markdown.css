@@ -1,0 +1,137 @@
+/* 共享的 GitHub 风格 Markdown 渲染样式。
+   供 v-html 渲染 renderSafeMarkdown 结果的容器使用：加 class="safe-markdown" 即可。
+   颜色全部走主题变量，跟随皮肤切换。 */
+
+.safe-markdown {
+  font-size: 14px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.safe-markdown h1,
+.safe-markdown h2,
+.safe-markdown h3,
+.safe-markdown h4,
+.safe-markdown h5,
+.safe-markdown h6 {
+  margin: 1.4em 0 0.6em;
+  line-height: 1.35;
+  color: var(--df-text);
+  font-family: var(--df-font-title);
+}
+
+.safe-markdown h1:first-child,
+.safe-markdown h2:first-child,
+.safe-markdown h3:first-child { margin-top: 0; }
+
+.safe-markdown h1 { font-size: 1.6em; padding-bottom: 0.35em; border-bottom: 1px solid var(--df-border-soft); }
+.safe-markdown h2 { font-size: 1.35em; padding-bottom: 0.3em; border-bottom: 1px solid var(--df-border-soft); }
+.safe-markdown h3 { font-size: 1.18em; }
+.safe-markdown h4 { font-size: 1.05em; }
+.safe-markdown h5,
+.safe-markdown h6 { font-size: 1em; color: var(--df-text-secondary); }
+
+.safe-markdown p { margin: 0.6em 0; }
+
+.safe-markdown a { color: var(--df-accent-strong); text-decoration: none; }
+.safe-markdown a:hover { text-decoration: underline; }
+
+.safe-markdown ul,
+.safe-markdown ol { margin: 0.6em 0; padding-left: 1.6em; }
+.safe-markdown li { margin: 0.25em 0; }
+.safe-markdown li > p { margin: 0.25em 0; }
+.safe-markdown ul ul,
+.safe-markdown ul ol,
+.safe-markdown ol ul,
+.safe-markdown ol ol { margin: 0.25em 0; }
+
+.safe-markdown li.task-list-item { list-style: none; margin-left: -1.4em; }
+.safe-markdown li.task-list-item input[type='checkbox'] {
+  margin: 0 0.45em 0 0;
+  vertical-align: middle;
+}
+
+.safe-markdown code {
+  padding: 0.15em 0.4em;
+  border-radius: var(--df-radius-sm);
+  background: color-mix(in srgb, var(--df-text) 8%, transparent);
+  font-family: var(--df-font-mono);
+  font-size: 0.88em;
+}
+
+.safe-markdown pre {
+  margin: 0.8em 0;
+  padding: 12px 14px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: var(--df-surface-2);
+  overflow-x: auto;
+  line-height: 1.6;
+}
+
+.safe-markdown pre code {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0.9em;
+}
+
+.safe-markdown blockquote {
+  margin: 0.8em 0;
+  padding: 0.3em 1em;
+  border-left: 4px solid var(--df-border);
+  color: var(--df-text-secondary);
+  background: color-mix(in srgb, var(--df-surface-1) 55%, transparent);
+  border-radius: 0 var(--df-radius-sm) var(--df-radius-sm) 0;
+}
+
+.safe-markdown blockquote > :first-child { margin-top: 0.3em; }
+.safe-markdown blockquote > :last-child { margin-bottom: 0.3em; }
+
+.safe-markdown table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 0.8em 0;
+  border-collapse: collapse;
+  overflow-x: auto;
+  font-size: 0.92em;
+}
+
+.safe-markdown th,
+.safe-markdown td {
+  padding: 6px 13px;
+  border: 1px solid var(--df-border-soft);
+}
+
+.safe-markdown th {
+  background: var(--df-surface-2);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.safe-markdown tr:nth-child(2n) td { background: color-mix(in srgb, var(--df-surface-1) 50%, transparent); }
+
+.safe-markdown img {
+  max-width: 100%;
+  border-radius: var(--df-radius-sm);
+}
+
+.safe-markdown hr {
+  height: 1px;
+  margin: 1.4em 0;
+  border: none;
+  background: var(--df-border-soft);
+}
+
+.safe-markdown kbd {
+  padding: 0.1em 0.45em;
+  border: 1px solid var(--df-border);
+  border-bottom-width: 2px;
+  border-radius: var(--df-radius-sm);
+  background: var(--df-surface-2);
+  font-family: var(--df-font-mono);
+  font-size: 0.85em;
+}
+
+.safe-markdown del { color: var(--df-text-muted); }

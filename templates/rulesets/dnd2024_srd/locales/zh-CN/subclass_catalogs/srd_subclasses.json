@@ -1,0 +1,22 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {"kind": "subclass_catalog", "id": "srd_subclasses"},
+  "fields": {
+    "name": "SRD 子职",
+    "labels": {
+      "path_of_the_berserker": "狂战士道途",
+      "college_of_lore": "逸闻学院",
+      "life_domain": "生命领域",
+      "circle_of_the_land": "大地结社",
+      "champion": "勇士",
+      "warrior_of_the_open_hand": "散打宗武者",
+      "oath_of_devotion": "奉献之誓",
+      "hunter": "猎人",
+      "thief": "盗贼",
+      "draconic_sorcery": "龙族术法",
+      "fiend_patron": "邪魔宗主",
+      "evoker": "塑能师"
+    }
+  }
+}

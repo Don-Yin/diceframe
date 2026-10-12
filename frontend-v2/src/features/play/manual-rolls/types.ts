@@ -1,0 +1,44 @@
+export type ManualRollVisibility = 'party' | 'private'
+export type ManualRollStatus = 'pending' | 'resolved' | 'cancelled'
+export type ManualRollPurpose = 'free' | 'check' | 'contest'
+export type ManualRollComparison = 'auto' | 'at_least' | 'at_most'
+
+export interface ManualRollResult {
+  formula: string
+  rolls: number[]
+  modifier: number
+  total: number
+  natural: number | null
+  target?: number
+  comparison?: ManualRollComparison
+  verdict?: 'success' | 'failure' | 'winner' | 'loss' | string
+  rolled_by: string
+  rolled_at: string
+}
+
+export interface ManualRollRequest {
+  id: string
+  operation_id: string
+  run_id: string
+  round_number: number
+  created_by: string
+  created_at: string
+  label: string
+  formula: string
+  purpose?: ManualRollPurpose
+  target?: number | null
+  comparison?: ManualRollComparison
+  include_in_ai_context?: boolean
+  visibility: ManualRollVisibility
+  target_uids: string[]
+  target_names: Record<string, string>
+  status: ManualRollStatus
+  results: Record<string, ManualRollResult>
+  cancel_reason?: string
+}
+
+export interface ManualRollRequestsResponse {
+  ok: true
+  run_id: string
+  requests: ManualRollRequest[]
+}

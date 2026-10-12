@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "skill",
+    "id": "arcana"
+  },
+  "fields": {
+    "name": "Arcana",
+    "summary": "Recall knowledge about spells, magic items, and the planes of existence."
+  }
+}

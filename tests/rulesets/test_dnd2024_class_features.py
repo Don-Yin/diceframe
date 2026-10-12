@@ -1,0 +1,329 @@
+"""Class feature runtime v1: identity, availability, parameters, i18n.
+
+These tests only exercise the feature boundary.  Combat behavior lives in
+``test_dnd2024_monk_combat.py`` and the resource lifecycle in
+``test_dnd2024_monk_resources.py``.
+"""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from dataclasses import replace
+
+import pytest
+
+from src.rulesets.dnd2024.features import (
+    ClassFeatureError,
+    Dnd2024ClassFeatureResolver,
+)
+from src.rulesets.dnd2024.resting import Dnd2024RestEngine
+from src.rulesets.dnd2024.runtime import Dnd2024Runtime
+
+from dnd2024_monk_common import advance, monk_sheet
+
+
+MONK_FEATURES_AT_TWO = (
+    "martial_arts", "monks_focus", "flurry_of_blows", "patient_defense",
+    "step_of_the_wind",
+)
+
+
+def _resolver(locale: str = "en") -> tuple[Dnd2024Runtime, Dnd2024ClassFeatureResolver]:
+    runtime = Dnd2024Runtime()
+    return runtime, Dnd2024ClassFeatureResolver(runtime.load_bundle(locale))
+
+
+def _character(level: int, class_ref: str = "class:monk", **extra) -> dict:
+    return {
+        "build": {"class_levels": [{"class_ref": class_ref, "level": level}]},
+        **extra,
+    }
+
+
+def _with_focus(current: int, maximum: int, level: int = 2) -> dict:
+    return _character(level, resources={
+        "class": {"focus_points": {"current": current, "maximum": maximum}},
+    })
+
+
+def _mutated_bundle(runtime: Dnd2024Runtime, mutate) -> object:
+    """Return the real bundle with one feature-catalog edit applied."""
+
+    bundle = runtime.load_bundle("en")
+    entities = deepcopy(bundle.entities)
+    mutate(entities["class_feature_catalog"]["srd_class_features"])
+    return replace(bundle, entities=entities)
+
+
+def test_monk_level_one_owns_martial_arts_only() -> None:
+    _runtime, resolver = _resolver()
+
+    assert [feature.id for feature in resolver.features_for(_character(1))] == [
+        "martial_arts",
+    ]
+    assert resolver.has_feature(_character(1), "martial_arts") is True
+    assert resolver.has_feature(_character(1), "monks_focus") is False
+    assert resolver.has_feature(_character(1), "flurry_of_blows") is False
+    assert resolver.class_resource_definition(_character(1), "focus_points") is None
+
+
+def test_monk_level_two_gains_focus_and_the_three_focus_options() -> None:
+    _runtime, resolver = _resolver()
+    character = _character(2)
+
+    owned = [feature.id for feature in resolver.features_for(character)]
+
+    assert owned == list(MONK_FEATURES_AT_TWO)
+    for feature_id in MONK_FEATURES_AT_TWO:
+        assert resolver.has_feature(character, feature_id) is True
+
+
+@pytest.mark.parametrize(
+    "preset_id",
+    ["stalwart_guardian", "lucky_scout", "curious_arcanist", "woodland_guide"],
+)
+def test_non_monk_characters_never_own_monk_features(preset_id: str) -> None:
+    runtime = Dnd2024Runtime()
+    resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle("en"))
+    choices = runtime.builder_choices(None, {"locale": "en"})
+    preset = next(item for item in choices["quick_presets"] if item["id"] == preset_id)
+    sheet = runtime.finalize_character(
+        None, {**preset["draft"], "locale": "en", "name": preset_id},
+    )
+
+    assert resolver.features_for(sheet["ruleset_character"]) == ()
+    assert resolver.combat_capabilities(sheet["ruleset_character"], {"bonus_action": 1}) == ()
+    assert sheet["ruleset_character"]["resources"]["class"].get("focus_points") is None
+
+
+def test_advancing_one_to_two_exposes_the_new_capabilities() -> None:
+    runtime = Dnd2024Runtime()
+    resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle("en"))
+    level_one = monk_sheet(runtime, level=1)
+
+    before = resolver.combat_capabilities(
+        level_one["ruleset_character"], {"action": 1, "bonus_action": 1},
+    )
+    advanced = advance(runtime, level_one, 2)
+    after = resolver.combat_capabilities(
+        advanced["ruleset_character"], {"action": 1, "bonus_action": 1},
+    )
+
+    # 1 级只有武艺带来的附赠徒手打击；升级后才出现专注点与三个专注用法。
+    assert [item.id for item in before] == ["bonus_unarmed_strike"]
+    assert {item.id for item in after} == {
+        "bonus_unarmed_strike", "flurry_of_blows", "patient_defense",
+        "patient_defense_focus", "step_of_the_wind", "step_of_the_wind_focus",
+    }
+    assert advanced["class_resources"][0]["id"] == "focus_points"
+    assert advanced["class_resources"][0]["current"] == 2
+
+
+@pytest.mark.parametrize("level,expected", [(1, "1d6"), (5, "1d8"), (11, "1d10"), (17, "1d12")])
+def test_martial_arts_die_comes_from_the_progression_table(level: int, expected: str) -> None:
+    _runtime, resolver = _resolver()
+
+    assert resolver.feature_value(
+        _character(level), "martial_arts", "unarmed_damage_die",
+    ) == expected
+    assert resolver.unarmed_strike_die(_character(level)) == expected
+
+
+def test_martial_arts_die_is_absent_without_the_feature() -> None:
+    _runtime, resolver = _resolver()
+
+    assert resolver.feature_value(
+        _character(4, "class:fighter"), "martial_arts", "unarmed_damage_die", "",
+    ) == ""
+    assert resolver.unarmed_strike_die(_character(4, "class:fighter")) == ""
+
+
+def test_feature_labels_follow_the_bundle_locale() -> None:
+    _runtime, english = _resolver("en")
+    _runtime_zh, chinese = _resolver("zh-CN")
+
+    assert english.feature_value(_character(2), "monks_focus", "missing", None) is None
+    assert [view.name for view in english.feature_views(_character(2))][:2] == [
+        "Martial Arts", "Monk's Focus",
+    ]
+    labels = {view.id: view.name for view in chinese.feature_views(_character(2))}
+    assert labels == {
+        "martial_arts": "武艺",
+        "monks_focus": "武僧专注",
+        "flurry_of_blows": "疾风连击",
+        "patient_defense": "坚守防御",
+        "step_of_the_wind": "疾风步",
+    }
+
+
+def test_feature_views_expose_scalar_parameters_only() -> None:
+    _runtime, resolver = _resolver()
+
+    martial_arts = next(
+        view for view in resolver.feature_views(_character(3)) if view.id == "martial_arts"
+    )
+
+    assert martial_arts.values == {
+        "unarmed_damage_die": "1d6",
+        "unarmed_ability_choice": ["str", "dex"],
+    }
+    assert martial_arts.minimum_level == 1
+    assert martial_arts.source_ref.startswith("srd-5.2.1:")
+
+
+def test_class_resource_definition_reflects_canonical_state() -> None:
+    _runtime, resolver = _resolver()
+
+    definition = resolver.class_resource_definition(_with_focus(1, 3), "focus_points")
+
+    assert definition is not None
+    assert (definition.current, definition.maximum) == (1, 3)
+    assert definition.name == "Focus Points"
+    assert definition.minimum_level == 2
+    assert definition.recovery["short"] == "all" and definition.recovery["long"] == "all"
+    assert resolver.class_resource_definition(_with_focus(1, 3), "second_wind") is None
+
+
+def test_combat_capabilities_require_action_and_resource_budget() -> None:
+    _runtime, resolver = _resolver()
+
+    def available(context: dict) -> set[str]:
+        return {
+            item.id for item in resolver.combat_capabilities(_with_focus(1, 2), context)
+        }
+
+    assert available({"action": 1, "bonus_action": 1}) >= {"flurry_of_blows"}
+    # 附赠动作已用：需要附赠动作的能力全部不可用。
+    assert available({"action": 1, "bonus_action": 0}) == set()
+    # 专注点为 0：只有不需要专注的版本仍然可用。
+    no_focus = {
+        item.id for item in resolver.combat_capabilities(_with_focus(0, 2), {"bonus_action": 1})
+    }
+    assert no_focus == {"bonus_unarmed_strike", "patient_defense", "step_of_the_wind"}
+
+
+def test_unavailable_capabilities_report_a_reason() -> None:
+    _runtime, resolver = _resolver()
+
+    views = {
+        item.id: item
+        for item in resolver.combat_capabilities(
+            _with_focus(0, 2), {"bonus_action": 1}, include_unavailable=True,
+        )
+    }
+
+    assert views["flurry_of_blows"].available is False
+    assert "not enough Focus Points" in views["flurry_of_blows"].blocked_reason
+    assert views["patient_defense"].available is True
+    assert views["patient_defense"].blocked_reason == ""
+    assert [cost.kind for cost in views["flurry_of_blows"].costs] == [
+        "bonus_action", "resource",
+    ]
+
+
+def test_unknown_class_or_partial_sheet_owns_nothing() -> None:
+    _runtime, resolver = _resolver()
+
+    assert resolver.features_for({"build": {"class_levels": []}}) == ()
+    assert resolver.features_for({"build": {}}) == ()
+    assert resolver.features_for({"build": {"class_levels": [
+        {"class_ref": "class:monk", "level": 0},
+    ]}}) == ()
+    assert resolver.features_for(None) == ()
+    assert resolver.features_for({
+        "build": {"class_levels": [{"class_ref": "class:homebrew", "level": 3}]},
+    }) == ()
+
+
+def test_bundle_without_the_feature_catalog_degrades_to_no_features() -> None:
+    runtime = Dnd2024Runtime()
+    bundle = runtime.load_bundle("en")
+    entities = deepcopy(bundle.entities)
+    entities.pop("class_feature_catalog")
+    resolver = Dnd2024ClassFeatureResolver(replace(bundle, entities=entities))
+
+    assert resolver.available is False
+    assert resolver.features_for(_character(5)) == ()
+    assert resolver.class_resource_definition(_with_focus(2, 2), "focus_points") is None
+    assert resolver.combat_capabilities(_with_focus(2, 2), {"bonus_action": 1}) == ()
+
+
+def _drop_actions(catalog: dict) -> None:
+    catalog["classes"]["monk"]["features"][0]["capabilities"][0]["actions"] = [
+        {"kind": "teleport"},
+    ]
+
+
+def _bad_track(catalog: dict) -> None:
+    catalog["classes"]["monk"]["features"][0]["parameters"]["unarmed_damage_die_track"] = (
+        "not_a_track"
+    )
+
+
+def _bad_format(catalog: dict) -> None:
+    catalog["classes"]["monk"]["features"][0]["parameters"]["unarmed_damage_die_format"] = (
+        "{die}{die}"
+    )
+
+
+def _orphan_option(catalog: dict) -> None:
+    catalog["classes"]["monk"]["features"][2]["option_of"] = "not_declared"
+
+
+def _undeclared_resource(catalog: dict) -> None:
+    catalog["classes"]["monk"]["features"][1]["resource_id"] = "not_a_resource"
+
+
+def _bad_cost_amount(catalog: dict) -> None:
+    catalog["classes"]["monk"]["features"][2]["capabilities"][0]["cost"]["resources"][0][
+        "amount"
+    ] = 0
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        _drop_actions,
+        _bad_track,
+        _bad_format,
+        _orphan_option,
+        _undeclared_resource,
+        _bad_cost_amount,
+    ],
+)
+def test_malformed_feature_declarations_fail_closed(mutate) -> None:
+    runtime = Dnd2024Runtime()
+
+    with pytest.raises(ClassFeatureError):
+        Dnd2024ClassFeatureResolver(_mutated_bundle(runtime, mutate))
+
+
+def test_resolver_requires_a_validated_progression_table() -> None:
+    runtime = Dnd2024Runtime()
+    bundle = runtime.load_bundle("en")
+    entities = deepcopy(bundle.entities)
+    entities.pop("progression_catalog")
+    resolver = Dnd2024ClassFeatureResolver(replace(bundle, entities=entities))
+
+    assert resolver.available is False
+    assert resolver.features_for(_character(5)) == ()
+
+
+def test_feature_and_rest_declarations_agree() -> None:
+    """The read-only resource projection must match the lifecycle authority."""
+
+    runtime = Dnd2024Runtime()
+    bundle = runtime.load_bundle("en")
+    resolver = Dnd2024ClassFeatureResolver(bundle)
+    policies = Dnd2024RestEngine(bundle).rules["class_resources"]
+
+    assert set(resolver.resources.by_class) == set(policies)
+    for class_id, specs in policies.items():
+        declared = resolver.resources.by_class[class_id]
+        assert set(declared) == {str(spec["id"]) for spec in specs}
+        for spec in specs:
+            entry = declared[str(spec["id"])]
+            assert entry.minimum_level == int(spec.get("minimum_level", 1) or 1)
+            assert entry.source_ref == str(spec["source_ref"])
+            assert entry.short_rest == spec.get("short", "none")
+            assert entry.long_rest == spec.get("long", "none")

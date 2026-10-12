@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "sorcerer_a",
+  "source_ref": "srd-5.2.1:p64:sorcerer_a",
+  "automation_level": "deterministic",
+  "category": "class",
+  "item_refs": [
+    "item:spear",
+    "item:dagger",
+    "item:arcane_focus_crystal",
+    "item:dungeoneer_pack"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:spear",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:dagger",
+      "quantity": 2
+    },
+    {
+      "item_ref": "item:arcane_focus_crystal",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:dungeoneer_pack",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 28
+}

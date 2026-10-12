@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "class",
+    "id": "bard"
+  },
+  "fields": {
+    "name": "吟游诗人",
+    "summary": "兼顾支援、社交和魔法的多面手，选择自由但需要管理法术。"
+  }
+}

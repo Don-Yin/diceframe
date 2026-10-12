@@ -1,0 +1,6 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "scene", "id": "greymoor_forked_trail"},
+  "fields": {"name": "Forked Trail", "description": "Three-toed tracks and pale lantern residue lead into the same thornwood."}
+}

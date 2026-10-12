@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "kind": "class",
+  "id": "fighter",
+  "source_ref": "srd-5.2.1:p47:fighter-core-traits",
+  "class_progression_ref": "progression_catalog:srd_classes",
+  "automation_level": "guided",
+  "hit_die": 10,
+  "fixed_hp_per_level": 6,
+  "primary_ability_refs": [
+    "ability:str",
+    "ability:dex"
+  ],
+  "saving_throw_refs": [
+    "ability:str",
+    "ability:con"
+  ],
+  "skill_choice": {
+    "count": 2,
+    "allowed_refs": [
+      "skill:acrobatics",
+      "skill:animal_handling",
+      "skill:athletics",
+      "skill:history",
+      "skill:insight",
+      "skill:intimidation",
+      "skill:perception",
+      "skill:persuasion",
+      "skill:survival"
+    ]
+  },
+  "armor_proficiencies": [
+    "light",
+    "medium",
+    "heavy",
+    "shield"
+  ],
+  "weapon_proficiencies": [
+    "simple",
+    "martial"
+  ],
+  "equipment_package_refs": [
+    "equipment_package:fighter_a",
+    "equipment_package:fighter_b",
+    "equipment_package:fighter_c"
+  ],
+  "recommended_standard_array": {
+    "str": 15,
+    "dex": 14,
+    "con": 13,
+    "int": 8,
+    "wis": 10,
+    "cha": 12
+  },
+  "level_1_feature_ids": [
+    "fighting_style",
+    "second_wind",
+    "weapon_mastery"
+  ],
+  "experience": {
+    "difficulty": "beginner"
+  }
+}

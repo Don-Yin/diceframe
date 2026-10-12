@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "class",
+    "id": "barbarian"
+  },
+  "fields": {
+    "name": "野蛮人",
+    "summary": "高生命值的强力近战职业，以狂暴承受并造成更多伤害。"
+  }
+}

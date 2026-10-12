@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "species",
+    "id": "goliath"
+  },
+  "fields": {
+    "name": "Goliath",
+    "summary": "Choose a giant ancestry gift, move quickly, and at level 5 briefly become Large."
+  }
+}

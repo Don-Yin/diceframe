@@ -1,0 +1,1521 @@
+"""Top-level first-party D&D 2024 runtime boundary."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+from src.adventures import (
+    ADVENTURE_GRAPH_FORMAT,
+    AdventureResolver,
+    LoadedAdventureBundle,
+    binding_matches,
+)
+from src.adventures.graph_v2 import (
+    ADVENTURE_GRAPH_FORMAT_V2,
+    AdventureGraphV2Error,
+    validate_graph_v2,
+)
+from src.engine import progression
+from src.engine.legacy_game_projection import project_legacy_game_context
+from src.engine.modules import adventure_runtime_state, legacy_combat, ruleset_runtime
+from src.rulesets.dnd2024.adventure_migrations import (
+    apply_unreleased_adventure_binding_migration,
+)
+from src.rulesets.bundle import LoadedRulesetBundle, RulesetBundleLoader
+from src.rulesets.contracts import RulesetCapabilities
+import src.rulesets.dnd2024.advancement_access as advancement_access
+from src.rulesets.dnd2024.binding import rule_binding
+from src.rulesets.dnd2024.character.builder import Dnd2024CharacterBuilder
+from src.rulesets.dnd2024.character.reconciliation import (
+    Dnd2024CharacterStateReconciler,
+    merge_live_character_projection,
+)
+from src.rulesets.dnd2024.campaign import CAMPAIGN_INTENT_TYPES, Dnd2024CampaignEngine
+from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
+import src.rulesets.dnd2024.combat.visibility as combat_visibility
+from src.rulesets.dnd2024.content.catalog import DndContentCatalog
+from src.rulesets.dnd2024.content.provider import (
+    DndContentCatalogProvider,
+    adventure_local_records,
+)
+from src.rulesets.dnd2024.content.rewards import reward_intents_from_outcome
+from src.rulesets.dnd2024.exploration import (
+    EXPLORATION_INTENT_TYPES, Dnd2024ExplorationEngine,
+)
+from src.rulesets.dnd2024.director import Dnd2024Director
+from src.rulesets.dnd2024.director.planner import (
+    plan_adventure_choice,
+    plan_encounter_preset,
+)
+from src.rulesets.dnd2024.director.temporary_encounter import plan_temporary_encounter
+from src.rulesets.dnd2024.play import (
+    EncounterAccess,
+    is_public_story_milestone,
+    public_timeline_projection,
+    resolve_story_encounter_access,
+    resolve_v2_encounter_access,
+)
+from src.rulesets.dnd2024.progression import (
+    Dnd2024AdvancementEngine,
+    Dnd2024ProgressionCatalog,
+    ProgressionCatalogError,
+)
+from src.rulesets.dnd2024.resting import Dnd2024RestEngine
+from src.rulesets.dnd2024.spells import Dnd2024SpellSelection, SpellCatalogError
+from src.rulesets.dnd2024 import adventure_validation  # noqa: F401  (MOD-01: 注册 adventure mechanics validator)
+
+
+logger = logging.getLogger(__name__)
+
+
+class Dnd2024Runtime:
+    runtime_id = "core:dnd2024"
+    runtime_version = 1
+    capabilities = RulesetCapabilities(
+        experience_profile="dnd2024",
+        character_builder="professional",
+        character_lifecycle="rules_aware",
+        authoritative_intents=True,
+        deterministic_combat=True,
+        versioned_state=True,
+        session_zero=True,
+        tutorial_coach=True,
+        narrative_turns=True,
+        adventure_formats=(ADVENTURE_GRAPH_FORMAT, ADVENTURE_GRAPH_FORMAT_V2),
+    )
+
+    def initialize_new_run(
+        self, instance: Any, *, preserve_characters: bool,
+    ) -> None:
+        """Materialize a clean campaign projection for reset/restart."""
+
+        ruleset_runtime.require_writable(instance)
+        ruleset_runtime.replace_state(instance, {"state_schema_version": 1})
+        self._campaign_engine(
+            instance, str(getattr(instance, "language", "") or ""),
+        ).initialize_state(instance)
+
+    def __init__(
+        self, bundles_dir: str | Path | None = None, *,
+        adventures_dir: str | Path | None = None,
+        director_mode: str = "assist",
+    ):
+        default = Path(__file__).resolve().parents[3] / "templates" / "rulesets"
+        self._loader = RulesetBundleLoader(bundles_dir or default)
+        self._bundle_cache: dict[str, LoadedRulesetBundle] = {}
+        default_adventures = (
+            Path(__file__).resolve().parents[3] / "templates" / "adventures"
+        )
+        adventures = adventures_dir or default_adventures
+        # FIX-02 §4.1：runtime 不再自己持有"另一个 loader"。默认建一个单目录
+        # resolver（standalone / 测试用；随应用发布的目录语义上是 builtin），
+        # 生产由组合根注入全局唯一 resolver（set_adventure_resolver），因此
+        # WebAPI 与 runtime 解析到同一个包。
+        self._adventure_loader = AdventureResolver.single_directory(
+            adventures,
+            source_kind="user" if adventures_dir else "builtin",
+        )
+        # FIX-03 §5.2：模组 catalog 来源由组合根注入（默认无模组）。
+        self._module_content_sources: Any = None
+        self._director = Dnd2024Director(director_mode if director_mode in {"auto", "assist", "manual"} else "assist")
+
+    def set_adventure_resolver(self, resolver: Any) -> None:
+        """Adopt the application's unique AdventureResolver (composition injection)."""
+
+        if resolver is None:
+            return
+        self._adventure_loader = resolver
+
+    def set_module_content_sources(self, provider: Any) -> None:
+        """Adopt the application's module catalog sources (FIX-03 §5.2).
+
+        组合根只提供"哪些模组声明了哪些 catalog 目录"这一事实；链路顺序
+        （adventure-local → owning module → 其它模组 → core）与解析语义由
+        runtime 自己决定，WebAPI 不拥有 gameplay catalog 真相。
+        """
+
+        self._module_content_sources = provider
+
+    def owning_module_id(self, instance: Any) -> str:
+        """The content-pack module that owns the instance's bound adventure."""
+
+        binding = getattr(instance, "adventure_binding", None)
+        if not isinstance(binding, dict):
+            return ""
+        if str(binding.get("source_kind") or "") != "plugin":
+            return ""
+        return str(binding.get("source_id") or "")
+
+    def _bound_adventure_or_none(self, instance: Any, locale: str) -> Any:
+        """The bound adventure, or None when it cannot be resolved.
+
+        内容目录只是"能解析出什么内容"的视图：绑定的冒险包缺失/变更时，游戏本身
+        由战斗/战役路径 fail closed（``load_adventure`` 抛错），但目录链不应该跟着
+        崩掉——模组内容仍然可解析（recovery / 诊断场景）。
+        """
+
+        try:
+            return self.load_adventure(instance, locale)
+        except Exception:  # noqa: BLE001 - 目录链对缺失冒险降级
+            return None
+
+    def content_catalog(self, instance: Any) -> DndContentCatalog:
+        """The runtime's ordered content catalog chain (§5.1).
+
+        adventure-local（绑定冒险里 catalog 形状的内容）→ owning module → 其它
+        模组 → core D&D content。组合根只注入模组来源。
+        """
+
+        locale = str(getattr(instance, "language", "") or "")
+        adventure = self._bound_adventure_or_none(instance, locale)
+        provider = DndContentCatalogProvider(
+            module_sources=self._module_content_sources,
+            core_sources=lambda _instance: self._core_content_sources(),
+        )
+        return provider.catalog_for(
+            instance,
+            owning_module_id=self.owning_module_id(instance),
+            adventure_label=(
+                f"adventure:{adventure.manifest.adventure_id}"
+                if adventure is not None else ""
+            ),
+            adventure_records=(
+                adventure_local_records(adventure.entities)
+                if adventure is not None else None
+            ),
+        )
+
+    def adventure_reward_intents(
+        self,
+        instance: Any,
+        outcome: Mapping[str, Any],
+        *,
+        recipient_uid: str = "",
+        locale: str = "",
+    ) -> list[dict[str, Any]]:
+        """FIX-03 §5.5：adventure outcome 的 item_reward → 权威奖励 intent.
+
+        只做"引用 → 结构化 intent"；是否发放、怎么发放仍由既有 proposal /
+        settlement 权威决定（本方法不写 inventory）。
+        """
+
+        return reward_intents_from_outcome(
+            self.content_catalog(instance),
+            dict(outcome or {}),
+            default_source=self.adventure_content_source(instance),
+            recipient_uid=str(recipient_uid or ""),
+        )
+
+    def adventure_content_source(self, instance: Any) -> str:
+        """Default source for v1 bare refs: the owning module, else the adventure."""
+
+        owning = self.owning_module_id(instance)
+        if owning:
+            return f"module:{owning}"
+        locale = str(getattr(instance, "language", "") or "")
+        adventure = self._bound_adventure_or_none(instance, locale)
+        if adventure is not None:
+            return f"adventure:{adventure.manifest.adventure_id}"
+        return ""
+
+    def _core_content_sources(self) -> list[tuple[str, dict[str, dict[str, Any]]]]:
+        """Core D&D content contributed by the ruleset bundle itself.
+
+        目前 bundle 只带 encounter_catalog（内联 statblock）与 combat/spell
+        catalog，没有 ``monster`` 记录；因此核心来源在 ContentRef 链上是空集，
+        但链路位置保留——模块引用 core ``item``/怪物时语义不变。
+        """
+
+        return []
+
+    def adventure_rules_evaluator(self, instance: Any) -> Any:
+        """FIX-04 §6.4：``rules.*`` gate 的 D&D adapter（证据不足 = 不放行）。
+
+        只读权威状态，不掷骰、不改状态；未知 outcome id 返回 False（不猜）。
+        """
+
+        def evaluator(gate_type: str, gate_id: str, expected: Any) -> bool:
+            try:
+                if gate_type == "rules.party_level":
+                    return self._party_level(instance) >= int(expected or 0)
+                if gate_type == "rules.item_possession":
+                    return self._party_has_item(instance, gate_id) is bool(expected)
+                if gate_type == "rules.outcome":
+                    return self._rules_outcome(instance, gate_id) == str(expected or "")
+            except Exception:  # noqa: BLE001 - 读取失败 = 证据不足 = 不满足
+                return False
+            return False
+
+        return evaluator
+
+    @staticmethod
+    def _party_level(instance: Any) -> int:
+        def level_of(sheet: Any) -> int:
+            sheet = sheet if isinstance(sheet, dict) else {}
+            raw_canonical = sheet.get("ruleset_character")
+            canonical: dict[str, Any] = (
+                raw_canonical if isinstance(raw_canonical, dict) else {}
+            )
+            raw_build = canonical.get("build")
+            build: dict[str, Any] = raw_build if isinstance(raw_build, dict) else {}
+            levels = build.get("class_levels") or sheet.get("class_levels") or []
+            highest = max(
+                (
+                    int(row.get("level", 0) or 0)
+                    for row in levels
+                    if isinstance(row, dict)
+                ),
+                default=0,
+            )
+            try:
+                return max(highest, int(sheet.get("level", 0) or 0))
+            except (TypeError, ValueError):
+                return highest
+
+        return max(
+            (level_of(instance.get_character_sheet(uid)) for uid in instance.players),
+            default=0,
+        )
+
+    @staticmethod
+    def _party_has_item(instance: Any, item_id: str) -> bool:
+        wanted = str(item_id or "").strip().casefold()
+        if not wanted:
+            return False
+        for uid in instance.players:
+            sheet = instance.get_character_sheet(uid) or {}
+            rows: list[Any] = []
+            for key in ("inventory", "equipment", "key_items"):
+                value = sheet.get(key)
+                if isinstance(value, list):
+                    rows.extend(value)
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                for key in ("id", "name", "item_id"):
+                    if str(row.get(key) or "").strip().casefold() == wanted:
+                        return True
+        return False
+
+    @staticmethod
+    def _rules_outcome(instance: Any, outcome_id: str) -> str:
+        """One canonical rules outcome id → its current status string."""
+
+        state = ruleset_runtime.state(instance)
+        state = state if isinstance(state, dict) else {}
+        raw_combat = state.get("combat")
+        combat: dict[str, Any] = raw_combat if isinstance(raw_combat, dict) else {}
+        if str(outcome_id or "") == "combat_ended":
+            status = str(combat.get("status") or "none")
+            if status == "ended":
+                return "ended"
+            if status == "active":
+                return "active"
+            return "pending"
+        outcomes = state.get("outcomes")
+        if isinstance(outcomes, dict):
+            return str(outcomes.get(str(outcome_id or "")) or "")
+        return ""
+
+    def adventure_reward_converter(self, instance: Any) -> Any:
+        """FIX-04 §6.7/§5.5：adventure item_reward → DNDMOD-03 reward intent。"""
+
+        from src.rulesets.dnd2024.content.rewards import reward_intent_from_ref
+
+        catalog = self.content_catalog(instance)
+        default_source = self.adventure_content_source(instance)
+
+        def converter(raw_ref: Any, source: str, recipient: str) -> dict[str, Any]:
+            return reward_intent_from_ref(
+                catalog,
+                raw_ref,
+                default_source=str(source or default_source),
+                recipient_uid=recipient,
+            )
+
+        return converter
+
+    def load_adventure(
+        self, instance: Any, locale: str = "",
+    ) -> LoadedAdventureBundle | None:
+        binding = getattr(instance, "adventure_binding", None)
+        if not isinstance(binding, dict) or not str(binding.get("adventure_id") or ""):
+            return None
+        # 来源身份存在时只在该来源内解析（不回退）；旧绑定按"当前唯一"解析，
+        # 重名冲突由 resolve_binding 抛 AdventureSourceConflict → 调用方 fail closed。
+        resolution = self._adventure_loader.resolve_binding(binding, locale)
+        bundle = resolution.bundle
+        if (
+            bundle.manifest.required_runtime_id != self.runtime_id
+            or bundle.manifest.required_runtime_version > self.runtime_version
+            or bundle.manifest.format not in self.capabilities.adventure_formats
+        ):
+            raise ValueError("bound adventure package is incompatible with this rules runtime")
+        if (
+            bundle.manifest.world_policy == "fixed"
+            and str(getattr(instance, "world_id", "") or "")
+            != bundle.manifest.recommended_world_id
+        ):
+            raise ValueError("bound adventure package is incompatible with the selected world")
+        expected = resolution.binding(str(getattr(instance, "world_id", "") or ""))
+        if not binding_matches(binding, expected):
+            raise ValueError("bound adventure package is missing or has changed")
+        return bundle
+
+    def load_bundle(self, locale: str = "") -> LoadedRulesetBundle:
+        cache_key = str(locale or "").replace("_", "-")
+        cached = self._bundle_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        bundle = self._loader.load("dnd2024_srd", locale)
+        if bundle.manifest.runtime_id != self.runtime_id:
+            raise ValueError(
+                f"bundle runtime {bundle.manifest.runtime_id} does not match {self.runtime_id}"
+            )
+        self._bundle_cache[cache_key] = bundle
+        return bundle
+
+    def narrative_advancement_prompt(self, instance: Any, locale: str) -> str:
+        """Expose D&D advancement instructions through the generic runtime boundary."""
+
+        return advancement_access.prompt_instruction(instance, locale)
+
+    def apply_narrative_advancement_rewards(
+        self, instance: Any, update: dict[str, Any],
+    ) -> list[str]:
+        """Apply AI-authored advancement tags under the configured authority policy."""
+
+        return advancement_access.apply_ai_rewards(instance, update)
+
+    def game_detail_projection(self, instance: Any) -> dict[str, Any]:
+        """Contribute D&D-only detail fields through the generic read boundary."""
+
+        return {"advancement": advancement_access.project(instance)}
+
+    def project_intent_result(
+        self, instance: Any, result: dict[str, Any], viewer_id: str, viewer_is_gm: bool,
+    ) -> dict[str, Any]:
+        """Strip monster stat blocks from intent/automation payloads for non-GMs."""
+
+        del instance, viewer_id
+        if viewer_is_gm:
+            return result
+        return combat_visibility.public_intent_result(result)
+
+    def configure_live_advancement(
+        self, instance: Any, mode: str, authority: str,
+    ) -> dict[str, Any]:
+        return advancement_access.configure(instance, mode, authority)
+
+    def live_advancement_policy(self, instance: Any) -> dict[str, Any]:
+        return advancement_access.project(instance)
+
+    def live_advancement_status(self, instance: Any) -> dict[str, Any]:
+        return advancement_access.view(instance)
+
+    def validate_live_advancement(
+        self, instance: Any, user_id: str, target_level: int,
+    ) -> None:
+        advancement_access.require_entitlement(instance, user_id, target_level)
+
+    def snapshot_live_advancement(self, instance: Any) -> Any:
+        return advancement_access.snapshot(instance)
+
+    def consume_live_advancement(
+        self, instance: Any, user_id: str, target_level: int,
+    ) -> None:
+        advancement_access.consume(instance, user_id, target_level)
+
+    def reconcile_live_advancement(self, instance: Any, user_id: str) -> None:
+        advancement_access.reconcile_after_level_up(instance, user_id)
+
+    def restore_live_advancement(self, instance: Any, snapshot: Any) -> None:
+        advancement_access.restore(instance, snapshot)
+
+    def apply_live_advancement_control(
+        self, instance: Any, command: dict[str, Any],
+    ) -> dict[str, Any]:
+        return advancement_access.control(instance, command)
+
+    def migrate_adventure_binding(
+        self, instance: Any, expected: dict[str, Any],
+    ) -> bool | None:
+        """Apply D&D-owned compatibility for known unreleased adventure digests."""
+
+        return apply_unreleased_adventure_binding_migration(instance, expected)
+
+    def is_public_story_milestone(self, batch: dict[str, Any]) -> bool:
+        return is_public_story_milestone(batch)
+
+    def public_timeline_projection(
+        self, batch: dict[str, Any], locale: str,
+    ) -> dict[str, str]:
+        return public_timeline_projection(batch, locale)
+
+    def _campaign_engine(
+        self, instance: Any, locale: str = "",
+    ) -> Dnd2024CampaignEngine:
+        adventure = self.load_adventure(instance, locale)
+        return Dnd2024CampaignEngine(
+            self.load_bundle(locale), adventure.adventure if adventure is not None else None,
+        )
+
+    def _exploration_engine(self, locale: str = "") -> Dnd2024ExplorationEngine:
+        return Dnd2024ExplorationEngine(self.load_bundle(locale), locale=locale)
+
+    def _combat_engine(
+        self,
+        instance: Any,
+        access: Any = None,
+        locale: str = "",
+    ) -> Dnd2024CombatEngine:
+        adventure = self.load_adventure(instance, locale)
+        use_adventure_catalog = (
+            adventure is not None
+            and isinstance(access, EncounterAccess)
+            and access.mode == "story"
+        )
+        catalogs = (
+            adventure.list("encounter_catalog")
+            if use_adventure_catalog and adventure is not None
+            else []
+        )
+        if len(catalogs) > 1:
+            raise ValueError("adventure package contains multiple encounter catalogs")
+        catalog = catalogs[0] if catalogs else None
+        # FIX-03 §5.3：把运行时内容目录交给战斗引擎，模块 encounter_profile /
+        # ContentRef enemy 才能解析成 canonical 敌人实例。
+        content_catalog = self.content_catalog(instance)
+        content_source = (
+            f"adventure:{adventure.manifest.adventure_id}"
+            if adventure is not None
+            else ""
+        )
+        if access is None:
+            return Dnd2024CombatEngine(
+                self.load_bundle(locale), encounter_catalog=catalog,
+                content_catalog=content_catalog, content_source=content_source,
+            )
+        return Dnd2024CombatEngine(
+            self.load_bundle(locale), access, catalog,
+            content_catalog=content_catalog, content_source=content_source,
+        )
+
+    def _encounter_access(
+        self,
+        instance: Any, campaign: dict[str, Any], intent: dict[str, Any] | None = None,
+    ) -> EncounterAccess:
+        """Resolve the authoritative encounter mode for one call.
+
+        Story binding wins. Without one, a loaded but inactive adventure leaves
+        free play available. An active adventure that does not grant a canonical
+        encounter never falls back to the generic training catalog: it reports
+        ``unprepared`` unless the GM explicitly declares a sandbox encounter.
+        """
+
+        if str(adventure_runtime_state.play_mode(instance) or "").casefold() == "free":
+            return EncounterAccess.sandbox()
+        # FIX-04 §6.9：绑定的是 Adventure v2 → 遭遇由**v2 进度**（active 节点的
+        # encounter_ref）决定，不再走 v1 tutorial step；v1 路径原样保留。
+        v2 = self._v2_encounter_access(instance)
+        if v2 is not None:
+            if v2.mode == "story":
+                if v2.status == "pending" and not v2.encounter_preset_id:
+                    return EncounterAccess.unbound_story(
+                        adventure_id=v2.adventure_id,
+                        origin_step_id=v2.origin_step_id,
+                    )
+                return v2
+            if str((intent or {}).get("mode") or "") == "sandbox":
+                return EncounterAccess.sandbox()
+            if v2.unprepared:
+                return v2
+            return EncounterAccess.sandbox() if v2.status == "resolved" else v2
+        story = resolve_story_encounter_access(instance, campaign)
+        if story.mode == "story":
+            # 剧情步骤声明了战斗，却没有可用的 canonical preset：这同样是
+            # “尚未准备遭遇”，不能拿通用目录里的预设顶上。
+            if story.status == "pending" and not story.encounter_preset_id:
+                return EncounterAccess.unbound_story(
+                    adventure_id=story.adventure_id,
+                    origin_step_id=story.origin_step_id,
+                )
+            return story
+        tutorial = campaign.get("tutorial") if isinstance(campaign, dict) else None
+        tutorial = tutorial if isinstance(tutorial, dict) else {}
+        if str(tutorial.get("status") or "") == "active":
+            # 只有 GM 在提交里显式声明 sandbox 时才离开冒险包；这是刻意的
+            # "准备自由遭遇"操作，而不是缺绑定时的隐式回退。
+            if str((intent or {}).get("mode") or "") == "sandbox":
+                return EncounterAccess.sandbox()
+            step = tutorial.get("current_step")
+            step = step if isinstance(step, dict) else {}
+            return EncounterAccess.unbound_story(
+                adventure_id=str(tutorial.get("adventure_id") or ""),
+                origin_step_id=str(step.get("id") or ""),
+            )
+        return EncounterAccess.sandbox()
+
+    def _v2_encounter_access(self, instance: Any) -> EncounterAccess | None:
+        """§6.9：v2 绑定时的剧情遭遇访问权；非 v2 返回 ``None``（走 v1 路径）。"""
+
+        progress = adventure_runtime_state.progress(instance)
+        if not isinstance(progress, dict) or not progress:
+            return None
+        try:
+            locale = str(getattr(instance, "language", "") or "")
+            bundle = self.load_adventure(instance, locale)
+        except Exception:  # noqa: BLE001 - 绑定不可解析时交给既有路径 fail closed
+            return None
+        if bundle is None or str(bundle.manifest.format) != ADVENTURE_GRAPH_FORMAT_V2:
+            return None
+        try:
+            adventure = validate_graph_v2(bundle.adventure)
+        except AdventureGraphV2Error:
+            return None
+        return resolve_v2_encounter_access(instance, adventure, progress)
+
+    def _builder(self, draft: dict[str, Any]) -> Dnd2024CharacterBuilder:
+        return Dnd2024CharacterBuilder(self.load_bundle(str(draft.get("locale") or "")))
+
+    @staticmethod
+    def _class_uses_spells(bundle: LoadedRulesetBundle, class_ref: str) -> bool:
+        class_entity = bundle.get("class", class_ref.removeprefix("class:")) or {}
+        return bool(class_entity.get("spellcasting_ability"))
+
+    def _configure_class_spells(
+        self, bundle: LoadedRulesetBundle, character: dict[str, Any], choices: Any,
+    ) -> dict[str, Any]:
+        class_levels = character.get("build", {}).get("class_levels") or []
+        class_ref = str(class_levels[0].get("class_ref") or "") if class_levels else ""
+        if not self._class_uses_spells(bundle, class_ref):
+            return character
+        return Dnd2024SpellSelection(bundle).configure(character, choices)
+
+    @staticmethod
+    def _sync_class_resources(
+        bundle: LoadedRulesetBundle, character: dict[str, Any],
+    ) -> dict[str, Any]:
+        if (
+            bundle.get("progression_catalog", "srd_classes") is None
+            or bundle.get("rest_catalog", "srd_recovery") is None
+        ):
+            return character
+        return Dnd2024RestEngine(bundle).sync_resources(character)
+
+    def game_binding(self, rule: Any, locale: str) -> dict[str, Any]:
+        del rule
+        return rule_binding(self.load_bundle(locale))
+
+    def describe_experience(self, rule: Any, locale: str) -> dict[str, Any]:
+        del rule
+        bundle = self.load_bundle(locale)
+        return {
+            "profile": "dnd2024",
+            "builder_mode": "professional",
+            "modes": ["quick", "guided", "expert"],
+            "content_version": bundle.manifest.content_version,
+            "locale": bundle.locale,
+        }
+
+    def builder_choices(self, rule: Any, draft: dict[str, Any]) -> dict[str, Any]:
+        del rule
+        choices = self._builder(draft).choices(draft)
+        class_ref = str(draft.get("class_ref") or "")
+        if class_ref:
+            try:
+                choices["class_spells"] = Dnd2024SpellSelection(
+                    self.load_bundle(str(draft.get("locale") or ""))
+                ).options(class_ref, 1)
+            except (ProgressionCatalogError, SpellCatalogError):
+                choices["class_spells"] = {}
+        else:
+            choices["class_spells"] = {}
+        return choices
+
+    def validate_character(self, rule: Any, draft: dict[str, Any]) -> list[str]:
+        del rule
+        errors = self._builder(draft).validate(draft)
+        if errors:
+            return errors
+        class_ref = str(draft.get("class_ref") or "")
+        bundle = self.load_bundle(str(draft.get("locale") or ""))
+        if not self._class_uses_spells(bundle, class_ref):
+            return errors
+        _parsed, spell_errors = Dnd2024SpellSelection(
+            bundle
+        ).validate(class_ref, 1, draft.get("class_spell_choices"))
+        return [*errors, *spell_errors]
+
+    def derive_character(self, rule: Any, draft: dict[str, Any]) -> dict[str, Any]:
+        del rule
+        errors = self.validate_character(None, draft)
+        if errors:
+            raise ValueError("; ".join(errors))
+        bundle = self.load_bundle(str(draft.get("locale") or ""))
+        character = Dnd2024CharacterBuilder(bundle).derive(draft)
+        character = self._configure_class_spells(
+            bundle, character, draft.get("class_spell_choices")
+        )
+        return self._sync_class_resources(bundle, character)
+
+    def finalize_character(self, rule: Any, draft: dict[str, Any]) -> dict[str, Any]:
+        del rule
+        canonical = self.derive_character(None, draft)
+        return {
+            **self._builder(draft).project_legacy(canonical),
+            "rule_binding": deepcopy(canonical["rule_binding"]),
+            "ruleset_character": canonical,
+        }
+
+    def normalize_character_submission(
+        self, rule: Any, character: dict[str, Any], locale: str = "",
+    ) -> dict[str, Any]:
+        del rule
+        canonical = character.get("ruleset_character")
+        canonical_locale = (
+            str(canonical.get("locale") or "") if isinstance(canonical, dict) else ""
+        )
+        bundle = self.load_bundle(canonical_locale or locale)
+        builder = Dnd2024CharacterBuilder(bundle)
+        if not isinstance(canonical, dict):
+            return builder.normalize_submission(character)
+        build = canonical.get("build")
+        raw_level = build.get("level", 1) if isinstance(build, dict) else 1
+        if isinstance(raw_level, bool):
+            raise ValueError("professional character level is invalid")
+        try:
+            level = int(raw_level)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("professional character level is invalid") from exc
+        if level <= 1:
+            rebuilt = builder.normalize_submission(character)["ruleset_character"]
+            spell_choices = build.get("class_spell_choices") if isinstance(build, dict) else None
+            try:
+                rebuilt = self._configure_class_spells(bundle, rebuilt, spell_choices)
+                rebuilt = self._sync_class_resources(bundle, rebuilt)
+            except SpellCatalogError as exc:
+                raise ValueError(f"professional character spell choices are invalid: {exc}") from exc
+            return {
+                **builder.project_legacy(rebuilt),
+                "rule_binding": deepcopy(rebuilt["rule_binding"]),
+                "ruleset_character": rebuilt,
+            }
+
+        progression = canonical.get("progression")
+        history = progression.get("history") if isinstance(progression, dict) else None
+        if not isinstance(history, list) or len(history) != level - 1:
+            raise ValueError("professional character advancement history is incomplete")
+        creation_submission = deepcopy(character)
+        creation_canonical = creation_submission["ruleset_character"]
+        creation_build = creation_canonical.get("build")
+        class_levels = creation_build.get("class_levels") if isinstance(creation_build, dict) else None
+        if not isinstance(class_levels, list) or len(class_levels) != 1:
+            raise ValueError("professional character must contain one class choice")
+        creation_build["level"] = 1
+        class_levels[0]["level"] = 1
+        creation_canonical.pop("progression", None)
+        rebuilt = builder.normalize_submission(creation_submission)["ruleset_character"]
+        try:
+            rebuilt = self._configure_class_spells(
+                bundle, rebuilt, creation_build.get("class_spell_choices"),
+            )
+        except SpellCatalogError as exc:
+            raise ValueError(f"professional character spell choices are invalid: {exc}") from exc
+        engine = Dnd2024AdvancementEngine(bundle)
+        for expected_level, entry in enumerate(history, start=2):
+            if not isinstance(entry, dict) or entry.get("to_level") != expected_level:
+                raise ValueError("professional character advancement history is not sequential")
+            choices = entry.get("choices")
+            if not isinstance(choices, dict):
+                raise ValueError("professional character advancement choices are invalid")
+            try:
+                rebuilt = engine.apply_next_level(rebuilt, choices)
+            except ProgressionCatalogError as exc:
+                raise ValueError(f"professional character advancement is invalid: {exc}") from exc
+        rebuilt = self._sync_class_resources(bundle, rebuilt)
+        projected = builder.project_legacy(rebuilt)
+        return {
+            **projected,
+            "rule_binding": deepcopy(rebuilt["rule_binding"]),
+            "ruleset_character": rebuilt,
+        }
+
+    def progression_table(
+        self, rule: Any, class_ref: str, start_level: int = 1, end_level: int = 20,
+        locale: str = "",
+    ) -> list[dict[str, Any]]:
+        del rule
+        return Dnd2024ProgressionCatalog.from_bundle(
+            self.load_bundle(locale)
+        ).range(class_ref, start_level, end_level)
+
+    def preview_advancement(
+        self, rule: Any, character: dict[str, Any], choices: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del rule
+        canonical = character.get("ruleset_character")
+        locale = str(canonical.get("locale") or "") if isinstance(canonical, dict) else ""
+        return Dnd2024AdvancementEngine(self.load_bundle(locale)).preview_next_level(
+            character, choices
+        )
+
+    def apply_advancement(
+        self, rule: Any, character: dict[str, Any], choices: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del rule
+        canonical = character.get("ruleset_character")
+        locale = str(canonical.get("locale") or "") if isinstance(canonical, dict) else ""
+        bundle = self.load_bundle(locale)
+        advanced = Dnd2024AdvancementEngine(bundle).apply_next_level(character, choices)
+        advanced = self._sync_class_resources(bundle, advanced)
+        return self._live_projection(character, advanced, bundle)
+
+    def complete_rest(
+        self, rule: Any, character: dict[str, Any], rest: str,
+        hit_die_rolls: dict[str, list[int]] | None = None,
+    ) -> dict[str, Any]:
+        del rule
+        canonical = character.get("ruleset_character")
+        locale = str(canonical.get("locale") or "") if isinstance(canonical, dict) else ""
+        bundle = self.load_bundle(locale)
+        engine = Dnd2024RestEngine(bundle)
+        if rest == "short":
+            result = engine.complete_short_rest(character, hit_die_rolls)
+        elif rest == "long":
+            if hit_die_rolls:
+                raise ValueError("hit_die_rolls are only valid for a short rest")
+            result = engine.complete_long_rest(character)
+        else:
+            raise ValueError("rest must be short or long")
+        result["character"] = self._live_projection(character, result["character"], bundle)
+        return result
+
+    @staticmethod
+    def validate_rest_context(instance: Any, actor_id: str, rest: str) -> None:
+        del actor_id, rest
+        state = ruleset_runtime.state(instance)
+        combat = state.get("combat") if isinstance(state, dict) else None
+        if isinstance(combat, dict) and combat.get("active"):
+            raise ValueError("战斗进行中不能休息；请先在“权威战斗”中结束战斗")
+
+    def available_intents(self, instance: Any, actor_id: str) -> list[dict[str, Any]]:
+        locale = str(getattr(instance, "language", "") or "")
+        bundle = self.load_bundle(locale)
+        campaign_engine = self._campaign_engine(instance, locale)
+        campaign = campaign_engine.gameplay_view(
+            instance,
+            actor_id,
+            actor_id == str(getattr(instance, "gm_uid", "") or ""),
+        )
+        access = self._encounter_access(instance, campaign)
+        combat_engine = self._combat_engine(instance, access, locale)
+        exploration_engine = self._exploration_engine(locale)
+        return [
+            *campaign_engine.available_intents(instance, actor_id),
+            # 探索态施法只在非战斗时暴露，且不与 combat 同名 action 重复。
+            *(
+                exploration_engine.available_intents(instance, actor_id)
+                if combat_engine.initialize_state(instance)["combat"].get("status") != "active"
+                else []
+            ),
+            *combat_engine.available_intents(instance, actor_id),
+        ]
+
+    def prepare_intent_submission(
+        self, intent: dict[str, Any], requester_id: str, requester_is_gm: bool,
+    ) -> dict[str, Any]:
+        prepared = deepcopy(intent)
+        intent_type = str(prepared.get("type") or "")
+        if intent_type in {
+            "encounter.ready", "encounter.unready", "combat.start", "combat.end",
+            "combat.message", "decision.resolve",
+        }:
+            prepared.pop("actor_id", None)
+        elif not requester_is_gm:
+            prepared["actor_id"] = f"player:{requester_id}"
+        return prepared
+
+    def next_automatic_intent(self, instance: Any) -> dict[str, Any] | None:
+        locale = str(getattr(instance, "language", "") or "")
+        return self._combat_engine(instance, locale=locale).next_automatic_intent(instance)
+
+    def on_player_join(self, instance: Any, user_id: str) -> None:
+        """Enroll a late-joining character in an already active encounter."""
+
+        result = self._combat_engine(
+            instance, locale=str(getattr(instance, "language", "") or ""),
+        ).add_player_to_active_combat(instance, user_id)
+        if not result.get("ok"):
+            raise ValueError(str(result.get("error") or "unable to join active combat"))
+
+    def on_character_revived(self, instance: Any, user_id: str) -> None:
+        """Synchronize generic revival with D&D canonical combat state."""
+
+        sheet = instance.get_character_sheet(str(user_id))
+        try:
+            hp = int(sheet.get("hp", 1) or 1)
+        except (TypeError, ValueError):
+            hp = 1
+        result = self._combat_engine(
+            instance, locale=str(getattr(instance, "language", "") or ""),
+        ).revive_player(instance, str(user_id), hp)
+        if not result.get("ok"):
+            raise ValueError(str(result.get("error") or "unable to revive character"))
+        if result.get("applied"):
+            updated = deepcopy(instance.get_character_sheet(str(user_id)))
+            revision = int(updated.get("ruleset_revision", 0) or 0) + 1
+            operation_log = updated.get("ruleset_operation_log")
+            operation_log = deepcopy(operation_log) if isinstance(operation_log, list) else []
+            operation_log.append({
+                "operation_id": str(
+                    (result.get("event_batch") or {}).get("batch_id") or ""
+                ),
+                "kind": "event_batch",
+                "intent_type": "character.revive",
+                "revision": revision,
+            })
+            updated["ruleset_revision"] = revision
+            updated["ruleset_operation_log"] = operation_log[-32:]
+            instance.set_character_sheet(str(user_id), updated)
+
+    @staticmethod
+    def memory_deltas_from_event_batch(
+        batch: dict[str, Any], instance: Any,
+    ) -> list[dict[str, Any]]:
+        del instance
+        return [
+            deepcopy(event["memory"])
+            for event in batch.get("events", [])
+            if (
+                isinstance(event, dict)
+                and event.get("type") == "dnd2024.chapter.summarized"
+                and isinstance(event.get("memory"), dict)
+            )
+        ]
+
+    def validate_intent(self, instance: Any, intent: dict[str, Any]) -> dict[str, Any]:
+        locale = str(getattr(instance, "language", "") or "")
+        bundle = self.load_bundle(locale)
+        if str(intent.get("type") or "") in CAMPAIGN_INTENT_TYPES:
+            return self._campaign_engine(instance, locale).validate_intent(instance, intent)
+        if str(intent.get("type") or "") in EXPLORATION_INTENT_TYPES:
+            return self._exploration_engine(locale).validate_intent(instance, intent)
+        campaign_engine = self._campaign_engine(instance, locale)
+        campaign = campaign_engine.gameplay_view(instance)
+        access = self._encounter_access(instance, campaign, intent)
+        return self._combat_engine(instance, access, locale).validate_intent(instance, intent)
+
+    def resolve_intent(self, instance: Any, intent: dict[str, Any], rng: Any) -> dict[str, Any]:
+        locale = str(getattr(instance, "language", "") or "")
+        bundle = self.load_bundle(locale)
+        if str(intent.get("type") or "") in CAMPAIGN_INTENT_TYPES:
+            return self._campaign_engine(instance, locale).resolve_intent(instance, intent, rng)
+        if str(intent.get("type") or "") in EXPLORATION_INTENT_TYPES:
+            return self._exploration_engine(locale).resolve_intent(instance, intent, rng)
+        campaign_engine = self._campaign_engine(instance, locale)
+        campaign = campaign_engine.gameplay_view(instance)
+        access = self._encounter_access(instance, campaign, intent)
+        return self._combat_engine(instance, access, locale).resolve_intent(instance, intent, rng)
+
+    def apply_event_batch(
+        self, instance: Any, batch: dict[str, Any],
+    ) -> dict[str, Any]:
+        from src.engine.modules import narrative_notes
+
+        # Campaign steps write the scene after the batch commits; reject an
+        # unsupported notes slot before any ruleset state changes.
+        narrative_notes.require_writable(instance)
+        locale = str(getattr(instance, "language", "") or "")
+        bundle = self.load_bundle(locale)
+        before_characters = {
+            uid: deepcopy(instance.get_character_sheet(uid).get("ruleset_character"))
+            for uid in getattr(instance, "players", {})
+        }
+        if str(batch.get("intent_type") or "") in EXPLORATION_INTENT_TYPES:
+            result = self._exploration_engine(locale).apply_batch(instance, batch)
+        elif str(batch.get("intent_type") or "") in CAMPAIGN_INTENT_TYPES:
+            campaign_engine = self._campaign_engine(instance, locale)
+            result = campaign_engine.apply_batch(instance, batch)
+            if result.get("applied"):
+                campaign_view = campaign_engine.gameplay_view(instance)
+                step = (campaign_view.get("tutorial") or {}).get("current_step")
+                if isinstance(step, dict):
+                    scene_name = str(step.get("title") or "").strip()
+                    scene_ref = str(step.get("scene_ref") or "")
+                    adventure = self.load_adventure(instance, locale)
+                    if adventure is not None and scene_ref.count(":") == 1:
+                        kind, entity_id = scene_ref.split(":", 1)
+                        entity = adventure.get(kind, entity_id) or {}
+                        scene_name = str(entity.get("name") or scene_name).strip()
+                    if scene_name:
+                        instance.set_scene(scene_name)
+        else:
+            result = self._combat_engine(instance, locale=locale).apply_batch(instance, batch)
+            if result.get("applied") and str(batch.get("intent_type") or "") == "combat.start":
+                ruleset_runtime.state(instance).pop("encounter_request", None)
+        revisions: dict[str, int] = {}
+        if result.get("applied"):
+            for uid in getattr(instance, "players", {}):
+                sheet = deepcopy(instance.get_character_sheet(uid))
+                canonical = sheet.get("ruleset_character")
+                if not isinstance(canonical, dict) or canonical == before_characters.get(uid):
+                    continue
+                revision = int(sheet.get("ruleset_revision", 0) or 0) + 1
+                raw_log = sheet.get("ruleset_operation_log")
+                operation_log = deepcopy(raw_log) if isinstance(raw_log, list) else []
+                operation_log.append({
+                    "operation_id": str(batch.get("batch_id") or ""),
+                    "kind": "event_batch",
+                    "intent_type": str(batch.get("intent_type") or ""),
+                    "revision": revision,
+                })
+                sheet["ruleset_revision"] = revision
+                sheet["ruleset_operation_log"] = operation_log[-32:]
+                instance.set_character_sheet(uid, sheet)
+                revisions[str(uid)] = revision
+        result["character_revisions"] = revisions
+        return result
+
+    def gameplay_view(
+        self, instance: Any, viewer_id: str = "", viewer_is_gm: bool = False,
+    ) -> dict[str, Any]:
+        locale = str(getattr(instance, "language", "") or "")
+        bundle = self.load_bundle(locale)
+        campaign_engine = self._campaign_engine(instance, locale)
+        campaign = campaign_engine.gameplay_view(
+            instance, viewer_id, viewer_is_gm,
+        )
+        access = self._encounter_access(instance, campaign)
+        combat_engine = self._combat_engine(instance, access, locale)
+        view = combat_engine.gameplay_view(instance)
+        request = ruleset_runtime.state(instance).get("encounter_request")
+        if isinstance(request, dict):
+            projected_request = deepcopy(request)
+            ready_ids = {
+                str(item) for item in request.get("ready_player_ids") or [] if str(item)
+            }
+            gm_uid = str(getattr(instance, "gm_uid", "") or "")
+            # 与普通回合 human_actions_ready 同一设计：AI 托管、未认领、暂离
+            # 或已倒下的席位不参与人工 ready barrier，避免一个不会点按钮的
+            # AI 座位把整桌遭遇卡成永久 pending。
+            human_seats = instance.active_human_players
+            required_ids = [
+                str(uid) for uid in instance.players
+                if str(uid) != gm_uid and str(uid) in human_seats
+            ]
+            projected_request["readiness"] = {
+                "ready_player_ids": sorted(ready_ids),
+                "required_player_ids": required_ids,
+                "ready_count": sum(uid in ready_ids for uid in required_ids),
+                "required_count": len(required_ids),
+                "all_ready": all(uid in ready_ids for uid in required_ids),
+                "players": [
+                    {
+                        "player_id": uid,
+                        "name": str(
+                            (instance.players.get(uid) or {}).get("character_name") or uid
+                        ),
+                        "ready": uid in ready_ids,
+                    }
+                    for uid in required_ids
+                ],
+            }
+            view["encounter_request"] = projected_request
+        else:
+            view["encounter_request"] = None
+        view["recent_combat_events"] = self._recent_combat_events(instance)
+        view["campaign"] = campaign
+        tutorial = campaign.get("tutorial") if isinstance(campaign, dict) else None
+        step = tutorial.get("current_step") if isinstance(tutorial, dict) else None
+        view["encounter_preview"] = combat_visibility.encounter_preview(
+            view.get("encounter_presets") or [],
+            [
+                str(step.get("encounter_preset_id") or "") if isinstance(step, dict) else "",
+                str(request.get("encounter_preset_id") or "") if isinstance(request, dict) else "",
+            ],
+        )
+        if not viewer_is_gm:
+            # The preset catalog carries full monster stat blocks: GM tooling only.
+            view.pop("encounter_presets", None)
+        director = self.director_proposal(instance, campaign)
+        # Gameplay clients need the recommendation, not the Director's
+        # bounded copy of every player action. Full context stays LLM-only.
+        view["director"] = {"proposal": deepcopy(director.get("proposal") or {})}
+        return view
+
+    @staticmethod
+    def _recent_combat_events(instance: Any) -> list[dict[str, Any]]:
+        """Project a bounded, presentation-safe public combat event feed."""
+
+        ledger = list(ruleset_runtime.event_ledger(instance) or [])
+        start_index = 0
+        for index in range(len(ledger) - 1, -1, -1):
+            if str((ledger[index] or {}).get("intent_type") or "") == "combat.start":
+                start_index = index
+                break
+        meaningful = {
+            "dnd2024.combat.started", "dnd2024.combat.ended",
+            "dnd2024.combat.message", "dnd2024.turn.advanced",
+            "dnd2024.position.changed", "dnd2024.spell.cast",
+            "check.resolved", "resource.changed", "condition.applied",
+            "condition.removed", "dnd2024.death_save.resolved",
+            "dnd2024.character.revived",
+        }
+        allowed_fields = {
+            "type", "kind", "actor_id", "target_id", "text", "natural", "modifier",
+            "total", "target", "success", "critical", "delta", "amount", "damage_type",
+            "healing",
+            "distance", "round", "turn_index", "previous_actor_id", "condition", "reason",
+            "spell_ref", "resource", "roll", "successes", "failures", "stable", "dead", "hp",
+        }
+        combat = (
+            ruleset_runtime.state(instance).get("combat")
+            if isinstance(ruleset_runtime.state(instance), dict) else {}
+        )
+        enemies = combat.get("enemies") if isinstance(combat, dict) else {}
+        enemies = enemies if isinstance(enemies, dict) else {}
+
+        def actor_name(actor_id: str) -> str:
+            if actor_id.startswith("player:"):
+                uid = actor_id.removeprefix("player:")
+                return str((instance.players.get(uid) or {}).get("character_name") or uid)
+            if actor_id.startswith("enemy:"):
+                enemy_id = actor_id.removeprefix("enemy:")
+                return str((enemies.get(enemy_id) or {}).get("name") or enemy_id)
+            return actor_id
+
+        result: list[dict[str, Any]] = []
+        current_round = 0
+        current_turn_index = 0
+        for batch in ledger[start_index:]:
+            if not isinstance(batch, dict):
+                continue
+            raw_events = batch.get("events") or []
+            batch_actor_id = next((
+                str(raw.get("actor_id") or "")
+                for raw in raw_events
+                if isinstance(raw, dict) and raw.get("type") == "intent.submitted"
+            ), "")
+            for event_index, raw in enumerate(raw_events):
+                if not isinstance(raw, dict) or str(raw.get("type") or "") not in meaningful:
+                    continue
+                event = {
+                    key: deepcopy(value) for key, value in raw.items() if key in allowed_fields
+                }
+                if event.get("round") is not None:
+                    current_round = int(event.get("round", 0) or 0)
+                if event.get("turn_index") is not None:
+                    current_turn_index = int(event.get("turn_index", 0) or 0)
+                event.setdefault("round", current_round)
+                event.setdefault("turn_index", current_turn_index)
+                if not event.get("actor_id") and batch_actor_id:
+                    event["actor_id"] = batch_actor_id
+                event.update({
+                    "event_id": f"{batch.get('batch_id', '')}:{event_index}",
+                    "batch_id": str(batch.get("batch_id") or ""),
+                    "intent_type": str(batch.get("intent_type") or ""),
+                    "state_version": int(batch.get("result_version", 0) or 0),
+                })
+                actor_id = str(event.get("actor_id") or "")
+                target_id = str(event.get("target_id") or "")
+                previous_id = str(event.get("previous_actor_id") or "")
+                if actor_id:
+                    event["actor_name"] = actor_name(actor_id)
+                if target_id:
+                    event["target_name"] = actor_name(target_id)
+                if previous_id:
+                    event["previous_actor_name"] = actor_name(previous_id)
+                result.append(event)
+        return result[-80:]
+
+    def apply_narrative_combat_signal(
+        self,
+        instance: Any,
+        signal: str,
+        proposal: dict[str, Any] | None = None,
+    ) -> bool:
+        """Persist an advisory request that wakes the authoritative combat tool."""
+
+        if str(signal or "").strip().casefold() not in {"start", "begin"}:
+            return False
+        try:
+            ruleset_runtime.require_binding(instance, self.runtime_id)
+        except ruleset_runtime.RulesetBindingError as exc:
+            logger.warning("%s: %s (game_key=%s)", exc.code, exc, instance.game_key)
+            return False
+        state = self._combat_engine(
+            instance, locale=str(getattr(instance, "language", "") or ""),
+        ).initialize_state(instance)
+        if (state.get("combat") or {}).get("status") == "active":
+            return False
+        current = state.get("encounter_request")
+        if isinstance(current, dict) and current.get("status") == "pending":
+            return False
+        request = {
+            "status": "pending",
+            "source": "narrative",
+            "round": progression.current_round(instance),
+            "ready_player_ids": [],
+        }
+        preset_id = str((proposal or {}).get("encounter_preset_id") or "")
+        if preset_id:
+            locale = str(getattr(instance, "language", "") or "")
+            campaign = self._campaign_engine(instance, locale).gameplay_view(instance)
+            access = self._encounter_access(instance, campaign)
+            # 剧情未绑定遭遇（unprepared）时不得把通用目录里的预设写进请求：
+            # 那等于用叙事文本静默替换 canonical 敌情。
+            story_bound = (
+                access.mode != "story" or preset_id == access.encounter_preset_id
+            )
+            if access.mode != "blocked" and story_bound:
+                preset = next(
+                    (
+                        item
+                        for item in self._combat_engine(instance, access, locale).encounter_presets()
+                        if item.get("id") == preset_id
+                    ),
+                    None,
+                )
+                if preset is not None:
+                    request["encounter_preset_id"] = preset_id
+                    try:
+                        confidence = float((proposal or {}).get("confidence", 0) or 0)
+                    except (TypeError, ValueError):
+                        confidence = 0.0
+                    request["confidence"] = max(0.0, min(1.0, confidence))
+        state["encounter_request"] = request
+        return True
+
+    def deferred_narrative_check_action_ids(self, instance: Any) -> list[str]:
+        """Keep opening attacks out of the generic check pipeline until initiative exists."""
+
+        proposal = self.director_proposal(instance).get("proposal") or {}
+        if (
+            proposal.get("kind") != "combat"
+            or float(proposal.get("confidence", 0) or 0) < 0.85
+        ):
+            return []
+        return [str(item) for item in proposal.get("action_ids") or [] if str(item)]
+
+    def build_llm_view(self, instance: Any) -> dict[str, Any]:
+        state = project_legacy_game_context(instance)
+        for uid, player in state.get("players", {}).items():
+            source = instance.get_character_sheet(uid)
+            canonical = source.get("ruleset_character")
+            if not isinstance(canonical, dict):
+                continue
+            sheet = player.get("character_sheet")
+            if not isinstance(sheet, dict):
+                continue
+            resources = canonical.get("resources") or {}
+            sheet["hp"] = int(resources.get("hp", 0) or 0)
+            sheet["max_hp"] = int(resources.get("max_hp", 0) or 0)
+            sheet["conditions"] = deepcopy(canonical.get("conditions") or {})
+            sheet["spellcasting"] = deepcopy(canonical.get("spellcasting") or {})
+            sheet["derived"] = deepcopy(canonical.get("derived") or {})
+        gameplay = self.gameplay_view(
+            instance, str(getattr(instance, "gm_uid", "") or ""), True,
+        )
+        director = self.director_proposal(instance, gameplay.get("campaign"))
+        state["ruleset_authority"] = {
+            "runtime_id": self.runtime_id,
+            "state_version": gameplay["state_version"],
+            "combat": gameplay["combat"],
+            "campaign": gameplay["campaign"],
+            "latest_event_batch": (
+                deepcopy(ruleset_runtime.event_ledger(instance)[-1]) if ruleset_runtime.event_ledger(instance) else None
+            ),
+            "director": director,
+            "policy": "Narrate resolved events only; never invent or mutate mechanics.",
+        }
+        return state
+
+    def director_proposal(
+        self, instance: Any, campaign: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return a read-only next-step proposal for the AI GM context/UI."""
+
+        if campaign is None:
+            campaign = self._campaign_engine(
+                instance, str(getattr(instance, "language", "") or ""),
+            ).gameplay_view(instance)
+        state = ruleset_runtime.state(instance)
+        persisted_campaign = state.get("campaign") if isinstance(state, dict) else None
+        automation = campaign.get("automation") if isinstance(campaign, dict) else None
+        if not isinstance(automation, dict) and isinstance(persisted_campaign, dict):
+            automation = persisted_campaign.get("automation")
+        configured_mode = automation.get("mode") if isinstance(automation, dict) else None
+        if configured_mode in {"auto", "assist", "manual"} and configured_mode != self._director.mode:
+            return Dnd2024Director(configured_mode).propose_dict(instance, campaign)
+        return self._director.propose_dict(instance, campaign)
+
+    def director_automatic_intent(
+        self, instance: Any, proposal: dict[str, Any],
+    ) -> dict[str, Any] | list[dict[str, Any]] | None:
+        """Start only a server-catalogued encounter in auto mode."""
+
+        if not isinstance(proposal, dict) or proposal.get("mode") != "auto":
+            return None
+        version = int(ruleset_runtime.state(instance).get("version", 0) or 0)
+        if proposal.get("kind") == "adventure_choice":
+            choice_id = str(proposal.get("choice_id") or "")
+            if not choice_id:
+                return None
+            return {
+                "intent_id": f"director:adventure:{version}:{choice_id}",
+                "type": "tutorial.choose",
+                "expected_version": version,
+                "submitted_by": str(getattr(instance, "gm_uid", "") or ""),
+                "choice_id": choice_id,
+            }
+        if proposal.get("kind") == "party_decision":
+            selections = proposal.get("selections")
+            if not isinstance(selections, list) or not selections:
+                return None
+            current = self._campaign_engine(
+                instance, str(getattr(instance, "language", "") or ""),
+            ).gameplay_view(instance)
+            party = current.get("party_decision") or {}
+            # The gameplay projection intentionally omits an unopened party
+            # decision. Treat that absence as the authoritative ``none`` state.
+            if str(party.get("status") or "none") not in {"none", "open"}:
+                return None
+            versioned: list[dict[str, Any]] = []
+            for index, selection in enumerate(selections):
+                if not isinstance(selection, dict):
+                    return None
+                choice_id = str(selection.get("choice_id") or "")
+                if not choice_id:
+                    return None
+                versioned.append({
+                    "intent_id": f"director:party:{version}:{index}:{choice_id}",
+                    "type": "party_decision.submit",
+                    "expected_version": version + index,
+                    "submitted_by": str(selection.get("player_id") or ""),
+                    "choice_id": choice_id,
+                })
+            versioned.append({
+                "intent_id": f"director:party:{version}:resolve",
+                "type": "party_decision.resolve",
+                "expected_version": version + len(versioned),
+                "submitted_by": str(getattr(instance, "gm_uid", "") or ""),
+            })
+            return versioned
+        if proposal.get("kind") != "combat":
+            return None
+        preset_id = str(proposal.get("encounter_preset_id") or "")
+        if not preset_id:
+            return None
+        locale = str(getattr(instance, "language", "") or "")
+        campaign = self._campaign_engine(instance, locale).gameplay_view(instance)
+        access = self._encounter_access(instance, campaign)
+        if access.status != "pending":
+            return None
+        if access.mode == "story" and access.encounter_preset_id != preset_id:
+            return None
+        if access.mode == "sandbox":
+            available = {
+                str(item.get("id") or "")
+                for item in self._combat_engine(instance, access, locale).encounter_presets()
+            }
+            if preset_id not in available:
+                return None
+        return {
+            "intent_id": (
+                f"director:combat:{version}:{access.encounter_instance_id}"
+                if access.encounter_instance_id
+                else f"director:combat:{version}:{preset_id}"
+            ),
+            "type": "combat.start",
+            "expected_version": version,
+            "submitted_by": str(getattr(instance, "gm_uid", "") or ""),
+            "encounter_preset_id": preset_id,
+        }
+
+    async def plan_director_turn(
+        self, instance: Any, llm_client: Any,
+    ) -> dict[str, Any] | None:
+        """Ask the model only for canonical adventure choices or encounter presets."""
+
+        campaign = self._campaign_engine(
+            instance, str(getattr(instance, "language", "") or ""),
+        ).gameplay_view(instance)
+        choice = await plan_adventure_choice(instance, campaign, llm_client)
+        if choice is not None:
+            return choice
+        proposal = self.director_proposal(instance, campaign).get("proposal") or {}
+        if proposal.get("kind") != "combat" or proposal.get("encounter_preset_id"):
+            return None
+        access = self._encounter_access(instance, campaign)
+        locale = str(getattr(instance, "language", "") or "")
+        presets = self._combat_engine(instance, access, locale).encounter_presets()
+        return await plan_encounter_preset(instance, proposal, presets, llm_client)
+
+    async def plan_temporary_encounter(
+        self, instance: Any, llm_client: Any,
+    ) -> dict[str, Any] | None:
+        """AI 临时遭遇提案：只读生成，不落任何权威状态。
+
+        GM 确认后提交现有 ``combat.start``（mode=sandbox），服务端权威校验
+        仍然完整生效。剧情已绑定正式遭遇时不提供这条兜底路径。
+        """
+
+        campaign = self._campaign_engine(
+            instance, str(getattr(instance, "language", "") or ""),
+        ).gameplay_view(instance)
+        return await plan_temporary_encounter(instance, campaign, llm_client)
+
+    def filter_narrative_state_update(
+        self, instance: Any, update: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Keep an active adventure step authoritative over narrative scene tags."""
+
+        filtered = deepcopy(update)
+        campaign = self._campaign_engine(
+            instance, str(getattr(instance, "language", "") or ""),
+        ).gameplay_view(instance)
+        tutorial = campaign.get("tutorial") if isinstance(campaign, dict) else None
+        if (
+            isinstance(tutorial, dict)
+            and tutorial.get("status") == "active"
+            and isinstance(tutorial.get("current_step"), dict)
+        ):
+            filtered["scene_change"] = ""
+        return filtered
+
+    def _reconciler(self, bundle: Any) -> Dnd2024CharacterStateReconciler:
+        return Dnd2024CharacterStateReconciler(
+            bundle,
+            locale_bundles=[
+                self.load_bundle(supported)
+                for supported in bundle.manifest.supported_locales
+            ],
+        )
+
+    def _live_projection(
+        self, current: dict[str, Any], canonical: dict[str, Any], bundle: Any,
+    ) -> dict[str, Any]:
+        """Project a played character forward without rolling live state back.
+
+        Used by the lifecycle operations that rebuild a character (rest,
+        advancement).  Creation and import keep the plain ``project_legacy``
+        path, where the packages legitimately are the source of truth.
+        """
+
+        projected = {
+            **Dnd2024CharacterBuilder(bundle).project_legacy(canonical),
+            "rule_binding": deepcopy(canonical["rule_binding"]),
+            "ruleset_character": canonical,
+        }
+        merged = merge_live_character_projection(current, projected)
+        # 带上既有的 revision / operation log，让随后的 reconcile 是在真实历史上
+        # 继续推进，而不是从零重新计数。
+        for field in ("ruleset_revision", "ruleset_operation_log"):
+            if field in current:
+                merged[field] = deepcopy(current[field])
+        # §35/§36：canonical 更新 -> live merge -> 按当前装备重算规则状态，
+        # 否则长休/升级之后 AC 会掉回开卡时的数值。
+        self._reconciler(bundle).reconcile(
+            merged, frozenset({"equipment", "inventory"}),
+        )
+        return merged
+
+    def reconcile_character_state(
+        self,
+        instance: Any,
+        user_id: str,
+        changed_domains: frozenset[str],
+    ) -> dict[str, Any] | None:
+        """Re-derive canonical mechanics after generic live state changed.
+
+        Thin delegate on purpose: the equipment projection, the armor class
+        re-derivation and the revision/log bookkeeping all live in
+        :mod:`~src.rulesets.dnd2024.character.reconciliation`.
+        """
+
+        sheet = instance.get_character_sheet(user_id)
+        if not isinstance(sheet, dict) or not isinstance(sheet.get("ruleset_character"), dict):
+            # 不是专业角色卡（legacy 导入 / 尚未建卡）：没有可投影的 canonical state。
+            return None
+        locale = str(
+            sheet["ruleset_character"].get("locale")
+            or getattr(instance, "language", "")
+            or ""
+        )
+        bundle = self.load_bundle(locale)
+        result = self._reconciler(bundle).reconcile(sheet, changed_domains)
+        if result is not None:
+            instance.set_character_sheet(user_id, sheet)
+        return result
+
+    def prepare_owned_items(
+        self,
+        instance: Any,
+        user_id: str,
+        item_names: frozenset[str],
+    ) -> None:
+        """Canonicalize owned rows before the generic layer equips them.
+
+        The generic equip derives a target slot from the row it is handed, so an
+        old save whose shield row carries no ruleset metadata would be placed at
+        ``body`` and evict the armor actually worn.  Doing this first keeps that
+        knowledge in the ruleset: the generic layer only asks "prepare these
+        owned item names", and never learns what a shield is.
+        """
+
+        sheet = instance.get_character_sheet(user_id)
+        if not isinstance(sheet, dict) or not isinstance(sheet.get("ruleset_character"), dict):
+            return
+        locale = str(
+            sheet["ruleset_character"].get("locale")
+            or getattr(instance, "language", "")
+            or ""
+        )
+        bundle = self.load_bundle(locale)
+        prepared = Dnd2024CharacterStateReconciler(
+            bundle,
+            locale_bundles=[
+                self.load_bundle(supported)
+                for supported in bundle.manifest.supported_locales
+            ],
+        ).prepare_owned_rows(sheet, item_names)
+        if prepared:
+            instance.set_character_sheet(user_id, sheet)
+
+    def project_legacy_character(self, character: dict[str, Any]) -> dict[str, Any]:
+        locale = str(character.get("locale") or "")
+        return Dnd2024CharacterBuilder(self.load_bundle(locale)).project_legacy(character)
+
+    def migrate_state(self, payload: dict[str, Any], from_version: int) -> dict[str, Any]:
+        if from_version != 1:
+            raise ValueError(f"unsupported D&D 2024 state schema version: {from_version}")
+        return deepcopy(payload)
+
+
+def project_combat_view(instance: Any) -> dict[str, Any] | None:
+    """Read-only combat turn view derived from ``ruleset_state["combat"]``."""
+
+    combat = ruleset_runtime.state(instance).get("combat")
+    if not isinstance(combat, Mapping):
+        return None
+    active = combat.get("status") == "active"
+    try:
+        turn_index = int(combat.get("turn_index", 0) or 0)
+    except (TypeError, ValueError):
+        turn_index = 0
+    return {
+        "combat_state": "active" if active else "none",
+        "combat_active": active,
+        "initiative_order": list(combat.get("initiative") or []),
+        "initiative_current": turn_index,
+    }
+
+
+# Registered where the runtime is defined: any code path that can hold this
+# runtime also gets its combat view, with no dependency from src/engine.
+legacy_combat.register_combat_projector(Dnd2024Runtime.runtime_id, project_combat_view)

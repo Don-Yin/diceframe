@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "kind": "scene",
+  "id": "greymoor_forked_trail",
+  "source_ref": "diceframe-original:dnd2024-adventures/lanterns-of-greymoor",
+  "automation_level": "guided",
+  "map_location_ref": "map_location:greymoor_route",
+  "map_marker_id": "forked_trail",
+  "npc_refs": []
+}

@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "fighter_b",
+  "source_ref": "srd-5.2.1:p47:fighter_b",
+  "automation_level": "deterministic",
+  "category": "class",
+  "item_refs": [
+    "item:studded_leather_armor",
+    "item:scimitar",
+    "item:shortsword",
+    "item:longbow",
+    "item:arrows",
+    "item:quiver",
+    "item:dungeoneer_pack"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:studded_leather_armor",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:scimitar",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:shortsword",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:longbow",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:arrows",
+      "quantity": 20
+    },
+    {
+      "item_ref": "item:quiver",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:dungeoneer_pack",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 11
+}

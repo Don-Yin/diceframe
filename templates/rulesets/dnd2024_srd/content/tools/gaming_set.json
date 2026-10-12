@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "kind": "tool",
+  "id": "gaming_set",
+  "source_ref": "srd-5.2.1:p83:backgrounds",
+  "automation_level": "deterministic"
+}

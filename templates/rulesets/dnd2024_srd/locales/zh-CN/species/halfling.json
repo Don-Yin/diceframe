@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "species",
+    "id": "halfling"
+  },
+  "fields": {
+    "name": "半身人",
+    "summary": "勇敢而幸运，能穿过大型生物的空间，并善于借助他人隐藏。"
+  }
+}

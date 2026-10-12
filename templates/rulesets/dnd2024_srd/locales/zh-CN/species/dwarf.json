@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "species",
+    "id": "dwarf"
+  },
+  "fields": {
+    "name": "矮人",
+    "summary": "坚韧耐久，生命值更高，并能感知石质环境中的震动。"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "nature"
+  },
+  "fields": {
+    "name": "自然",
+    "summary": "回忆地形、植物、动物与天气知识。"
+  }
+}

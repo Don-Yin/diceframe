@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "skill",
+    "id": "stealth"
+  },
+  "fields": {
+    "name": "Stealth",
+    "summary": "Move quietly and use concealment to avoid notice."
+  }
+}

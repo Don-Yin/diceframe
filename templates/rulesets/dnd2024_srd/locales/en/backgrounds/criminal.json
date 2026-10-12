@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "background",
+    "id": "criminal"
+  },
+  "fields": {
+    "name": "Criminal",
+    "summary": "You know covert work and the underworld, with training in Sleight of Hand and Stealth."
+  }
+}

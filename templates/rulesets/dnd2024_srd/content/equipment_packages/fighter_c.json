@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "fighter_c",
+  "source_ref": "srd-5.2.1:p47:fighter_c",
+  "automation_level": "deterministic",
+  "category": "class",
+  "item_refs": [],
+  "item_grants": [],
+  "coins_gp": 155
+}

@@ -1,0 +1,6 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "scene", "id": "greymoor_thorn_glade"},
+  "fields": {"name": "Thorn Glade", "description": "A cramped clearing around a disturbed shrine stone where the trail becomes an encounter."}
+}

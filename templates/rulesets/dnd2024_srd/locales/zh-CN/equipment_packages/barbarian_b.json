@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "equipment_package",
+    "id": "barbarian_b"
+  },
+  "fields": {
+    "name": "野蛮人装备 B（75 GP）"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "quick_character_preset",
+    "id": "woodland_guide"
+  },
+  "fields": {
+    "name": "林野向导",
+    "summary": "木精灵游侠，兼顾侦察、远程战斗与自然魔法。",
+    "recommendation_reason": "如果你想替队伍发现危险、追踪线索并从远处可靠输出，这个构筑覆盖探索和战斗两端。"
+  }
+}

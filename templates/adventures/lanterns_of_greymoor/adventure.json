@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "kind": "adventure",
+  "id": "lanterns_of_greymoor",
+  "source_ref": "diceframe-original:dnd2024-adventures/lanterns-of-greymoor",
+  "recommended_world_id": "greymoor",
+  "automation_level": "deterministic",
+  "estimated_minutes": 90,
+  "start_step_id": "mistbound_road",
+  "chapters": [
+    {"id": "missing_light", "step_ids": ["mistbound_road", "keepers_plea", "read_the_trail"]},
+    {"id": "thorn_glade", "step_ids": ["thorn_ambush"]},
+    {"id": "old_shrine", "step_ids": ["restore_the_lantern"]}
+  ],
+  "steps": [
+    {
+      "id": "mistbound_road",
+      "chapter_id": "missing_light",
+      "scene_ref": "scene:greymoor_mistbound_road",
+      "requires": "none",
+      "choice_ids": ["inspect_cold_ash", "check_wagon_tracks"]
+    },
+    {
+      "id": "keepers_plea",
+      "chapter_id": "missing_light",
+      "scene_ref": "scene:greymoor_waykeeper_cottage",
+      "requires": "none",
+      "choice_ids": ["reassure_mira", "ask_precise_questions"]
+    },
+    {
+      "id": "read_the_trail",
+      "chapter_id": "missing_light",
+      "scene_ref": "scene:greymoor_forked_trail",
+      "requires": "none",
+      "choice_ids": ["follow_small_tracks", "follow_arcane_residue"]
+    },
+    {
+      "id": "thorn_ambush",
+      "chapter_id": "thorn_glade",
+      "scene_ref": "scene:greymoor_thorn_glade",
+      "requires": "combat_ended",
+      "encounter_preset_id": "first_skirmish",
+      "choice_ids": ["secure_the_glade"]
+    },
+    {
+      "id": "restore_the_lantern",
+      "chapter_id": "old_shrine",
+      "scene_ref": "scene:greymoor_old_shrine",
+      "requires": "none",
+      "choice_ids": ["return_the_light", "share_the_truth"]
+    }
+  ],
+  "choices": [
+    {
+      "id": "inspect_cold_ash",
+      "step_id": "mistbound_road",
+      "next_step_id": "keepers_plea",
+      "outcomes": [{"entity_kind": "clue", "entity_id": "clue:cold_silver_ash", "visibility": "public"}]
+    },
+    {
+      "id": "check_wagon_tracks",
+      "step_id": "mistbound_road",
+      "next_step_id": "keepers_plea",
+      "outcomes": [{"entity_kind": "clue", "entity_id": "clue:three_toed_tracks", "visibility": "public"}]
+    },
+    {
+      "id": "reassure_mira",
+      "step_id": "keepers_plea",
+      "next_step_id": "read_the_trail",
+      "outcomes": [
+        {"entity_kind": "relationship", "entity_id": "relationship:mira_trust", "visibility": "public"},
+        {"entity_kind": "task", "entity_id": "task:recover_way_lantern", "visibility": "public", "status": "active"}
+      ]
+    },
+    {
+      "id": "ask_precise_questions",
+      "step_id": "keepers_plea",
+      "next_step_id": "read_the_trail",
+      "outcomes": [
+        {"entity_kind": "fact", "entity_id": "fact:lantern_failed_at_midnight", "visibility": "public"},
+        {"entity_kind": "task", "entity_id": "task:recover_way_lantern", "visibility": "public", "status": "active"}
+      ]
+    },
+    {
+      "id": "follow_small_tracks",
+      "step_id": "read_the_trail",
+      "next_step_id": "thorn_ambush",
+      "outcomes": [{"entity_kind": "clue", "entity_id": "clue:thorn_glade_route", "visibility": "public"}]
+    },
+    {
+      "id": "follow_arcane_residue",
+      "step_id": "read_the_trail",
+      "next_step_id": "thorn_ambush",
+      "outcomes": [{"entity_kind": "clue", "entity_id": "clue:lantern_resonance", "visibility": "public"}]
+    },
+    {
+      "id": "secure_the_glade",
+      "step_id": "thorn_ambush",
+      "next_step_id": "restore_the_lantern",
+      "outcomes": [{"entity_kind": "item", "entity_id": "item:brass_shrine_key", "visibility": "public"}]
+    },
+    {
+      "id": "return_the_light",
+      "step_id": "restore_the_lantern",
+      "next_step_id": "",
+      "outcomes": [
+        {"entity_kind": "fact", "entity_id": "fact:greymoor_light_restored", "visibility": "public"},
+        {"entity_kind": "task", "entity_id": "task:recover_way_lantern", "visibility": "public", "status": "completed"}
+      ]
+    },
+    {
+      "id": "share_the_truth",
+      "step_id": "restore_the_lantern",
+      "next_step_id": "",
+      "outcomes": [
+        {"entity_kind": "fact", "entity_id": "fact:shrine_truth_shared", "visibility": "public"},
+        {"entity_kind": "task", "entity_id": "task:recover_way_lantern", "visibility": "public", "status": "completed"}
+      ]
+    }
+  ]
+}

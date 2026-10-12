@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "acolyte_a",
+  "source_ref": "srd-5.2.1:p83:acolyte_a",
+  "automation_level": "deterministic",
+  "category": "background",
+  "item_refs": [
+    "item:calligraphers_supplies",
+    "item:prayer_book",
+    "item:holy_symbol",
+    "item:parchment",
+    "item:robe"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:calligraphers_supplies",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:prayer_book",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:holy_symbol",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:parchment",
+      "quantity": 10
+    },
+    {
+      "item_ref": "item:robe",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 8
+}

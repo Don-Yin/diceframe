@@ -1,0 +1,317 @@
+{
+  "locale_schema_version": 1,
+  "locale": "ja",
+  "target": {
+    "kind": "rule",
+    "id": "dnd5e"
+  },
+  "rule": {
+    "rule_name": "D&D 5e ライトルール",
+    "description": "D&D 5e 風の軽量アシストルール。"
+  },
+  "attributes": {
+    "str": {
+      "name": "筋力"
+    },
+    "dex": {
+      "name": "敏捷力"
+    },
+    "con": {
+      "name": "耐久力"
+    },
+    "int": {
+      "name": "知力"
+    },
+    "wis": {
+      "name": "判断力"
+    },
+    "cha": {
+      "name": "魅力"
+    }
+  },
+  "classes": {
+    "barbarian": {
+      "name": "蛮族"
+    },
+    "bard": {
+      "name": "吟遊詩人"
+    },
+    "cleric": {
+      "name": "クレリック"
+    },
+    "druid": {
+      "name": "ドルイド"
+    },
+    "fighter": {
+      "name": "ファイター"
+    },
+    "monk": {
+      "name": "モンク"
+    },
+    "paladin": {
+      "name": "パラディン"
+    },
+    "ranger": {
+      "name": "レンジャー"
+    },
+    "rogue": {
+      "name": "ローグ"
+    },
+    "sorcerer": {
+      "name": "ソーサラー"
+    },
+    "warlock": {
+      "name": "ウォーロック"
+    },
+    "wizard": {
+      "name": "ウィザード"
+    }
+  },
+  "items": {
+    "dagger": {
+      "name": "ダガー"
+    },
+    "shortsword": {
+      "name": "ショートソード"
+    },
+    "longsword": {
+      "name": "ロングソード"
+    },
+    "scimitar": {
+      "name": "シミター"
+    },
+    "rapier": {
+      "name": "レイピア"
+    },
+    "greatsword": {
+      "name": "グレートソード"
+    },
+    "greataxe": {
+      "name": "大斧"
+    },
+    "mace": {
+      "name": "メイス"
+    },
+    "warhammer": {
+      "name": "ウォーハンマー"
+    },
+    "quarterstaff": {
+      "name": "クォータースタッフ"
+    },
+    "longbow": {
+      "name": "ロングボウ"
+    },
+    "shortbow": {
+      "name": "ショートボウ"
+    },
+    "leather_armor": {
+      "name": "革鎧"
+    },
+    "chain_mail": {
+      "name": "チェインメイル"
+    },
+    "shield": {
+      "name": "盾"
+    },
+    "wooden_shield": {
+      "name": "木の盾"
+    },
+    "arcane_focus": {
+      "name": "秘術焦点"
+    },
+    "lute": {
+      "name": "リュート"
+    },
+    "holy_symbol": {
+      "name": "聖印"
+    },
+    "mistletoe": {
+      "name": "ヤドリギ"
+    },
+    "dart": {
+      "name": "ダーツ×10"
+    },
+    "arrows": {
+      "name": "矢×20"
+    },
+    "thieves_tools": {
+      "name": "盗賊道具"
+    },
+    "staff": {
+      "name": "杖"
+    },
+    "spellbook": {
+      "name": "魔法書"
+    }
+  },
+  "skills": {
+    "athletics": {
+      "aliases": [
+        "運動"
+      ]
+    },
+    "acrobatics": {
+      "aliases": [
+        "軽業"
+      ]
+    },
+    "stealth": {
+      "aliases": [
+        "隠密"
+      ]
+    },
+    "perception": {
+      "aliases": [
+        "知覚"
+      ]
+    },
+    "arcana": {
+      "aliases": [
+        "魔法学"
+      ]
+    },
+    "insight": {
+      "aliases": [
+        "洞察"
+      ]
+    },
+    "rage": {
+      "name": "激怒"
+    },
+    "reckless_attack": {
+      "name": "無謀な攻撃"
+    },
+    "danger_sense": {
+      "name": "危険感知"
+    },
+    "brutal_critical": {
+      "name": "残虐な一撃"
+    },
+    "bardic_inspiration": {
+      "name": "吟遊激励"
+    },
+    "hypnotic_pattern": {
+      "name": "催眠パターン"
+    },
+    "jack_of_all_trades": {
+      "name": "何でも屋"
+    },
+    "counterspell": {
+      "name": "呪文反撃"
+    },
+    "healing_word": {
+      "name": "癒しの言葉"
+    },
+    "turn_undead": {
+      "name": "アンデッド退散"
+    },
+    "guiding_bolt": {
+      "name": "導きの光"
+    },
+    "shield_of_faith": {
+      "name": "信仰の盾"
+    },
+    "wild_shape": {
+      "name": "野生変身"
+    },
+    "entangle": {
+      "name": "絡みつき"
+    },
+    "nature_sense": {
+      "name": "自然感知"
+    },
+    "barkskin": {
+      "name": "樹皮の肌"
+    },
+    "action_surge": {
+      "name": "アクションサージ"
+    },
+    "second_wind": {
+      "name": "セカンドウィンド"
+    },
+    "improved_critical": {
+      "name": "致命打強化"
+    },
+    "battle_master": {
+      "name": "戦術の達人"
+    },
+    "flurry_of_blows": {
+      "name": "連続打撃"
+    },
+    "deflect_missiles": {
+      "name": "飛び道具防御"
+    },
+    "stunning_strike": {
+      "name": "震撼打撃"
+    },
+    "step_of_the_wind": {
+      "name": "風の歩み"
+    },
+    "divine_smite": {
+      "name": "聖なる斬撃"
+    },
+    "lay_on_hands": {
+      "name": "癒しの手"
+    },
+    "aura_of_protection": {
+      "name": "守護のオーラ"
+    },
+    "divine_sense": {
+      "name": "聖なる感知"
+    },
+    "favored_enemy": {
+      "name": "宿敵"
+    },
+    "hunter_s_mark": {
+      "name": "狩人の印"
+    },
+    "natural_explorer": {
+      "name": "自然の探索者"
+    },
+    "multiattack": {
+      "name": "多重攻撃"
+    },
+    "sneak_attack": {
+      "name": "不意打ち"
+    },
+    "uncanny_dodge": {
+      "name": "驚異のかわし"
+    },
+    "thieves_tools": {
+      "name": "盗賊道具"
+    },
+    "stealth_expertise": {
+      "name": "隠密の達人"
+    },
+    "magic_missile": {
+      "name": "魔法の矢"
+    },
+    "shield": {
+      "name": "護盾"
+    },
+    "scorching_ray": {
+      "name": "灼熱の光線"
+    },
+    "metamagic": {
+      "name": "メタマジック"
+    },
+    "eldritch_blast": {
+      "name": "エルドリッチブラスト"
+    },
+    "pact_boon": {
+      "name": "契約の恩恵"
+    },
+    "devil_s_sight": {
+      "name": "悪魔の視覚"
+    },
+    "charm_person": {
+      "name": "人間魅惑"
+    },
+    "fireball": {
+      "name": "火球"
+    },
+    "counterspell_wizard": {
+      "name": "呪文反撃"
+    }
+  }
+}

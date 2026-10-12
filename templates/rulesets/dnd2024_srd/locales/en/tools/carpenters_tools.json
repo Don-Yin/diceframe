@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "tool",
+    "id": "carpenters_tools"
+  },
+  "fields": {
+    "name": "Carpenter's Tools"
+  }
+}

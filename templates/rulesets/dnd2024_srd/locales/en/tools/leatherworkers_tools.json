@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "tool",
+    "id": "leatherworkers_tools"
+  },
+  "fields": {
+    "name": "Leatherworker's Tools"
+  }
+}

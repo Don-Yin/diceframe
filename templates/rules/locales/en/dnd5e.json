@@ -1,0 +1,317 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "rule",
+    "id": "dnd5e"
+  },
+  "rule": {
+    "rule_name": "D&D 5e Lite",
+    "description": "A lightweight D&D 5e-style assisted ruleset."
+  },
+  "attributes": {
+    "str": {
+      "name": "Strength"
+    },
+    "dex": {
+      "name": "Dexterity"
+    },
+    "con": {
+      "name": "Constitution"
+    },
+    "int": {
+      "name": "Intelligence"
+    },
+    "wis": {
+      "name": "Wisdom"
+    },
+    "cha": {
+      "name": "Charisma"
+    }
+  },
+  "classes": {
+    "barbarian": {
+      "name": "Barbarian"
+    },
+    "bard": {
+      "name": "Bard"
+    },
+    "cleric": {
+      "name": "Cleric"
+    },
+    "druid": {
+      "name": "Druid"
+    },
+    "fighter": {
+      "name": "Fighter"
+    },
+    "monk": {
+      "name": "Monk"
+    },
+    "paladin": {
+      "name": "Paladin"
+    },
+    "ranger": {
+      "name": "Ranger"
+    },
+    "rogue": {
+      "name": "Rogue"
+    },
+    "sorcerer": {
+      "name": "Sorcerer"
+    },
+    "warlock": {
+      "name": "Warlock"
+    },
+    "wizard": {
+      "name": "Wizard"
+    }
+  },
+  "items": {
+    "dagger": {
+      "name": "Dagger"
+    },
+    "shortsword": {
+      "name": "Shortsword"
+    },
+    "longsword": {
+      "name": "Longsword"
+    },
+    "scimitar": {
+      "name": "Scimitar"
+    },
+    "rapier": {
+      "name": "Rapier"
+    },
+    "greatsword": {
+      "name": "Greatsword"
+    },
+    "greataxe": {
+      "name": "Greataxe"
+    },
+    "mace": {
+      "name": "Mace"
+    },
+    "warhammer": {
+      "name": "Warhammer"
+    },
+    "quarterstaff": {
+      "name": "Quarterstaff"
+    },
+    "longbow": {
+      "name": "Longbow"
+    },
+    "shortbow": {
+      "name": "Shortbow"
+    },
+    "leather_armor": {
+      "name": "Leather Armor"
+    },
+    "chain_mail": {
+      "name": "Chain Mail"
+    },
+    "shield": {
+      "name": "Shield"
+    },
+    "wooden_shield": {
+      "name": "Wooden Shield"
+    },
+    "arcane_focus": {
+      "name": "Arcane Focus"
+    },
+    "lute": {
+      "name": "Lute"
+    },
+    "holy_symbol": {
+      "name": "Holy Symbol"
+    },
+    "mistletoe": {
+      "name": "Mistletoe"
+    },
+    "dart": {
+      "name": "Darts x10"
+    },
+    "arrows": {
+      "name": "Arrows x20"
+    },
+    "thieves_tools": {
+      "name": "Thieves' Tools"
+    },
+    "staff": {
+      "name": "Staff"
+    },
+    "spellbook": {
+      "name": "Spellbook"
+    }
+  },
+  "skills": {
+    "athletics": {
+      "aliases": [
+        "Athletics"
+      ]
+    },
+    "acrobatics": {
+      "aliases": [
+        "Acrobatics"
+      ]
+    },
+    "stealth": {
+      "aliases": [
+        "Stealth"
+      ]
+    },
+    "perception": {
+      "aliases": [
+        "Perception"
+      ]
+    },
+    "arcana": {
+      "aliases": [
+        "Arcana"
+      ]
+    },
+    "insight": {
+      "aliases": [
+        "Insight"
+      ]
+    },
+    "rage": {
+      "name": "Rage"
+    },
+    "reckless_attack": {
+      "name": "Reckless Attack"
+    },
+    "danger_sense": {
+      "name": "Danger Sense"
+    },
+    "brutal_critical": {
+      "name": "Brutal Critical"
+    },
+    "bardic_inspiration": {
+      "name": "Bardic Inspiration"
+    },
+    "hypnotic_pattern": {
+      "name": "Hypnotic Pattern"
+    },
+    "jack_of_all_trades": {
+      "name": "Jack of All Trades"
+    },
+    "counterspell": {
+      "name": "Counterspell"
+    },
+    "healing_word": {
+      "name": "Healing Word"
+    },
+    "turn_undead": {
+      "name": "Turn Undead"
+    },
+    "guiding_bolt": {
+      "name": "Guiding Bolt"
+    },
+    "shield_of_faith": {
+      "name": "Shield of Faith"
+    },
+    "wild_shape": {
+      "name": "Wild Shape"
+    },
+    "entangle": {
+      "name": "Entangle"
+    },
+    "nature_sense": {
+      "name": "Nature Sense"
+    },
+    "barkskin": {
+      "name": "Barkskin"
+    },
+    "action_surge": {
+      "name": "Action Surge"
+    },
+    "second_wind": {
+      "name": "Second Wind"
+    },
+    "improved_critical": {
+      "name": "Improved Critical"
+    },
+    "battle_master": {
+      "name": "Battle Master"
+    },
+    "flurry_of_blows": {
+      "name": "Flurry of Blows"
+    },
+    "deflect_missiles": {
+      "name": "Deflect Missiles"
+    },
+    "stunning_strike": {
+      "name": "Stunning Strike"
+    },
+    "step_of_the_wind": {
+      "name": "Step of the Wind"
+    },
+    "divine_smite": {
+      "name": "Divine Smite"
+    },
+    "lay_on_hands": {
+      "name": "Lay on Hands"
+    },
+    "aura_of_protection": {
+      "name": "Aura of Protection"
+    },
+    "divine_sense": {
+      "name": "Divine Sense"
+    },
+    "favored_enemy": {
+      "name": "Favored Enemy"
+    },
+    "hunter_s_mark": {
+      "name": "Hunter's Mark"
+    },
+    "natural_explorer": {
+      "name": "Natural Explorer"
+    },
+    "multiattack": {
+      "name": "Multiattack"
+    },
+    "sneak_attack": {
+      "name": "Sneak Attack"
+    },
+    "uncanny_dodge": {
+      "name": "Uncanny Dodge"
+    },
+    "thieves_tools": {
+      "name": "Thieves' Tools"
+    },
+    "stealth_expertise": {
+      "name": "Stealth Expertise"
+    },
+    "magic_missile": {
+      "name": "Magic Missile"
+    },
+    "shield": {
+      "name": "Shield"
+    },
+    "scorching_ray": {
+      "name": "Scorching Ray"
+    },
+    "metamagic": {
+      "name": "Metamagic"
+    },
+    "eldritch_blast": {
+      "name": "Eldritch Blast"
+    },
+    "pact_boon": {
+      "name": "Pact Boon"
+    },
+    "devil_s_sight": {
+      "name": "Devil's Sight"
+    },
+    "charm_person": {
+      "name": "Charm Person"
+    },
+    "fireball": {
+      "name": "Fireball"
+    },
+    "counterspell_wizard": {
+      "name": "Counterspell"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "skill",
+    "id": "animal_handling"
+  },
+  "fields": {
+    "name": "驯兽",
+    "summary": "安抚、训练动物，或判断动物会如何行动。"
+  }
+}

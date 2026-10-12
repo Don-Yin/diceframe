@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "tool",
+    "id": "shawm"
+  },
+  "fields": {
+    "name": "肖姆管"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "class",
+    "id": "ranger"
+  },
+  "fields": {
+    "name": "游侠",
+    "summary": "擅长探索、远程或双持作战，并拥有实用自然魔法。"
+  }
+}

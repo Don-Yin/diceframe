@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "class",
+    "id": "monk"
+  },
+  "fields": {
+    "name": "武僧",
+    "summary": "依靠敏捷、感知和徒手技艺机动作战，不穿护甲。"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "kind": "class",
+  "id": "barbarian",
+  "source_ref": "srd-5.2.1:p28:barbarian-core-traits",
+  "class_progression_ref": "progression_catalog:srd_classes",
+  "automation_level": "guided",
+  "hit_die": 12,
+  "fixed_hp_per_level": 7,
+  "primary_ability_refs": [
+    "ability:str"
+  ],
+  "saving_throw_refs": [
+    "ability:str",
+    "ability:con"
+  ],
+  "skill_choice": {
+    "count": 2,
+    "allowed_refs": [
+      "skill:animal_handling",
+      "skill:athletics",
+      "skill:intimidation",
+      "skill:nature",
+      "skill:perception",
+      "skill:survival"
+    ]
+  },
+  "armor_proficiencies": [
+    "light",
+    "medium",
+    "shield"
+  ],
+  "weapon_proficiencies": [
+    "simple",
+    "martial"
+  ],
+  "equipment_package_refs": [
+    "equipment_package:barbarian_a",
+    "equipment_package:barbarian_b"
+  ],
+  "recommended_standard_array": {
+    "str": 15,
+    "dex": 13,
+    "con": 14,
+    "int": 10,
+    "wis": 12,
+    "cha": 8
+  },
+  "level_1_feature_ids": [
+    "rage",
+    "unarmored_defense",
+    "weapon_mastery"
+  ],
+  "experience": {
+    "difficulty": "beginner"
+  }
+}

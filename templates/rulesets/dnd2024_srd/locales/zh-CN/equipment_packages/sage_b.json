@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "equipment_package",
+    "id": "sage_b"
+  },
+  "fields": {
+    "name": "贤者装备 B（50 GP）"
+  }
+}

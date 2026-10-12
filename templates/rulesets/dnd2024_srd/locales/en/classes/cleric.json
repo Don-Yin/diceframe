@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "class",
+    "id": "cleric"
+  },
+  "fields": {
+    "name": "Cleric",
+    "summary": "A dependable divine spellcaster who can heal, support allies, and stand near the front line."
+  }
+}

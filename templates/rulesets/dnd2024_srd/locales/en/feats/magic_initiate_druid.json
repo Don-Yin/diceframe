@@ -1,0 +1,31 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "feat",
+    "id": "magic_initiate_druid"
+  },
+  "fields": {
+    "name": "Magic Initiate (Druid)",
+    "summary": "Choose two cantrips and one level 1 spell from the Druid list, plus the ability used to cast them.",
+    "labels": {
+      "spellcasting_ability": "Spellcasting ability",
+      "cantrips": "Cantrips (choose 2)",
+      "level_1_spell": "Level 1 spell (choose 1)",
+      "int": "Intelligence", "wis": "Wisdom", "cha": "Charisma",
+      "druidcraft": "Druidcraft", "elementalism": "Elementalism", "guidance": "Guidance",
+      "mending": "Mending", "message": "Message", "poison_spray": "Poison Spray",
+      "produce_flame": "Produce Flame", "resistance": "Resistance", "shillelagh": "Shillelagh",
+      "spare_the_dying": "Spare the Dying", "starry_wisp": "Starry Wisp",
+      "animal_friendship": "Animal Friendship", "charm_person": "Charm Person",
+      "create_or_destroy_water": "Create or Destroy Water", "cure_wounds": "Cure Wounds",
+      "detect_magic": "Detect Magic", "detect_poison_and_disease": "Detect Poison and Disease",
+      "entangle": "Entangle", "faerie_fire": "Faerie Fire", "fog_cloud": "Fog Cloud",
+      "goodberry": "Goodberry", "healing_word": "Healing Word", "ice_knife": "Ice Knife",
+      "jump": "Jump", "longstrider": "Longstrider",
+      "protection_from_evil_and_good": "Protection from Evil and Good",
+      "purify_food_and_drink": "Purify Food and Drink", "speak_with_animals": "Speak with Animals",
+      "thunderwave": "Thunderwave"
+    }
+  }
+}

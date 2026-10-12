@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "kind": "rest_catalog",
+  "id": "srd_recovery",
+  "source_ref": "srd-5.2.1:p185-p188:resting",
+  "automation_level": "deterministic",
+  "short_rest": {
+    "minimum_hours": 1,
+    "minimum_hp": 1,
+    "spend_hit_dice": true,
+    "source_ref": "srd-5.2.1:p188:short-rest"
+  },
+  "long_rest": {
+    "minimum_hours": 8,
+    "minimum_sleep_hours": 6,
+    "minimum_hp": 1,
+    "minimum_hours_between_starts": 16,
+    "restore_all_hp": true,
+    "restore_all_hit_dice": true,
+    "reduce_exhaustion": 1,
+    "end_concentration": true,
+    "source_ref": "srd-5.2.1:p185:long-rest"
+  },
+  "spell_slots": {
+    "full": {"short": "none", "long": "all"},
+    "half": {"short": "none", "long": "all"},
+    "pact": {"short": "all", "long": "all"}
+  },
+  "class_resources": {
+    "barbarian": [
+      {"id": "rages", "minimum_level": 1, "maximum_track": "rages", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p28:rage"}
+    ],
+    "bard": [
+      {"id": "bardic_inspiration", "minimum_level": 1, "maximum_ability_modifier": "cha", "minimum": 1, "short_all_from_level": 5, "long": "all", "source_ref": "srd-5.2.1:p31:bardic-inspiration"}
+    ],
+    "cleric": [
+      {"id": "channel_divinity", "minimum_level": 2, "maximum_track": "channel_divinity", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p37:channel-divinity"}
+    ],
+    "druid": [
+      {"id": "wild_shape", "minimum_level": 2, "maximum_track": "wild_shape", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p42:wild-shape"}
+    ],
+    "fighter": [
+      {"id": "second_wind", "minimum_level": 1, "maximum_track": "second_wind", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p48:second-wind"},
+      {"id": "action_surge", "minimum_level": 2, "maximum_track": "action_surge", "short": "all", "long": "all", "source_ref": "srd-5.2.1:p48:action-surge"},
+      {"id": "indomitable", "minimum_level": 9, "maximum_track": "indomitable", "short": "none", "long": "all", "source_ref": "srd-5.2.1:p48:indomitable"}
+    ],
+    "monk": [
+      {"id": "focus_points", "minimum_level": 2, "maximum_track": "focus_points", "short": "all", "long": "all", "resize_policy": "preserve_current", "source_ref": "srd-5.2.1:p50:monks-focus"},
+      {"id": "uncanny_metabolism", "minimum_level": 2, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p51:uncanny-metabolism"}
+    ],
+    "paladin": [
+      {"id": "lay_on_hands", "minimum_level": 1, "maximum_track": "lay_on_hands", "short": "none", "long": "all", "source_ref": "srd-5.2.1:p53:lay-on-hands"},
+      {"id": "channel_divinity", "minimum_level": 3, "maximum_track": "channel_divinity", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p55:channel-divinity"}
+    ],
+    "ranger": [
+      {"id": "favored_enemy", "minimum_level": 1, "maximum_track": "favored_enemy", "short": "none", "long": "all", "source_ref": "srd-5.2.1:p58:favored-enemy"}
+    ],
+    "rogue": [],
+    "sorcerer": [
+      {"id": "innate_sorcery", "minimum_level": 1, "maximum_fixed": 2, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p65:innate-sorcery"},
+      {"id": "sorcery_points", "minimum_level": 2, "maximum_track": "sorcery_points", "short": "none", "long": "all", "source_ref": "srd-5.2.1:p66:font-of-magic"}
+    ],
+    "warlock": [
+      {"id": "magical_cunning", "minimum_level": 2, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p72:magical-cunning"}
+    ],
+    "wizard": [
+      {"id": "arcane_recovery", "minimum_level": 1, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p78:arcane-recovery"}
+    ]
+  }
+}

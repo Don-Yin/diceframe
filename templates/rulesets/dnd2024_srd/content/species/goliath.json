@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "kind": "species",
+  "creature_type": "humanoid",
+  "automation_level": "guided",
+  "id": "goliath",
+  "size_options": [
+    "medium"
+  ],
+  "speed": 35,
+  "source_ref": "srd-5.2.1:p85-86:goliath",
+  "choice_specs": [
+    {
+      "id": "giant_ancestry",
+      "count": 1,
+      "option_ids": [
+        "cloud",
+        "fire",
+        "frost",
+        "hill",
+        "stone",
+        "storm"
+      ]
+    }
+  ],
+  "traits": [
+    {
+      "id": "giant_ancestry",
+      "source_ref": "srd-5.2.1:p85-86:goliath",
+      "automation_level": "guided"
+    },
+    {
+      "id": "large_form",
+      "source_ref": "srd-5.2.1:p85-86:goliath",
+      "automation_level": "guided"
+    },
+    {
+      "id": "powerful_build",
+      "source_ref": "srd-5.2.1:p85-86:goliath",
+      "automation_level": "guided"
+    }
+  ]
+}

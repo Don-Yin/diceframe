@@ -1,0 +1,64 @@
+{
+  "language": "ja",
+  "rule_version": "1.1",
+  "rule_id": "tavern_free",
+  "scene_image": {"kind": "builtin", "id": "tavern_free"},
+  "rule_name": "酒場フリーRP",
+  "rule_name_en": "Tavern Free RP",
+  "description": "ダイスも属性も使わない、純粋な物語ロールプレイモード。酒場で卓を囲むように自由に会話します。",
+  "attributes": [],
+  "special_stats": [],
+  "attribute_points": 0,
+  "attr_hint": "酒場モードでは属性の割り振りは不要です。キャラクターの設定をそのまま書いてください。",
+  "dice_system": "none",
+  "combat_model": "narrative",
+  "hp_formula": "100",
+  "valid_qualities": [],
+  "max_skills": 5,
+  "skill_point_total": 0,
+  "max_skill_value": 0,
+  "skill_mode": "narrative",
+  "skill_hint": "得意なことを1〜5個書いてください。描写用のみで、数値による判定は行いません。",
+  "currency": "金貨",
+  "item_categories": {
+    "equipment": [],
+    "consumable": [],
+    "misc": []
+  },
+  "classes": [
+    {
+      "name": "冒険者",
+      "description": "自由な冒険者",
+      "starter_equipment": []
+    },
+    {
+      "name": "商人",
+      "description": "旅商人",
+      "starter_equipment": []
+    },
+    {
+      "name": "吟遊詩人",
+      "description": "吟遊詩人",
+      "starter_equipment": []
+    },
+    {
+      "name": "傭兵",
+      "description": "雇われの戦士",
+      "starter_equipment": []
+    },
+    {
+      "name": "学者",
+      "description": "遊学の学者",
+      "starter_equipment": []
+    }
+  ],
+  "skill_pools": {},
+  "mechanics": "narrative_only",
+  "ruleset_level": "narrative",
+  "dc_table": {},
+  "difficulty_dc_modifiers": {
+    "轻松": 0,
+    "标准": 0,
+    "硬核": 0
+  }
+}

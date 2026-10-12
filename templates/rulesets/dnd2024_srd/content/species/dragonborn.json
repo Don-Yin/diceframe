@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "kind": "species",
+  "creature_type": "humanoid",
+  "automation_level": "guided",
+  "id": "dragonborn",
+  "size_options": [
+    "medium"
+  ],
+  "speed": 30,
+  "source_ref": "srd-5.2.1:p84:dragonborn",
+  "choice_specs": [
+    {
+      "id": "draconic_ancestry",
+      "count": 1,
+      "option_ids": [
+        "black",
+        "blue",
+        "brass",
+        "bronze",
+        "copper",
+        "gold",
+        "green",
+        "red",
+        "silver",
+        "white"
+      ]
+    }
+  ],
+  "traits": [
+    {
+      "id": "draconic_ancestry",
+      "source_ref": "srd-5.2.1:p84:dragonborn",
+      "automation_level": "guided"
+    },
+    {
+      "id": "breath_weapon",
+      "source_ref": "srd-5.2.1:p84:dragonborn",
+      "automation_level": "guided"
+    },
+    {
+      "id": "damage_resistance",
+      "source_ref": "srd-5.2.1:p84:dragonborn",
+      "automation_level": "deterministic"
+    },
+    {
+      "id": "darkvision_60",
+      "source_ref": "srd-5.2.1:p84:dragonborn",
+      "automation_level": "deterministic"
+    },
+    {
+      "id": "draconic_flight",
+      "source_ref": "srd-5.2.1:p84:dragonborn",
+      "automation_level": "guided"
+    }
+  ]
+}

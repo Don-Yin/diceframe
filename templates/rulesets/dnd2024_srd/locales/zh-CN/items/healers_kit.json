@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "item",
+    "id": "healers_kit"
+  },
+  "fields": {
+    "name": "医疗包"
+  }
+}

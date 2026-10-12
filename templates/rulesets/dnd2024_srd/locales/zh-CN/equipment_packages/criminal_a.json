@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "equipment_package",
+    "id": "criminal_a"
+  },
+  "fields": {
+    "name": "罪犯装备 A"
+  }
+}

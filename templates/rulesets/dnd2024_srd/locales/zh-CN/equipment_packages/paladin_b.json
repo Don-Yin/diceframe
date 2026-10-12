@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "equipment_package",
+    "id": "paladin_b"
+  },
+  "fields": {
+    "name": "圣武士装备 B（150 GP）"
+  }
+}

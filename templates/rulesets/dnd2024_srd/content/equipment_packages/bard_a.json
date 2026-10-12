@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_package",
+  "id": "bard_a",
+  "source_ref": "srd-5.2.1:p31:bard_a",
+  "automation_level": "deterministic",
+  "category": "class",
+  "item_refs": [
+    "item:leather_armor",
+    "item:dagger",
+    "item:musical_instrument",
+    "item:entertainer_pack"
+  ],
+  "item_grants": [
+    {
+      "item_ref": "item:leather_armor",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:dagger",
+      "quantity": 2
+    },
+    {
+      "item_ref": "item:musical_instrument",
+      "quantity": 1
+    },
+    {
+      "item_ref": "item:entertainer_pack",
+      "quantity": 1
+    }
+  ],
+  "coins_gp": 19
+}

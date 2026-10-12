@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "species",
+    "id": "gnome"
+  },
+  "fields": {
+    "name": "Gnome",
+    "summary": "Choose Forest or Rock lineage, resist mental magic, and gain distinctive magical talents."
+  }
+}

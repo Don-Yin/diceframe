@@ -1,0 +1,20 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "encounter_catalog", "id": "srd_training_encounters"},
+  "fields": {
+    "name": "SRD Starter Combat Presets",
+    "labels": {
+      "presets": {
+        "goblin_patrol": {"name": "Goblin Patrol", "description": "A goblin warrior able to fight at melee or ranged distance."},
+        "crypt_pair": {"name": "Crypt Defenders", "description": "A skeleton and wolf guarding a dark crypt together."}
+      },
+      "profiles": {
+        "goblin_warrior": "Goblin Warrior",
+        "skeleton": "Skeleton",
+        "wolf": "Wolf"
+      },
+      "attacks": {"scimitar": "Scimitar", "shortbow": "Shortbow", "shortsword": "Shortsword", "bite": "Bite"}
+    }
+  }
+}
