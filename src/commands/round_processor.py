@@ -733,7 +733,7 @@ class RoundProcessor:
         if declared:
             return None
 
-        completed_round = int(instance.round_number) - 1
+        completed_round = int(progression_state.round_value(instance)) - 1
         if completed_round < 0:
             return None
         entry = next(
