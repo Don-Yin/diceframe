@@ -187,15 +187,15 @@ async def test_whole_book_pending_plan_rejects_changed_scope_before_any_write(we
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('audience', ['public', 'characters', 'gm'])
+@pytest.mark.parametrize('audience', ['public', 'characters'])
 @pytest.mark.parametrize('scope_kind', ['book', 'global'])
-async def test_task_grant_still_requires_explicit_whole_book_approval(web_api, audience, scope_kind):
+async def test_task_grant_requires_approval_for_whole_book_audience_expansion(web_api, audience, scope_kind):
     api, store, registry, llm, _ = web_api
     book_id = 'manual-visibility-book'
     store.create_lorebook({'id': book_id, 'name': 'GM notes', 'source_kind': 'user'})
     for index in range(35):
         store.add_book_entry(book_id, {'id': f'manual-{index}', 'name': f'Clue {index}',
-            'content': f'Unmarked hidden clue {index}', 'visible_to': ['*'] if audience == 'gm' else [],
+            'content': f'Unmarked hidden clue {index}', 'visible_to': [],
             'extensions': {'keep': index}})
     arguments = {'book_id': book_id, 'audience': audience}
     if audience == 'characters':

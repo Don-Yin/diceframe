@@ -13,7 +13,7 @@ async def test_real_visibility_only_task_discovers_new_action_and_keeps_content(
     api, store, registry, llm, _ = web_api
     store.create_lorebook({'id': 'task-book', 'name': 'Task Book', 'source_kind': 'user'})
     store.add_book_entry('task-book', {'id': 'entry-a', 'name': 'Harbor', 'content': 'Unchanged text',
-                                      'visible_to': []})
+                                      'visible_to': ['*']})
     planner = Planner(
         {'tool': 'search_capabilities', 'arguments': {'query': 'visibility'}},
         {'tool': 'describe_capability', 'arguments': {'name': 'set_lorebook_entry_visibility'}},

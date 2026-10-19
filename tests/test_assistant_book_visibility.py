@@ -113,10 +113,12 @@ def test_visibility_undo_rejects_binding_changes(tmp_path):
 
 
 def test_authoring_registers_whole_book_visibility_only_with_recovery_callback():
-    callback = lambda owner, book_id, rows, digest: {"ok": True, "operation_ids": []}
+    callback = lambda owner, book_id, rows, digest, **kwargs: {"ok": True, "operation_ids": []}
     preview = lambda owner, book_id, rows, digest: {"target_name": "Book", "total": 0,
                                                      "changed_count": 0, "batch_count": 0,
                                                      "affected_games": ["game-1"]}
+    snapshot = lambda book_id: {"book": {"id": book_id}, "entries": [], "bindings": []}
+    receipt = lambda owner, operation_id: None
     deps = AuthoringDependencies(
         list_worlds=lambda: {"worlds": []}, update_world=lambda *args: {},
         list_book_entries=lambda book: {"ok": True, "book": {"name": "Book"}, "entries": []},
@@ -124,9 +126,12 @@ def test_authoring_registers_whole_book_visibility_only_with_recovery_callback()
         update_card=lambda *args: {}, adventure_detail=lambda *args: {}, get_rule=lambda *args: {},
         write_book_visibility_with_recovery=callback,
         preview_book_visibility_with_recovery=preview,
+        book_snapshot=snapshot,
+        book_visibility_receipt=receipt,
     )
     tool = next(item for item in authoring_tools(deps) if item.name == "set_lorebook_visibility")
-    assert tool.effect == "external" and tool.version == 2 and not tool.automatic
+    assert tool.effect == "disclosure" and tool.version == 3 and not tool.automatic
+    assert callable(tool.prepare) and callable(tool.execute) and tool.resumable
     assert set(tool.schema["properties"]) == {"book_id", "audience", "game_key", "character_ids"}
     summary = tool.preview({"book_id": "book", "audience": "public"}, "owner")
     assert summary["affected_games"] == ["game-1"]

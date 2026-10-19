@@ -335,9 +335,9 @@ function addResult(result: AgentConfirmResult, tool = '') {
   if (message) appendEvent(message, 'tool_result', { ok: result.ok, partial: result.partial, tool, result: result.result, error: result.error })
   if (result.navigation) navigation.value = safeNavigation(result.navigation)
 }
-function updateTaskAfterApproval(result: AgentConfirmResult, approved: boolean) {
+function updateTaskAfterApproval(result: AgentConfirmResult, approved: boolean, resuming = false) {
   const current = task.value
-  if (!current || current.status !== 'approval_required') return
+  if (!current || (current.status !== 'approval_required' && !resuming)) return
   if (approved && result.pending) {
     task.value = { ...current, status: result.pending.execution_status === 'cancelled' ? 'cancelled' : 'paused', error: undefined }
   } else if (result.ok && approved && !result.partial) {
@@ -368,7 +368,7 @@ function applyApprovalResult(result: AgentConfirmResult, approval: AgentApproval
     pendingApproval.value = null
   }
   addResult(result, approval.tool)
-  updateTaskAfterApproval(result, approved)
+  updateTaskAfterApproval(result, approved, approval.resumable === true)
   actionError.value = result.ok || result.pending ? '' : result.error || 'Assistant action failed.'
 }
 function receiptResponse(receipt: AgentSession['receipts'][number]): AgentConfirmResult {
@@ -376,6 +376,12 @@ function receiptResponse(receipt: AgentSession['receipts'][number]): AgentConfir
   const raw = receipt.result
   if (raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as Record<string, unknown>).ok === 'boolean') return raw as AgentConfirmResult
   return { ok: true, result: raw }
+}
+function cacheReceipt(approval: AgentApproval, response: AgentConfirmResult) {
+  const next = { approval_id: approval.approval_id, plan_digest: approval.plan_digest, result: response.result, response }
+  const index = receipts.value.findIndex(item => item.approval_id === approval.approval_id && item.plan_digest === approval.plan_digest)
+  if (index >= 0) receipts.value.splice(index, 1, next)
+  else receipts.value.push(next)
 }
 async function confirmApproval(approved = true): Promise<AgentConfirmResult | undefined> {
   const pending = pendingApproval.value; const currentSession = sessionId.value; if (!pending || !currentSession || actionBusy.value) return undefined
@@ -393,7 +399,7 @@ async function confirmApproval(approved = true): Promise<AgentConfirmResult | un
   try {
     const result = await confirmAssistantAgent(currentSession, pending.approval_id, pending.plan_digest, approved)
     if (generation !== requestGeneration) return undefined
-    if (result.ok && approved) receipts.value.push({ approval_id: pending.approval_id, plan_digest: pending.plan_digest, result: result.result, response: result })
+    if (approved && (result.ok || result.pending || result.partial)) cacheReceipt(pending, result)
     applyApprovalResult(result, pending, approved)
     persist(); return result
   } catch (error: unknown) {
@@ -424,6 +430,7 @@ async function resumeApproval(): Promise<AgentConfirmResult | undefined> {
   try {
     const result = await resumeAssistantAgent(currentSession, pending.approval_id, pending.plan_digest)
     if (generation !== requestGeneration || sessionId.value !== currentSession) return undefined
+    if (result.ok || result.pending || result.partial) cacheReceipt(pending, result)
     applyApprovalResult(result, pending, true)
     persist()
     return result

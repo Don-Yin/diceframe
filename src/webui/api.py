@@ -1002,6 +1002,7 @@ class WebAPI:
             write_book_visibility_with_recovery=self._content_recovery.write_book_visibility,
             preview_book_visibility_with_recovery=self._content_recovery.preview_book_visibility,
             book_snapshot=self._lore.snapshot_lorebook,
+            book_visibility_receipt=self._content_recovery.read_book_visibility_receipt,
             write_world_with_recovery=self._metadata_recovery.write_world,
             write_card_with_recovery=self._metadata_recovery.write_card,
             world_snapshot=world_snapshot, card_snapshot=card_snapshot,
@@ -1284,6 +1285,9 @@ class WebAPI:
 
     def assistant_agent_capabilities(self, owner, query='', domain='', offset=0):
         return self._assistant_agent.capabilities(owner, query, domain, offset)
+
+    async def assistant_agent_resume(self, owner, session_id, approval_id, plan_digest):
+        return await self._assistant_agent.resume(owner, session_id, approval_id, plan_digest)
 
     def assistant_agent_authorize(self, owner, session_id, mode, scope, domains, max_steps):
         return self._assistant_agent.authorize(owner, session_id, mode, scope, domains, max_steps)

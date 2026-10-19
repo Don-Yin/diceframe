@@ -6,7 +6,7 @@ DF Agent 是 owner 应用壳中的应用代理。模型输出只是注册动作�
 
 ## 当前实现范围
 
-`src/application_actions.py` 定义唯一的应用动作契约 `ApplicationAction` 和 `ActionRegistry`。动作由 owning module 在应用组合根注册；路由、页面和 Agent 适配器复用同一领域 handler。每个动作都有稳定 `name`、`version`、JSON 参数 schema、`domain`、effect（`read`、`write`、`disclosure`、`destructive` 或 `external`）、是否自动处理、guard、preview 和 handler。动作描述不包含 handler 或其它私有回调。
+`src/application_actions.py` 定义唯一的应用动作契约 `ApplicationAction` 和 `ActionRegistry`。动作由 owning module 在应用组合根注册；路由、页面和 Agent 适配器复用同一领域 handler。每个动作都有稳定 `name`、`version`、JSON 参数 schema、`domain`、effect、是否自动处理、guard、preview 和 handler，并通过显式 `PreparedAction`、`ActionAssessment` 暴露准备后的语义 payload 与评估结果。owning module 负责解析 live 目标和实际可见性策略，registry 不从 tool name、路由或 Python 成员推导权限，也不提供旁路。动作描述不包含 handler 或其它私有回调。
 
 `contract_digest` 是动作公开 descriptor 的 SHA-256；registry `revision` 是按 canonical action name 排序后的 descriptor 集合摘要。计划保存动作的 `contract_digest`，确认和执行时重新读取 registry 并拒绝已删除或契约已变化的动作。版本替换必须使用更高版本；重复注册和不合法 effect/schema 会失败。
 
@@ -33,9 +33,9 @@ Agent 启动时只加载基础 application 动作、当前页面 domain、当前
 | `routine` | 仅允许动作明确标记 `automatic=True` 且 effect 为普通 `write`，由已授权范围内自动执行。 |
 | `task` | 在已授权范围内允许普通 `write` 和 `disclosure` 连续执行；仍拒绝 `external`、`destructive` 和未满足动作 guard 的操作。 |
 
-routine 授权有效 4 小时，task 授权有效 1 小时；两者都有 `remaining_steps`，步数必须为 1..64。可选 domain 必须是 registry 中已知 domain；每个动作的 domain 必须匹配。可选 scope 只接受 `game_key`、`world_id`、`book_id`、`card_id`，每一个给出的键都必须出现在动作参数中并逐字相等；缺失或跨目标都 fail closed。授权过期、步数耗尽、owner 不符或 session 不符均不放行。
+routine 授权有效 4 小时，task 授权有效 1 小时；两者都有 `remaining_steps`，步数必须为 1..64。可选 domain 必须是 registry 中已知 domain；每个动作的 domain 必须匹配。可选 scope 只接受 `game_key`、`world_id`、`book_id`、`card_id`，每一个给出的键都必须与 owning module 解析出的每个 canonical target 逐字相等；没有 prepared assessment 时匹配动作参数，缺失或跨目标都 fail closed。授权过期、步数耗尽、owner 不符或 session 不符均不放行。
 
-整册 `set_lorebook_visibility` 是 `version=2` 的 `external` 动作，适用于 `gm`、`public` 和 `characters` audience；无论当前是 `task` 还是 `routine`，每次都必须取得具体人工批准。已有 task grant 不能绕过这项整册批准。单条资料册条目的 `disclosure` 仍按通常 task 语义处理，不改变全局授权规则。`suggest` 与撤销授权仍可用。
+资料册可见性使用 owning module 的 `PreparedAction`/`ActionAssessment`。单条 setter 与 `write_lorebook_entries` 均按实际 audience policy 判断，拆分写入不能绕过审批；visibility-only prepared payload 不携带正文并最终只更新实际行的 `visible_to`，而普通 `write_lorebook_entries` 的 prepared payload 包含要写入的正文并执行正常内容写入。对 canonical book targets 的 GM 收窄可由覆盖目标的 task 自动执行；扩展为 `public` 或新增角色 audience 时，一个封存的多册计划取得一次人工批准，task 不因此获得 blanket disclosure。`suggest` 与撤销授权仍可用。
 
 前端 scope 只接受有效且非空白的 `game_key`、`world_id`、`book_id`、`card_id`。缺少目标 ID 时，对应选项保持禁用；routine/task 授权在用户明确选择“全部”之前保持阻止，前端不会自动替用户选择全部目标。scope/grant 的 HTTP 和持久化格式保持不变。
 
@@ -51,8 +51,10 @@ routine 授权有效 4 小时，task 授权有效 1 小时；两者都有 `remai
 
 ## 领域 authority 与隐私
 
+批次报告中的 `unconfirmed` 表示可能已提交、待核对，不计入 `not-executed`；`unconfirmed_count` 单独统计它。
+
 - 内容、资料册、恢复和游戏本局资料册动作复用各自 owning service 的校验、guard、快照/操作记录和权限边界；Agent 没有通用文件、SQL、shell 或任意 HTTP 写入能力。
-- 资料册可见性动作只修改既有 canonical entry 的 `visible_to` audience 字段，保留名称、正文和其它扩展字段。单条动作仍是 `disclosure`；整册 `set_lorebook_visibility` 使用 canonical `book_id`，`version=2`、effect 为 `external`，接受 `gm`、`public` 或 `characters` audience，并可选 `game_key` 以解析当前 live roster 的角色 UID。它最多处理 1000 条目，预览返回 changed count 与 affected games；“所有资料册”这类用户选择必须先解析成明确的 book ID 列表，再逐册调用一次，而且每册都要具体人工批准。每册在一个 owning-store 事务中按 16 条目分批写入，但每批保留独立 undo operation ID，不承诺跨册全局原子性。指定角色时，服务器从 live game roster 取得 canonical UID，并由组合根进行游戏存在、owner/GM 范围校验；显示名不能代替 UID。目标不存在、UID 不属于当前 live roster 或无 GM 权限时拒绝。
+- `set_lorebooks_visibility(book_ids, audience, ...)` 要求先从 live catalog 解析出显式 1..128 个 canonical book IDs；scope 绑定 owner 解析出的每册 book target，`game_key` 只用于校验 live 角色，不构成 book 授权。每册最多 1000 条目。owning module 为每册准备并评估真实 audience，生成签名绑定不可变 payload、assessment、版本和 `contract_digest` 的多册计划；visibility-only `prepared.payload` 不含正文，普通 `write_lorebook_entries` payload 仍包含待写正文并执行正常内容写入。4 MiB 上限只约束 `prepared.payload`，private-marker 仅是 validation warning。每册在 owning-store 事务中写入：隐藏的 `visibility_plan_book` 记录负责幂等协调 parent receipt，真正可撤销的子记录仍是 `kind=write_entries` 加 `visibility_only` marker。计划逐册报告 success/failure/unconfirmed/not-executed，并提供 `unconfirmed_count`；允许册间取消。`POST /api/assistant/agent/resume` 是 owner 对原封存计划剩余目标的显式确认，复核 plan/contract/TTL 和每个未完成目标；原 automatic 执行还要逐册重新检查 live task grant，不依赖已撤销的 grant，随后跳过 committed receipts。重复确认返回已存响应且不重试部分写入；只有注册的 resumable executor 可协调 owner receipts，未知突变仍为 `recovery_required`。指定角色使用 live roster canonical UID，显示名不能代替 UID。
 - 世界事实可见性走正式 `worldops`（`apply_world_ops`、revision guard、权威写锁和保存），不在通用资料册或世界元数据里另造一个同名布尔字段。读取使用 viewer-safe world projection。
 - 规则结算、骰点、角色资源、回合和世界事实仍由现有规则/游戏 authority 执行；角色资源恢复复用 `ResourceRecoveryService`，内容撤销复用内容恢复服务，不形成第二套 mechanics 或权限模型。
 - HTTP 与 Agent 的专业休息共用 live-rest 应用命令，单人沿用单角色结算，多人收集符合资格角色的提交后协同结算；Agent 不直接绑定单角色路径，也不新增独立的时钟推进逻辑。
@@ -69,7 +71,7 @@ routine 授权有效 4 小时，task 授权有效 1 小时；两者都有 `remai
 
 当前持久化记录支持会话 TTL、重复确认、重启后的结果核对和不确定状态标记；它不是持久化工作流引擎，也没有跨模块的自动恢复、全局事务或万能 undo。跨文件/数据库操作必须依照具体 owning service 的 prepared、guard、receipt 和 recovery contract，无法证明结果时 fail closed。
 
-资料册可见性批次的恢复沿用现有 `kind=write_entries` 记录，并以 `visibility_only` 标记区分 audience-only patch。private-marker 扫描只属于校验，不构成发布同意或替代整册动作的具体批准。恢复预览会比较目标条目的内容、绑定、资料册语义元数据和其它受影响快照；只有该标记的新记录忽略资料册 `revision` 与 `updated_at` 这两个派生时间字段。批准前重新检查资料册内容、绑定和受影响对局，变化后必须重新预览。每批沿用 512 KiB 快照上限并预留撤销记录空间，超限则整册回滚；可改用明确条目小批次。冲突时拒绝覆盖后续编辑；它不把整册批次提升为跨资料册事务，也不重写条目正文。
+资料册可见性批次由隐藏的 `kind=visibility_plan_book` 记录负责每册幂等协调 parent receipt；真正可撤销的子记录仍是 `kind=write_entries` 加 `visibility_only` marker。private-marker 扫描只属于校验，不构成发布同意。恢复预览会比较目标条目的内容、绑定、资料册语义元数据和其它受影响快照；只有该 marker 的 visibility-only 记录忽略资料册 `revision` 与 `updated_at` 这两个派生时间字段。批准前重新检查资料册内容、绑定和受影响对局，变化后必须重新预览。4 MiB 上限只约束 `prepared.payload`，最多 128 册；每册沿用 512 KiB 快照上限并预留撤销记录空间。冲突时拒绝覆盖后续编辑；它不把多册计划提升为跨资料册事务，也不重写条目正文。
 
 ## HTTP contract
 
@@ -82,6 +84,7 @@ routine 授权有效 4 小时，task 授权有效 1 小时；两者都有 `remai
 | `POST` | `/api/assistant/agent/cancel` | 撤销 session 授权并取消尚未派发的工作。 |
 | `POST` | `/api/assistant/agent/run` | 运行模型任务并以 SSE 返回规划、发现、工具、审批、使用量摘要和结果事件。 |
 | `POST` | `/api/assistant/agent/confirm` | 以 `approval_id`、`plan_digest` 和 `approved` 确认/拒绝一个服务器计划。 |
+| `POST` | `/api/assistant/agent/resume` | owner 以 `session_id`、`approval_id` 和原始 `plan_digest` 确认恢复原封存计划的剩余目标；校验计划完整性、版本和 TTL，逐册复核目标并跳过已提交回执。 |
 | `GET` | `/api/assistant/agent/session/{session_id}` | 读取 owner 私有 session 快照、任务、授权和 receipt。 |
 | `POST` | `/api/assistant/agent/review` | 重新审查用户编辑后的内容草稿，并使旧保存计划失效。 |
 | `POST` | `/api/assistant/agent/plan` | 内容管理工作台为明确白名单恢复动作创建同一服务器计划。 |

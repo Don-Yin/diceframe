@@ -24,11 +24,11 @@ async def client_for(owner, api):
 
 @pytest.mark.asyncio
 async def test_every_agent_endpoint_requires_owner():
-    api = SimpleNamespace(assistant_agent_run=AsyncMock(), assistant_agent_confirm=AsyncMock(),
+    api = SimpleNamespace(assistant_agent_run=AsyncMock(), assistant_agent_confirm=AsyncMock(), assistant_agent_resume=AsyncMock(),
         assistant_agent_review=AsyncMock(), assistant_agent_session=lambda *a: {})
     client = await client_for(False, api)
     try:
-        for path in ("run", "confirm", "review", "plan"):
+        for path in ("run", "confirm", "resume", "review", "plan", "authorization", "cancel"):
             response = await client.post(f"/api/assistant/agent/{path}", json={})
             assert response.status == 401
         response = await client.get("/api/assistant/agent/session/" + "a" * 32)
@@ -37,6 +37,45 @@ async def test_every_agent_endpoint_requires_owner():
         assert response.status == 401
         api.assistant_agent_run.assert_not_called()
         api.assistant_agent_confirm.assert_not_called()
+        api.assistant_agent_resume.assert_not_called()
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_resume_rejects_target_replacement_and_invalid_digests_before_dispatch():
+    api = SimpleNamespace(assistant_agent_resume=AsyncMock())
+    client = await client_for(True, api)
+    valid = {'session_id': 'a' * 32, 'approval_id': 'b' * 32, 'plan_digest': 'sha256:' + 'c' * 64}
+    try:
+        for body in ({**valid, 'arguments': {'targets': ['outside']}},
+                     {**valid, 'plan_digest': 'sha256:invalid'}, {**valid, 'session_id': 'not-a-session'}):
+            response = await client.post('/api/assistant/agent/resume', json=body)
+            assert response.status == 400
+        api.assistant_agent_resume.assert_not_called()
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_resume_route_uses_server_owner_and_real_checkpointed_execution(tmp_path):
+    from copy import deepcopy
+    from tests.test_assistant_prepared_actions import runtime
+
+    agent, _, writes = runtime(tmp_path, interrupt=True)
+    sid = agent.authorize('alice', '', 'task', {}, ['lorebook'], 8)['session_id']
+    async def emit(*_):
+        pass
+    await agent.run('alice', [{'role': 'user', 'content': 'Update both targets'}], 'en', {}, sid, emit)
+    plan = deepcopy(agent.snapshot('alice', sid)['pending'])
+    assert writes == ['a']
+    client = await client_for(True, SimpleNamespace(assistant_agent_resume=agent.resume))
+    try:
+        response = await client.post('/api/assistant/agent/resume', json={
+            'session_id': sid, 'approval_id': plan['approval_id'], 'plan_digest': plan['plan_digest']})
+        assert response.status == 200
+        assert (await response.json())['result']['status'] == 'completed'
+        assert writes == ['a', 'b']
     finally:
         await client.close()
 

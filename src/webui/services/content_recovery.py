@@ -25,6 +25,8 @@ _LABELS = {
     'archive_book': '资料册移入回收站',
     'world_fields': '修改世界叙事', 'card_fields': '修改角色叙事',
 }
+_VISIBILITY_GROUP_KIND = 'visibility_plan_book'
+_OPERATION_ID_RE = re.compile(r'[a-f0-9]{32}')
 
 
 @dataclass(frozen=True)
@@ -187,8 +189,14 @@ class ContentRecoveryService:
         return {'ok': True, 'operation_id': operation_id, 'reversible': True, **(result or {}),
                 'navigation': {'route': 'lorebook', 'query': {'book': book_id}}}
 
-    def write_entries(self, owner: str, book_id: str, rows: list[dict], *, _visibility_only: bool = False) -> dict:
+    def write_entries(
+        self, owner: str, book_id: str, rows: list[dict], *,
+        _visibility_only: bool = False, expected_entries_digest: str | None = None,
+    ) -> dict:
         self._ids([row.get('id') for row in rows], maximum=16)
+        if expected_entries_digest is not None and (
+                not isinstance(expected_entries_digest, str) or not expected_entries_digest):
+            raise ValueError('expected_entries_digest must be a non-empty string')
         allowed = {'id', 'name', 'content', 'type', 'keywords', 'visible_to'}
         if any(set(row) - allowed for row in rows): raise ValueError('Unsupported entry write fields')
         if _visibility_only and any(
@@ -199,6 +207,9 @@ class ContentRecoveryService:
             raise ValueError('Visibility recovery only supports audience patches')
         fields = {row['id']: [key for key in row if key != 'id'] for row in rows}
         def apply():
+            if (expected_entries_digest is not None
+                    and _digest(self.store.list_book_entries(book_id)) != expected_entries_digest):
+                raise ValueError('整册条目已变化，请重新预览')
             if _visibility_only:
                 existing = {row['id'] for row in self.store.list_book_entries(book_id)}
                 if any(row['id'] not in existing for row in rows):
@@ -238,6 +249,7 @@ class ContentRecoveryService:
 
     def write_book_visibility(
         self, owner: str, book_id: str, rows: list[dict], expected_entries_digest: str,
+        *, operation_id: str | None = None,
     ) -> dict:
         """Set visibility for an entire book through bounded journaled batches.
 
@@ -250,6 +262,9 @@ class ContentRecoveryService:
             raise ValueError('整册 visibility 最多支持 1000 条目')
         if not isinstance(expected_entries_digest, str) or not expected_entries_digest:
             raise ValueError('必须提供整册条目摘要')
+        if operation_id is not None and (
+                not isinstance(operation_id, str) or not _OPERATION_ID_RE.fullmatch(operation_id)):
+            raise ValueError('visibility operation identity must be a stable 32-hex string')
         for row in rows:
             if not isinstance(row, dict) or set(row) != {'id', 'visible_to'}:
                 raise ValueError('整册 visibility 只接受既有 id 与 visible_to')
@@ -260,9 +275,28 @@ class ContentRecoveryService:
         if len({row['id'] for row in rows}) != len(rows):
             raise ValueError('整册 visibility 不允许重复条目')
 
+        owner_key = self._owner(owner)
+        request_digest = _digest({
+            'book_id': book_id, 'rows': rows,
+            'expected_entries_digest': expected_entries_digest,
+        })
         operation_ids: list[str] = []
         changed_count = 0
         with self.store.transaction():
+            # Receipt lookup and the collision check share the owning store
+            # lock/transaction with the subsequent child journals.  Two
+            # concurrent retries therefore cannot both pass the preflight.
+            if operation_id is not None:
+                existing = self.store.get_lorebook_operation(operation_id, owner_key)
+                if existing is not None:
+                    if existing.get('kind') != _VISIBILITY_GROUP_KIND:
+                        raise ValueError('visibility operation identity is already used by another operation')
+                    payload = existing.get('payload') or {}
+                    if payload.get('request_digest') != request_digest:
+                        raise ValueError('visibility operation request does not match its durable receipt')
+                    if existing.get('status') != 'applied' or not isinstance(payload.get('result'), dict):
+                        raise ValueError('visibility operation has no completed durable receipt')
+                    return deepcopy(payload['result'])
             self.preview_book_visibility(owner, book_id, rows, expected_entries_digest)
             current = self.store.list_book_entries(book_id)
             current_digest = _digest(current)
@@ -274,12 +308,35 @@ class ContentRecoveryService:
                 raise ValueError('visibility 只能修改资料册中既有条目')
             changed = [row for row in rows if existing[row['id']].get('visible_to') != row['visible_to']]
             if not changed:
-                return {'ok': True, 'operation_ids': [], 'changed_count': 0, 'batch_count': 0,
-                        'navigation': {'route': 'lorebook', 'query': {'book': book_id}}}
+                result = {'ok': True, 'operation_ids': [], 'changed_count': 0, 'batch_count': 0,
+                          'navigation': {'route': 'lorebook', 'query': {'book': book_id}}}
+                if operation_id is not None:
+                    result['operation_id'] = operation_id
+                    result['request_digest'] = request_digest
+                    self.store.record_lorebook_operation({
+                        'id': operation_id, 'owner': owner_key, 'kind': _VISIBILITY_GROUP_KIND,
+                        'status': 'prepared',
+                        'payload': {'request_digest': request_digest, 'book_id': book_id,
+                                    'result': result},
+                    })
+                    if not self.store.update_lorebook_operation(
+                            operation_id, owner_key, {'status': 'applied', 'payload': {
+                                'request_digest': request_digest, 'book_id': book_id,
+                                'result': result,
+                            }}):
+                        raise ValueError('无法保存 visibility 回执，操作已回滚')
+                return result
             # Recheck immediately before writing; the transaction lock makes
             # this the authoritative fence for all following batches.
             if _digest(self.store.list_book_entries(book_id)) != expected_entries_digest:
                 raise ValueError('整册条目已变化，请重新预览')
+            if operation_id is not None:
+                self.store.record_lorebook_operation({
+                    'id': operation_id, 'owner': owner_key, 'kind': _VISIBILITY_GROUP_KIND,
+                    'status': 'prepared',
+                    'payload': {'request_digest': request_digest, 'book_id': book_id,
+                                'result': None},
+                })
             for start in range(0, len(changed), 16):
                 batch = changed[start:start + 16]
                 result = self.write_entries(
@@ -287,9 +344,38 @@ class ContentRecoveryService:
                 )
                 operation_ids.append(result['operation_id'])
                 changed_count += len(batch)
-        return {'ok': True, 'operation_ids': operation_ids, 'changed_count': changed_count,
-                'batch_count': len(operation_ids),
-                'navigation': {'route': 'lorebook', 'query': {'book': book_id}}}
+            result = {'ok': True, 'operation_ids': operation_ids, 'changed_count': changed_count,
+                      'batch_count': len(operation_ids),
+                      'navigation': {'route': 'lorebook', 'query': {'book': book_id}}}
+            if operation_id is not None:
+                result['operation_id'] = operation_id
+                result['request_digest'] = request_digest
+                if not self.store.update_lorebook_operation(
+                        operation_id, owner_key, {'status': 'applied', 'payload': {
+                            'request_digest': request_digest, 'book_id': book_id,
+                            'result': result,
+                        }}):
+                    raise ValueError('无法保存 visibility 回执，操作已回滚')
+        return result
+
+    def read_book_visibility_receipt(self, owner: str, operation_id: str) -> dict | None:
+        """Read the owner-private group receipt used for plan reconciliation.
+
+        Group receipts deliberately have no entry label and are therefore
+        omitted from :meth:`list_operations`, which is the normal undo UI.
+        """
+        if not isinstance(operation_id, str) or not _OPERATION_ID_RE.fullmatch(operation_id):
+            raise ValueError('Invalid content operation identity')
+        operation = self.store.get_lorebook_operation(operation_id, self._owner(owner))
+        if operation is None or operation.get('kind') != _VISIBILITY_GROUP_KIND:
+            return None
+        if operation.get('status') != 'applied':
+            return None
+        payload = operation.get('payload') or {}
+        result = payload.get('result')
+        if not isinstance(result, dict):
+            return None
+        return deepcopy(result)
 
     def set_book_enabled(self, owner: str, book_id: str, enabled: bool) -> dict:
         if not isinstance(enabled, bool): raise ValueError('enabled must be boolean')

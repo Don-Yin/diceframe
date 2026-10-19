@@ -14,6 +14,29 @@ from typing import Callable, Iterable
 
 
 @dataclass(frozen=True)
+class ActionAssessment:
+    """Owner-derived impact; never supplied by model arguments or chat text."""
+
+    effect: str
+    requires_approval: bool = False
+    targets: tuple[dict, ...] = ()
+
+    def to_dict(self) -> dict:
+        return {'effect': self.effect, 'requires_approval': self.requires_approval,
+                'targets': deepcopy(list(self.targets))}
+
+
+@dataclass(frozen=True)
+class PreparedAction:
+    """An immutable reviewable command, with owner-private execution input."""
+
+    guard: str | None
+    preview: dict
+    payload: dict
+    assessment: ActionAssessment
+
+
+@dataclass(frozen=True)
 class ApplicationAction:
     name: str
     label: str
@@ -30,6 +53,9 @@ class ApplicationAction:
     automatic: bool = False
     instructions: str = ''
     authorize: Callable | None = None
+    prepare: Callable | None = None
+    execute: Callable | None = None
+    resumable: bool = False
 
     @property
     def effective_effect(self) -> str:
@@ -39,7 +65,8 @@ class ApplicationAction:
         return {'name': self.name, 'label': self.label, 'description': self.label,
                 'parameters': deepcopy(self.schema), 'requires_confirmation': self.mutation,
                 'domain': self.domain, 'effect': self.effective_effect, 'version': self.version,
-                'automatic': self.automatic, 'instructions': self.instructions}
+                'automatic': self.automatic, 'instructions': self.instructions,
+                'prepared_execution': self.prepare is not None, 'resumable_execution': self.resumable}
 
     @property
     def contract_digest(self) -> str:
@@ -75,6 +102,10 @@ class ActionRegistry:
                 or not isinstance(action.schema, dict) or action.schema.get('type') != 'object'
                 or not callable(action.handler)):
             raise ValueError('Invalid application action contract')
+        if ((action.prepare is not None and (not action.mutation or not callable(action.prepare)))
+                or (action.execute is not None and (action.prepare is None or not callable(action.execute)))
+                or type(action.resumable) is not bool or (action.resumable and action.execute is None)):
+            raise ValueError('Prepared execution requires an owning mutation planner')
         if action.automatic and (not action.mutation or action.effective_effect != 'write' or not action.guard):
             raise ValueError('Automatic actions require a guarded ordinary write')
 

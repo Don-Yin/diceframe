@@ -64,13 +64,13 @@ const targets = computed(() => {
   for (const raw of previewTargets) {
     const item = record(raw)
     const id = targetId(item) || `target-${rows.size}`
-    rows.set(id, { ...item, id, label: targetLabel(item) })
+    rows.set(id, { ...item, id, label: targetLabel(item), __execution: false })
   }
   const reportTargets = Array.isArray(report.value.targets) ? report.value.targets : []
   for (const raw of reportTargets) {
     const item = record(raw)
     const id = targetId(item) || `target-${rows.size}`
-    rows.set(id, { ...(rows.get(id) || {}), ...item, id, label: targetLabel({ ...(rows.get(id) || {}), ...item }) })
+    rows.set(id, { ...(rows.get(id) || {}), ...item, id, label: targetLabel({ ...(rows.get(id) || {}), ...item }), __execution: true })
   }
   return [...rows.values()]
 })
@@ -85,12 +85,18 @@ const summary = computed(() => {
     succeeded: count(source.success_count),
     failed: count(source.failed_count),
     notExecuted: count(source.not_executed_count),
+    unconfirmed: count(source.unconfirmed_count),
   }
 })
 
 const status = computed(() => text(report.value.status) || text(props.approval?.execution_status))
-const audience = computed(() => text(preview.value.audience))
-const isBatch = computed(() => targets.value.length > 0 || Object.keys(previewSummary.value).length > 0 || Object.keys(report.value).length > 0)
+const audience = computed(() => {
+  const value = text(preview.value.audience)
+  const zh = props.locale.startsWith('zh')
+  return ({ gm: zh ? '主持人' : 'GM', public: zh ? '公开' : 'Public', characters: zh ? '角色' : 'Characters' } as Record<string, string>)[value] || value
+})
+const isBatch = computed(() => targets.value.length > 0)
+const hasExecution = computed(() => targets.value.some(item => item.__execution))
 
 function statusLabel(value: ExecutionStatus): string {
   const zh = props.locale.startsWith('zh')
@@ -98,15 +104,19 @@ function statusLabel(value: ExecutionStatus): string {
     succeeded: zh ? '已完成' : 'Completed',
     failed: zh ? '失败' : 'Failed',
     not_executed: zh ? '未执行' : 'Not executed',
+    unconfirmed: zh ? '待回执核对' : 'Awaiting receipt',
     completed: zh ? '已完成' : 'Completed',
     partial: zh ? '部分完成' : 'Partially completed',
     cancelled: zh ? '已取消' : 'Cancelled',
+    pending: zh ? '等待中' : 'Pending',
+    running: zh ? '执行中' : 'Running',
+    interrupted: zh ? '已中断' : 'Interrupted',
     failed_plan: zh ? '失败' : 'Failed',
   } as Record<string, string>)[value] || value
 }
 
 function targetStatus(item: RecordValue): string {
-  return statusLabel(text(item.status) || (count(item.changed_count) !== undefined ? 'succeeded' : ''))
+  return statusLabel(text(item.status) || 'pending')
 }
 
 function countLabel(value: number | undefined, label: string): string {
@@ -123,12 +133,13 @@ function countLabel(value: number | undefined, label: string): string {
     </div>
     <div class="agent-execution-counts" aria-label="execution counts">
       <span v-if="summary.total !== undefined">{{ countLabel(summary.total, locale.startsWith('zh') ? '目标总数' : 'Total') }}</span>
-      <span v-if="summary.changed !== undefined">{{ countLabel(summary.changed, locale.startsWith('zh') ? '已变更' : 'Changed') }}</span>
+      <span v-if="summary.changed !== undefined">{{ countLabel(summary.changed, locale.startsWith('zh') ? (hasExecution ? '已变更' : '计划修改') : (hasExecution ? 'Changed' : 'Planned changes')) }}</span>
       <span v-if="summary.books !== undefined">{{ countLabel(summary.books, locale.startsWith('zh') ? '资料册' : 'Books') }}</span>
       <span v-if="summary.games !== undefined">{{ countLabel(summary.games, locale.startsWith('zh') ? '影响游戏' : 'Games') }}</span>
       <span v-if="summary.succeeded !== undefined">{{ countLabel(summary.succeeded, locale.startsWith('zh') ? '成功' : 'Succeeded') }}</span>
       <span v-if="summary.failed !== undefined">{{ countLabel(summary.failed, locale.startsWith('zh') ? '失败' : 'Failed') }}</span>
       <span v-if="summary.notExecuted !== undefined">{{ countLabel(summary.notExecuted, locale.startsWith('zh') ? '未执行' : 'Not executed') }}</span>
+      <span v-if="summary.unconfirmed">{{ countLabel(summary.unconfirmed, locale.startsWith('zh') ? '待回执核对' : 'Awaiting receipt') }}</span>
     </div>
     <details v-if="targets.length" class="agent-execution-targets" open>
       <summary>{{ locale.startsWith('zh') ? `目标（${targets.length}）` : `Targets (${targets.length})` }}</summary>
@@ -137,9 +148,9 @@ function countLabel(value: number | undefined, label: string): string {
           <span class="agent-execution-target-label">{{ String(item.label) }}</span>
           <span class="agent-execution-target-meta">
             <span v-if="item.total !== undefined">{{ locale.startsWith('zh') ? `共 ${String(item.total)}` : `Total ${String(item.total)}` }}</span>
-            <span v-if="item.changed_count !== undefined">{{ locale.startsWith('zh') ? `变更 ${String(item.changed_count)}` : `Changed ${String(item.changed_count)}` }}</span>
+            <span v-if="item.changed_count !== undefined">{{ locale.startsWith('zh') ? `${item.__execution ? '变更' : '计划修改'} ${String(item.changed_count)}` : `${item.__execution ? 'Changed' : 'Planned changes'} ${String(item.changed_count)}` }}</span>
             <span v-if="item.affected_games !== undefined">{{ locale.startsWith('zh') ? `影响游戏 ${String(count(item.affected_games))}` : `Games ${String(count(item.affected_games))}` }}</span>
-            <strong v-if="item.status">{{ targetStatus(item) }}</strong>
+            <strong v-if="item.__execution">{{ targetStatus(item) }}</strong>
           </span>
           <span v-if="item.error" class="agent-execution-target-error">{{ String(item.error) }}</span>
         </li>
@@ -153,7 +164,7 @@ function countLabel(value: number | undefined, label: string): string {
 .agent-execution-heading, .agent-execution-counts, .agent-execution-target-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .agent-execution-heading strong { color: var(--df-text); }
 .agent-execution-status { color: var(--df-text-muted); }
-.status-partial, .status-cancelled { color: var(--df-warning-strong, #d6a14c); }
+.status-partial, .status-cancelled, .status-interrupted, .target-unconfirmed { color: var(--df-warning-strong, #d6a14c); }
 .status-failed, .target-failed { color: var(--df-danger-strong, #e57373); }
 .status-completed, .target-succeeded { color: var(--df-success-strong, #6fbf8a); }
 .agent-execution-audience { color: var(--df-text-muted); }

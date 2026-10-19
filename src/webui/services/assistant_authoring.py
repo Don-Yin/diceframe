@@ -6,9 +6,15 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Callable
 
+from src.application_actions import ActionAssessment, PreparedAction
+from src.knowledge.visibility import classify_audience
+
 from src.webui.services.assistant_agent import AgentTool, _digest
 from src.webui.services.assistant_agent_application import obj, string
 from src.webui.services.assistant_content import _has_private_markers
+from src.webui.services.lorebook_visibility_plans import (
+    LorebookVisibilityPlanDependencies, LorebookVisibilityPlans, audience_expands,
+)
 
 
 @dataclass(frozen=True)
@@ -30,9 +36,24 @@ class AuthoringDependencies:
     write_book_visibility_with_recovery: Callable | None = None
     preview_book_visibility_with_recovery: Callable | None = None
     book_snapshot: Callable | None = None
+    book_visibility_receipt: Callable | None = None
 
 
 def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
+    def live_players(game_key, owner):
+        if deps.game_players is None:
+            raise ValueError('Live game players unavailable')
+        return deps.game_players(game_key, owner)
+
+    visibility = None
+    if (deps.book_snapshot is not None and deps.preview_book_visibility_with_recovery is not None
+            and deps.write_book_visibility_with_recovery is not None and deps.book_visibility_receipt is not None):
+        visibility = LorebookVisibilityPlans(LorebookVisibilityPlanDependencies(
+            list_entries=deps.list_book_entries, snapshot=deps.book_snapshot,
+            preview=deps.preview_book_visibility_with_recovery, write=deps.write_book_visibility_with_recovery,
+            receipt=deps.book_visibility_receipt,
+            game_players=live_players,
+        ))
     def world(world_id):
         row = next((w for w in deps.list_worlds().get("worlds", []) if w.get("id") == world_id), None)
         if not row:
@@ -80,8 +101,9 @@ def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
                                  **{field: value for field, value in patch.items()
                                     if field in {"world_setting", "starter_scene"}})
 
-    async def write_entries(args, owner):
-        existing = {e["id"]: e for e in book_entries(args["book_id"])}
+    def entry_rows(args):
+        entries = book_entries(args['book_id'])
+        existing = {e["id"]: e for e in entries}
         prepared = []
         seen = set()
         # Validate the complete batch before the first write.
@@ -92,7 +114,8 @@ def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
             if identity and identity in seen:
                 raise ValueError("Duplicate entry update")
             seen.add(identity)
-            public = entry.get("visibility") == "public" if "visibility" in entry else "*" in existing.get(identity, {}).get("visible_to", [])
+            public = (entry.get('visibility') == 'public' if 'visibility' in entry
+                      else classify_audience(existing.get(identity)) == 'public')
             if public and _has_private_markers(entry["content"]):
                 raise ValueError("A public entry cannot contain private markers")
             row = {key: deepcopy(value) for key, value in entry.items() if key != "visibility"}
@@ -102,6 +125,25 @@ def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
             if "visibility" in entry or not identity:
                 row["visible_to"] = ["*"] if public else []
             prepared.append(row)
+        return entries, existing, prepared
+
+    def prepare_entries(args, owner):
+        entries, existing, rows = entry_rows(args)
+        expands = any(audience_expands(existing.get(row['id'], {}),
+            row.get('visible_to', existing.get(row['id'], {}).get('visible_to', []))) for row in rows)
+        digest = _digest(entries)
+        return PreparedAction(digest, {'book_id': args['book_id'], 'entries': args['entries'],
+            'requires_publication_consent': expands},
+            {'book_id': args['book_id'], 'rows': rows, 'entries_digest': digest},
+            ActionAssessment('disclosure' if expands else 'write', expands, ({'book_id': args['book_id']},)))
+
+    async def execute_entries(payload, owner, context):
+        context.check()
+        return deps.write_entries_with_recovery(owner, payload['book_id'], payload['rows'],
+                                                expected_entries_digest=payload['entries_digest'])
+
+    async def write_entries(args, owner):
+        _entries, _existing, prepared = entry_rows(args)
         if deps.write_entries_with_recovery is not None:
             return deps.write_entries_with_recovery(owner, args['book_id'], prepared)
         results = []
@@ -115,6 +157,13 @@ def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
                 return {"ok": False, "partial": len(results) > 1, "results": results,
                         "error": "Some entries could not be saved; inspect results before planning again"}
         return {"ok": True, "results": results, "navigation": {"route": "lorebook", "query": {"book": args["book_id"]}}}
+
+    def prepare_entry_visibility(args, owner):
+        existing, _audience, rows = visibility_plan(args, owner)
+        expands = any(audience_expands(existing[row['id']], row['visible_to']) for row in rows)
+        return PreparedAction(_digest(book_entries(args['book_id'])),
+            {'book_id': args['book_id'], 'entry_ids': args['entry_ids'], 'audience': args['audience']}, {},
+            ActionAssessment('disclosure' if expands else 'write', expands, ({'book_id': args['book_id']},)))
 
     def visibility_plan(args, owner):
         entries = book_entries(args["book_id"])
@@ -259,12 +308,15 @@ def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
             preview=lambda args, owner: {"target_name": world(args["world_id"])["name"], "changes": args}),
         AgentTool("write_lorebook_entries", "Add or update reviewed lorebook entries, with explicit public or GM visibility", obj({
             "book_id": string(minimum=1), "entries": {"type": "array", "minItems": 1, "maxItems": 16, "items": entry}},
-            ("book_id", "entries")), write_entries, mutation=True,
+            ("book_id", "entries")), write_entries, mutation=True, version=2,
+            prepare=prepare_entries, execute=execute_entries if deps.write_entries_with_recovery is not None else None,
             guard=lambda args, owner: _digest(book_entries(args["book_id"])),
             preview=lambda args, owner: {"target_name": str((deps.list_book_entries(args["book_id"]).get("book") or {}).get("name") or args["book_id"]),
                 "entries": args["entries"]}),
         AgentTool("set_lorebook_entry_visibility", "Change existing lorebook entry visibility without rewriting its authored fields",
             visibility_schema, set_entry_visibility, mutation=True, domain='lorebook', effect='disclosure',
+            version=3, prepare=visibility.prepare if visibility is not None else prepare_entry_visibility,
+            execute=visibility.execute if visibility is not None else None, resumable=visibility is not None,
             guard=lambda args, owner: _digest(book_entries(args["book_id"])),
             preview=lambda args, owner: {"target_name": str((deps.list_book_entries(args["book_id"]).get("book") or {}).get("name") or args["book_id"]),
                 "entry_ids": args["entry_ids"], "audience": args["audience"],
@@ -273,16 +325,32 @@ def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
             obj({"book_id": string(minimum=1), "audience": string(20, ("gm", "public", "characters")),
                  "game_key": string(200, minimum=1), "character_ids": {"type": "array", "maxItems": 10,
                                  "items": string(200, minimum=1)}}, ("book_id", "audience")),
-            set_book_visibility, mutation=True, domain="lorebook", effect="external", version=2,
+            set_book_visibility, mutation=True, domain="lorebook",
+            effect="disclosure" if visibility is not None else "external", version=3,
+            prepare=visibility.prepare if visibility is not None else None,
+            execute=visibility.execute if visibility is not None else None, resumable=visibility is not None,
             guard=book_visibility_guard,
             preview=book_visibility_preview,
-            instructions=("Requires concrete approval for this whole-book operation, even with Task access. "
+            instructions=("Narrowing to GM-only can execute under a covering Task grant. Audience expansion needs concrete consent. "
+                          "For multiple books use set_lorebooks_visibility once with the complete explicit selection. "
                           "Changes only the audience of existing entries, never their text or world runtime facts. "
-                          "Resolve the user's selection into explicit canonical book IDs first; for all selected books, "
-                          "call once per book. Ask for the target audience if it is unclear. Each book supports at most "
+                          "Resolve the user's selection into explicit canonical book IDs first, then use one grouped command "
+                          "for the selection. Ask for the target audience if it is unclear. Each book supports at most "
                           "1000 entries; larger books need explicit entry batches. The preview shows affected counts "
                           "and games; writes are transactional per book and have separate batch undo records."))]
             if deps.write_book_visibility_with_recovery is not None else []),
+        *([AgentTool('set_lorebooks_visibility', 'Plan and apply visibility changes across multiple selected lorebooks',
+            obj({'book_ids': {'type': 'array', 'minItems': 1, 'maxItems': 128, 'items': string(200, minimum=1)},
+                 'audience': string(20, ('gm', 'public', 'characters')), 'game_key': string(200, minimum=1),
+                 'character_ids': {'type': 'array', 'minItems': 1, 'maxItems': 10, 'items': string(200, minimum=1)}},
+                ('book_ids', 'audience')), set_book_visibility, mutation=True, domain='lorebook', effect='disclosure',
+            version=1, prepare=visibility.prepare, execute=visibility.execute, resumable=True,
+            instructions=('For a request covering multiple or all lorebooks, read the live lorebook catalog to resolve '
+                          'the complete explicit book_ids, then call this grouped command once. Do not split the request '
+                          'into separate book approvals. GM-only narrowing runs automatically with covering Task access; '
+                          'audience expansion presents one complete plan for approval, then all books execute. '
+                          'Only visible_to changes. Failures and cancellation retain completed receipts and remaining '
+                          'targets for explicit resume; inspect the structured execution report.'))] if visibility is not None else []),
         AgentTool("edit_character_card", "Edit a reusable character's public narrative fields", obj({"card_id": string(minimum=1),
             "character_name": string(minimum=1), "background": string(16000), "race": string(),
             "class": string()}, ("card_id", "character_name")), edit_card, mutation=True,

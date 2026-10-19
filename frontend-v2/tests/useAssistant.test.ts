@@ -276,7 +276,25 @@ describe('useAssistant request history', () => {
     await assistant.resumeApproval()
     expect(mocks.confirm).toHaveBeenCalledOnce()
     expect(mocks.resume).toHaveBeenCalledWith('s-batch', 'a-batch', 'digest-batch')
+    expect(assistant.task.value).toMatchObject({ status: 'completed', completed_steps: 1 })
     expect(assistant.pendingApproval.value).toBeNull()
+  })
+
+  it('caches an ok-false partial response with pending state without retrying confirm', async () => {
+    const pending = { approval_id: 'a-ok-false', plan_digest: 'digest-ok-false', tool: 'write_lorebook_entries', resumable: true, execution_status: 'partial', execution_state: { report: { status: 'partial' } } }
+    mocks.agentStream.mockImplementationOnce(async (_messages: unknown, _locale: unknown, handlers: { onAgentEvent?: (event: string, payload: Record<string, unknown>) => void }) => {
+      handlers.onAgentEvent?.('session', { session_id: 's-ok-false' })
+      handlers.onAgentEvent?.('approval', { approval_id: pending.approval_id, plan_digest: pending.plan_digest, tool: pending.tool })
+    })
+    mocks.confirm.mockResolvedValueOnce({ ok: false, pending, result: { status: 'partial' } })
+    const assistant = useAssistant()
+    await assistant.send('保留部分结果', 'zh-CN')
+    const first = await assistant.confirmApproval(true)
+    const second = await assistant.confirmApproval(true)
+    expect(first).toMatchObject({ ok: false, pending: { resumable: true } })
+    expect(second).toMatchObject({ ok: false, pending: { resumable: true } })
+    expect(mocks.confirm).toHaveBeenCalledOnce()
+    expect(assistant.pendingApproval.value).toMatchObject({ approval_id: pending.approval_id, resumable: true })
   })
 
   it('keeps the report and resumable plan after a failed resume', async () => {

@@ -14,7 +14,7 @@ DF Agent 需要调用多个 owning module 的真实业务能力，同时保持�
 
 ### 1. 统一应用动作契约
 
-以 `src/application_actions.py` 的 `ApplicationAction` 和 `ActionRegistry` 作为应用动作的公共 contract。owning module 注册稳定 name、version、schema、domain、effect、guard/preview 和 handler；registry 生成整体 revision，descriptor 生成 `contract_digest`。确认计划必须重新核对 descriptor/digest、资源 guard 和服务器权限；版本变化、删除或动态 source 失败会使旧计划失效或不可用。
+以 `src/application_actions.py` 的 `ApplicationAction` 和 `ActionRegistry` 作为应用动作的公共 contract。owning module 注册稳定 name、version、schema、domain、effect、guard/preview 和 handler，并显式提供 `PreparedAction` 与 `ActionAssessment` contract：owning module 负责准备语义 payload、解析真实目标和评估实际可见性策略，registry 只负责目录、版本和 contract 校验。确认计划必须重新核对 descriptor/digest、assessment、资源 guard 和服务器权限；版本变化、删除或动态 source 失败会使旧计划失效或不可用。
 
 动作目录是发现与校验边界，不是新的领域 authority。handler 仍调用既有 service、engine、worldops、recovery 或 plugin host。未注册的函数、route、文件、SQL、任意 HTTP 和 RPC 不具备 Agent 执行资格。
 
@@ -30,9 +30,9 @@ Agent 初始只加载必要动作；运行时 compact catalog 最多提供 160 �
 - `routine` 仅允许带 guard 的 `automatic` 普通 `write`，有效期 4 小时；
 - `task` 允许授权 scope/domain 内的普通 `write` 和 `disclosure`，有效期 1 小时。
 
-连续授权的步数为 1..64；每个给定 scope 键必须在动作参数中精确匹配，domain 也必须匹配。`external`、`destructive`、未声明 effect 和不满足 guard 的动作 fail closed 或回到人工确认。设置 patch/插件启停属于 external；插件声明 read_only/mutation 仍走 external 人工确认，destructive 走 destructive 人工确认。插件 effect 声明不是沙箱。
+连续授权的步数为 1..64；每个给定 scope 键必须与 owning module 解析出的每个 canonical target 精确匹配，没有 prepared assessment 的动作则匹配参数；domain 也必须匹配。`external`、`destructive`、未声明 effect 和不满足 guard 的动作 fail closed 或回到人工确认。设置 patch/插件启停属于 external；插件声明 read_only/mutation 仍走 external 人工确认，destructive 走 destructive 人工确认。插件 effect 声明不是沙箱。
 
-整册 `set_lorebook_visibility` 固定为 `version=2`、effect `external`，目标 audience 为 `gm`、`public` 或 `characters`；每次都需要具体人工批准，`task`/`routine` grant 不能绕过该批准。单条条目仍是通常的 `disclosure` task 行为，不改写全局授权规则。前端 scope 仅接受有效且非空白的 `game_key`、`world_id`、`book_id`、`card_id`；缺少目标 ID 时禁用选项，并在用户明确选择“全部”前阻止 routine/task grant，绝不自动选择全部。`suggest` 与 revoke 继续可用；HTTP 和持久化 grant 格式不变。
+资料册可见性动作不以 tool name 绕过 registry 或授权。单条 setter 与普通 `write_lorebook_entries` 都使用 owning module 评估出的实际 audience policy，因此把同一变更拆成多条写入不能绕过审批；只有 visibility-only prepared payload 不含正文并只改变 `visible_to`，普通 `write_lorebook_entries` payload 含待写正文并执行正常内容写入。这些 prepared visibility writes 也不产生新的 blanket disclosure。对 canonical book targets 的低风险 GM 收窄可由覆盖该目标的 `task` 自动执行；扩展到 `public` 或新增角色 audience 时，由一个封存的多册计划取得一次具体审批，不按册重复审批。已有当前 scope UI 在缺少 ID 时仍要求用户明确选择“全部”。
 
 本局纯展示偏好与影响规则/GM 决策权的策略分开注册。后者、语义包含策略变更的通用规则指令和确认游戏时间的休息操作均保留逐项审批，task 授权不能代替这些确认。专业休息与 HTTP 共用单人/多人分派命令，不允许 Agent 绕过多人收集流程。
 
@@ -46,7 +46,7 @@ Agent 初始只加载必要动作；运行时 compact catalog 最多提供 160 �
 
 持久化计划不代表写入已经派发：取消清理未派发计划，并在开始通知及异步权限校验后重新核对 stop/plan identity；取消之后不得启动新的领域写入。
 
-资料册整册可见性使用 canonical `book_id` 与 `audience`，`set_lorebook_visibility` 为 `version=2`、effect `external`，可选 `game_key` 仅用于解析 live character IDs；最多 1000 条目。每次整册操作都要具体人工批准，现有 task grant 不能绕过；private-marker 扫描只做校验，不构成发布同意。预览提供 changed counts 和 affected games；“所有资料册”必须先解析成明确 book IDs，再逐册调用。每册按 16 条目在 owning-store 事务中写入，并为每批保留独立 undo ID，因此不形成跨册全局原子事务。其恢复记录仍是 `write_entries` 加 `visibility_only` marker；恢复检查目标内容、绑定和资料册语义元数据冲突，仅对该新 marker 忽略 `revision`/`updated_at`。
+`set_lorebooks_visibility(book_ids, audience, ...)` 只接受显式 1..128 个 canonical `book_id`；“全部”必须先从 live catalog 解析为 ID 列表，scope 绑定 owner 解析的每册 book target，`game_key` 只验证 live 角色，不构成 book 授权。owning module 先按每册最多 1000 条目准备并评估实际 audience，再生成带不可变 payload、assessment、版本和 `contract_digest` 的多册计划；只有 visibility-only `prepared.payload` 不含正文，普通 `write_lorebook_entries` payload 仍含待写正文。4 MiB 上限只约束 `prepared.payload`。private-marker 只产生校验警告，不构成同意。计划报告每册 success、failure、unconfirmed 或 not-executed，并提供 `unconfirmed_count`；支持册间取消。每册仍在 owning-store 事务中写入：`kind=visibility_plan_book` 隐藏记录负责幂等协调 parent book receipt，真正可撤销的子记录仍是 `kind=write_entries` 加 `visibility_only` marker，不形成跨册事务。重复 confirm 返回已存响应且绝不重试部分写入；重启不自动写入，`POST /api/assistant/agent/resume` 是 owner 对原封存剩余目标的显式确认，复核 plan/contract/TTL 和每个未完成目标；原 automatic 执行还逐册重新检查 live task grant，不依赖已撤销 grant，并跳过已有 committed receipts。只有注册的 resumable executor 可协调 owner receipts；未知突变仍进入 `recovery_required`。恢复检查目标内容、绑定和资料册语义元数据冲突，仅对 visibility-only 记录忽略派生 revision/time 字段。
 
 ### 6. 使用量语义
 

@@ -4,7 +4,7 @@
 
 ## 已实现的基础
 
-`ApplicationAction`/`ActionRegistry` 是能力扩展的唯一目录入口。owning feature/domain module 注册动作，动作公开稳定 name、version、domain、effect、schema、instructions、guard/preview 元数据和 handler。registry 计算整体 `revision`，每个 descriptor 计算 `contract_digest`；计划确认时重新检查动作契约，版本变化、删除或 source 刷新失败都会使旧计划失效或不可用。
+`ApplicationAction`/`ActionRegistry` 是能力扩展的唯一目录入口。owning feature/domain module 注册动作，并通过显式 `PreparedAction`/`ActionAssessment` contract 负责准备语义 payload、解析真实目标和评估实际可见性。动作公开稳定 name、version、domain、effect、schema、instructions、guard/preview 元数据和 handler。registry 计算整体 `revision`，每个 descriptor 计算 `contract_digest`；计划确认时重新检查动作契约，版本变化、删除或 source 刷新失败都会使旧计划失效或不可用。tool name 不能绕过 registry。
 
 当前目录由应用、内容/世界、资料册、游戏/冒险、规则/恢复、本局资料册、设置和插件 source 组成。已注册的新动作会被 `GET /api/assistant/agent/capabilities` 发现，并可由 Agent 的 `search_capabilities`/`describe_capability` 按需加载完整 schema。运行时 compact `capability_catalog` 最多携带 160 条摘要，并带 `has_more` 与 `domains`；搜索分页的下一次 `offset` 从当前页起点加返回条数计算。完整 schema 只在 describe 或搜索命中后按需加入 callable 集合；动作 `instructions` 会自动并入工具描述。`library` 页面自动覆盖 `lorebook`、`worlds` 和 `adventures` domain。动态插件 descriptor 在每次 source refresh 时重新读取；失效 source fail closed 并从目录移除其动作。
 
@@ -18,9 +18,9 @@
 - `routine`：仅允许 `automatic=True`、带 guard 的普通 `write` 动作自动执行，授权 4 小时；
 - `task`：允许 scope/domain 内的普通 `write` 与 `disclosure` 连续执行，授权 1 小时；`external`、`destructive` 和未自动许可动作不能借此绕过人工确认。
 
-整册 `set_lorebook_visibility` 是 `version=2`、effect 为 `external` 的动作，适用于 `gm`、`public`、`characters` audience；Task 和 Routine 都必须逐次取得具体人工批准，已有 grant 不能绕过。单条 entry 的 `disclosure` 保持通常 task 行为，不改写全局权限。前端 scope 只接受有效且非空白的 `game_key`、`world_id`、`book_id`、`card_id`；缺少 ID 时禁用选项，routine/task grant 需等用户明确选择“全部”后才能继续，不自动全选。Suggest 与 revoke 保持可用，HTTP/持久化 grant 格式不变。
+资料册可见性由 owning module 准备和评估。单条 setter 与普通 `write_lorebook_entries` 使用同一实际 audience policy，拆分写入不能绕过审批；只有 visibility-only prepared payload 不含正文并只改变 `visible_to`，普通 `write_lorebook_entries` payload 含待写正文并执行正常内容写入。canonical book targets 的低风险 GM 收窄可由覆盖目标的 task 自动执行；扩展到 public 或新增角色 audience 时，一个封存的多册计划取得一次人工批准，task 不因此获得 blanket disclosure。前端缺少 ID 时仍保持当前 scope 的明确“全部”选择要求；不能自动全选。
 
-两种连续授权的 `max_steps` 为 1..64，执行消耗 `remaining_steps`。scope 的每个键必须在动作参数中精确匹配；domain 也必须匹配。授权过期、owner/session 不符、动作 effect 不兼容、资源 guard 变化或 contract digest 变化时 fail closed。
+两种连续授权的 `max_steps` 为 1..64，执行消耗 `remaining_steps`。scope 的每个键必须与 owning module 解析的每个 canonical target 精确匹配，没有 prepared assessment 时才匹配动作参数；domain 也必须匹配。授权过期、owner/session 不符、动作 effect 不兼容、资源 guard 变化或 contract digest 变化时 fail closed。
 
 设置写入和插件宿主调用都涉及外部副作用。设置 patch/插件启停标为 `external`；插件声明 `read_only` 或 `mutation` 时也按外部动作人工确认，声明 `destructive` 时按 destructive 人工确认。未知、缺失或 malformed effect 不会降级放行。插件声明不是沙箱，也不替代宿主权限。
 
@@ -32,9 +32,11 @@ Agent 初始只接收必要的基础动作；其它能力由搜索命中或 desc
 
 ## 可见性与领域边界
 
-资料册 audience 变更通常是 disclosure：单条动作只更新既有条目的 `visible_to`，指定角色使用 live roster canonical UID 并通过 GM 校验。整册 `set_lorebook_visibility` 使用 canonical `book_id`，版本 2、effect 为 `external`，适用于 `gm`、`public`、`characters` audience，每次都要具体人工批准；task grant 不能绕过。可选 `game_key` 仅用于解析角色 UID，最多 1000 条目；预览返回 changed count 与 affected games。用户选择“所有资料册”时必须先得到明确 book IDs，再逐册调用一次。private-marker 扫描是校验，不是发布同意。每册按 16 条目在单个 owning-store 事务内写入，每批产生独立 undo ID，不提供跨册全局原子性，也不重写正文。世界事实可见性使用正式 worldops；规则结算、骰点、资源、回合和恢复动作复用既有 authority。specific ruleset 不得反向污染 generic engine，也不能为 Agent 增加任意资源写入旁路。
+批次报告中的 `unconfirmed` 表示可能已提交、待核对，不计入 `not-executed`；`unconfirmed_count` 单独统计它。
 
-整册可见性恢复复用 `kind=write_entries` 并加 `visibility_only` marker。恢复会拒绝目标内容、绑定或资料册语义元数据冲突；只有带该新 marker 的记录忽略 `revision` 与 `updated_at` 派生字段。它保持逐批独立回执，不能被描述为跨资料册全局回滚。
+资料册 audience 变更只更新既有条目的 `visible_to`，指定角色使用 live roster canonical UID 并通过 GM 校验。`set_lorebooks_visibility(book_ids, audience, ...)` 先从 live catalog 解析显式 1..128 个 canonical book IDs；scope 绑定 owner 解析出的每册 book target，`game_key` 只校验 live 角色，不构成 book 授权；每册最多 1000 条目。计划签名绑定不可变 payload、assessment、版本和 `contract_digest`，4 MiB 上限只作用于 `prepared.payload`。按册报告 success/failure/unconfirmed/not-executed，并提供 `unconfirmed_count`；册间可取消。每册在 owning-store 事务中写入：隐藏 `visibility_plan_book` 负责幂等协调 parent receipt，真正可撤销子记录是 `kind=write_entries` 加 `visibility_only` marker，不形成跨册原子性。private-marker 只是 validation warning。`POST /api/assistant/agent/resume` 是 owner 对原封存剩余目标的显式确认，复核 plan/contract/TTL 和每个未完成目标；原 automatic 执行还逐册重新检查 live task grant，不依赖已撤销的 grant，并跳过 committed receipts。重复 confirm 返回已存响应且不重试部分写入。只有注册 resumable executor 可协调 owner receipts，未知突变仍为 `recovery_required`。世界事实可见性使用正式 worldops；规则结算、骰点、资源、回合和恢复动作复用既有 authority。specific ruleset 不得反向污染 generic engine，也不能为 Agent 增加任意资源写入旁路。
+
+整册可见性恢复由隐藏的 `kind=visibility_plan_book` 协调每册幂等 parent receipt；真正可撤销记录是 `kind=write_entries` 加 `visibility_only` marker。`prepared.payload` 上限 4 MiB、最多 128 册；每册 child receipt 可稳定恢复，重启不自动写入。恢复会拒绝目标内容、绑定或资料册语义元数据冲突；只有 visibility-only marker 的记录忽略 `revision` 与 `updated_at` 派生字段。它保持逐册独立回执，不能被描述为跨资料册全局回滚。
 
 新动作必须明确 owner、actor、目标资源、domain、effect、并发/版本 guard、结果 receipt、取消和不确定结果语义。没有这些契约的能力应保持未注册或人工流程，而不是用提示词模拟权限。
 
