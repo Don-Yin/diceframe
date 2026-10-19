@@ -163,6 +163,8 @@ async def test_agent_adventure_markers_reach_actual_private_projection(content_a
     async def emit(event, value):
         events.append((event, deepcopy(value)))
     await api.assistant_agent_run("alice", [{"role": "user", "content": "Write an adventure"}], "en", {}, "", emit)
+    assert api._assistant_agent.deps.max_tokens == 4096
+    assert llm.calls[-1]["kwargs"]["max_tokens"] == 16384
     draft = next(v for e, v in events if e == "draft")
     draft_id_for_save[0] = draft["draft_id"]
     assert not draft["review"]["blockers"]

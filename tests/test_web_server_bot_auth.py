@@ -31,16 +31,16 @@ def test_generation_defaults_migration_raises_only_the_old_narrative_default():
 
     assert web_server._migrate_generation_defaults(old_default) is True
     assert old_default["narrative_max_tokens"] == web_server.DEFAULT_NARRATIVE_MAX_TOKENS
-    assert old_default["generation_defaults_version"] == 6
+    assert old_default["generation_defaults_version"] == 7
     assert web_server._migrate_generation_defaults(old_default) is False
 
     assert web_server._migrate_generation_defaults(previous_default) is True
     assert previous_default["narrative_max_tokens"] == web_server.DEFAULT_NARRATIVE_MAX_TOKENS
-    assert previous_default["generation_defaults_version"] == 6
+    assert previous_default["generation_defaults_version"] == 7
 
     assert web_server._migrate_generation_defaults(custom) is True
     assert custom["narrative_max_tokens"] == 1280
-    assert custom["generation_defaults_version"] == 6
+    assert custom["generation_defaults_version"] == 7
 
 
 def test_generation_defaults_migration_raises_old_analysis_default():
@@ -50,16 +50,16 @@ def test_generation_defaults_migration_raises_old_analysis_default():
 
     assert web_server._migrate_generation_defaults(old_analysis) is True
     assert old_analysis["analysis_max_tokens"] == 4096
-    assert old_analysis["generation_defaults_version"] == 6
+    assert old_analysis["generation_defaults_version"] == 7
     assert web_server._migrate_generation_defaults(old_analysis) is False
 
     assert web_server._migrate_generation_defaults(custom_analysis) is True
     assert custom_analysis["analysis_max_tokens"] == 768
-    assert custom_analysis["generation_defaults_version"] == 6
+    assert custom_analysis["generation_defaults_version"] == 7
 
 
 def test_generation_defaults_migration_raises_old_summary_brief_textgen_defaults():
-    """v5/v6: summary/brief/text_gen 旧默认提升到 4096，自定义值保留。"""
+    """旧默认更新，v7 文本额度下限不改其他自定义预算。"""
     old_defaults = {
         "summary_max_tokens": 400,
         "brief_max_tokens": 300,
@@ -69,26 +69,26 @@ def test_generation_defaults_migration_raises_old_summary_brief_textgen_defaults
     custom = {
         "summary_max_tokens": 500,
         "brief_max_tokens": 350,
-        "text_gen_max_tokens": 600,
+        "text_gen_max_tokens": 20000,
         "generation_defaults_version": 4,
     }
 
     assert web_server._migrate_generation_defaults(old_defaults) is True
     assert old_defaults["summary_max_tokens"] == 4096
     assert old_defaults["brief_max_tokens"] == 4096
-    assert old_defaults["text_gen_max_tokens"] == 4096
-    assert old_defaults["generation_defaults_version"] == 6
+    assert old_defaults["text_gen_max_tokens"] == 16384
+    assert old_defaults["generation_defaults_version"] == 7
     assert web_server._migrate_generation_defaults(old_defaults) is False
 
     assert web_server._migrate_generation_defaults(custom) is True
     assert custom["summary_max_tokens"] == 500
     assert custom["brief_max_tokens"] == 350
-    assert custom["text_gen_max_tokens"] == 600
-    assert custom["generation_defaults_version"] == 6
+    assert custom["text_gen_max_tokens"] == 20000
+    assert custom["generation_defaults_version"] == 7
 
 
-def test_generation_defaults_migration_v6_raises_all_caps_to_4096():
-    """v6: 全部生成类 token 上限统一提升到 4096，自定义值保留。"""
+def test_generation_defaults_migration_v6_raises_all_caps_to_current_defaults():
+    """v6 之前的迁移与 v7 文本额度下限按顺序生效。"""
     previous_defaults = {
         "narrative_max_tokens": 2048,
         "character_gen_max_tokens": 2048,
@@ -100,7 +100,7 @@ def test_generation_defaults_migration_v6_raises_all_caps_to_4096():
     }
     custom = {
         "narrative_max_tokens": 6144,
-        "text_gen_max_tokens": 8192,
+        "text_gen_max_tokens": 20000,
         "generation_defaults_version": 5,
     }
 
@@ -110,14 +110,57 @@ def test_generation_defaults_migration_v6_raises_all_caps_to_4096():
     assert previous_defaults["analysis_max_tokens"] == 4096
     assert previous_defaults["summary_max_tokens"] == 4096
     assert previous_defaults["brief_max_tokens"] == 4096
-    assert previous_defaults["text_gen_max_tokens"] == 4096
-    assert previous_defaults["generation_defaults_version"] == 6
+    assert previous_defaults["text_gen_max_tokens"] == 16384
+    assert previous_defaults["generation_defaults_version"] == 7
     assert web_server._migrate_generation_defaults(previous_defaults) is False
 
     assert web_server._migrate_generation_defaults(custom) is True
     assert custom["narrative_max_tokens"] == 6144
-    assert custom["text_gen_max_tokens"] == 8192
-    assert custom["generation_defaults_version"] == 6
+    assert custom["text_gen_max_tokens"] == 20000
+    assert custom["generation_defaults_version"] == 7
+
+
+def test_generation_defaults_migration_raises_legacy_text_generation_values():
+    for value in (2048, 8192, 16383):
+        config = {"text_gen_max_tokens": value, "generation_defaults_version": 6}
+
+        assert web_server._migrate_generation_defaults(config) is True
+        assert config["text_gen_max_tokens"] == 16384
+        assert config["generation_defaults_version"] == 7
+        assert web_server._migrate_generation_defaults(config) is False
+
+
+@pytest.mark.parametrize("value", [16384, 32768])
+def test_generation_defaults_migration_preserves_existing_higher_text_budgets(value):
+    config = {"text_gen_max_tokens": value, "generation_defaults_version": 6}
+
+    assert web_server._migrate_generation_defaults(config) is True
+    assert config["text_gen_max_tokens"] == value
+    assert config["generation_defaults_version"] == 7
+
+
+def test_generation_defaults_v7_preserves_manual_lower_text_budget():
+    config = {"text_gen_max_tokens": 8192, "generation_defaults_version": 7}
+
+    assert web_server._migrate_generation_defaults(config) is False
+    assert config["text_gen_max_tokens"] == 8192
+
+
+def test_generation_defaults_v6_upgrade_only_changes_text_budget():
+    config = {
+        "generation_defaults_version": 6,
+        "text_gen_max_tokens": 4096,
+        "narrative_max_tokens": 2048,
+        "summary_max_tokens": 1024,
+        "custom_setting": "keep",
+    }
+
+    assert web_server._migrate_generation_defaults(config) is True
+    assert config["text_gen_max_tokens"] == 16384
+    assert config["narrative_max_tokens"] == 2048
+    assert config["summary_max_tokens"] == 1024
+    assert config["custom_setting"] == "keep"
+    assert config["generation_defaults_version"] == 7
 
 
 def test_invalid_config_is_quarantined_instead_of_silently_discarded(tmp_path):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from src.engine.modules import economy_state
 from src.assistant_agent_limits import DEFAULT_TASK_MAX_TOKENS
+from src.generation_limits import DEFAULT_TEXT_GEN_MAX_TOKENS
 
 import asyncio
 import json
@@ -150,7 +151,7 @@ class WebAPI:
                  handler=None, llm_client=None, worlds_dir: Path | None = None,
                  adventures_dir: Path | None = None,
                  character_gen_max_tokens: int = 4096,
-                 text_gen_max_tokens: int = 4096, plugin_host=None, hub_client=None,
+                 text_gen_max_tokens: int = DEFAULT_TEXT_GEN_MAX_TOKENS, plugin_host=None, hub_client=None,
                  speech_service=None, asr_service=None, imagegen_service=None,
                  ruleset_registry: RulesetRuntimeRegistry | None = None,
                  content_cache_dir: Path | None = None,

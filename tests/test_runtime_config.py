@@ -19,6 +19,7 @@ def test_agent_token_budget_is_independent_and_roundtrips(tmp_path):
 
     store, _ = _store(tmp_path)
     initial = store.load()
+    assert initial.state["text_gen_max_tokens"] == 16384
     assert initial.state["assistant_agent_max_tokens"] == 4096
     prepared = prepare_config_update(initial.state, {
         "text_gen_max_tokens": 2048, "assistant_agent_max_tokens": 8192,
@@ -29,6 +30,49 @@ def test_agent_token_budget_is_independent_and_roundtrips(tmp_path):
     assert restored.state["text_gen_max_tokens"] == 2048
     assert restored.state["assistant_agent_max_tokens"] == 8192
     assert store.public_view(restored)["assistant_agent_max_tokens"] == 8192
+
+
+def test_legacy_text_budget_migrates_once_and_remains_editable(tmp_path):
+    from src.webui.config_update import prepare_config_update
+
+    store, paths = _store(tmp_path)
+    paths.data_dir.mkdir(parents=True)
+    paths.config_file.write_text(
+        json.dumps({"text_gen_max_tokens": 2048, "generation_defaults_version": 6}), encoding="utf-8",
+    )
+
+    runtime = store.load()
+
+    assert runtime.state["text_gen_max_tokens"] == 16384
+    assert store.public_view(runtime)["text_gen_max_tokens"] == 16384
+    assert runtime.generation_defaults_migrated is True
+    # Startup persists the migrated state before constructing model services.
+    store.save(runtime.state)
+    persisted = json.loads(paths.config_file.read_text(encoding="utf-8"))
+    assert persisted["text_gen_max_tokens"] == 16384
+    assert persisted["generation_defaults_version"] == 7
+    assert store.load().generation_defaults_migrated is False
+
+    prepared = prepare_config_update(runtime.state, {"text_gen_max_tokens": 8192})
+    assert not prepared.error
+    store.save(prepared.state)
+    assert store.load().state["text_gen_max_tokens"] == 8192
+
+
+def test_legacy_text_budget_upgrade_preserves_explicit_environment_override(tmp_path):
+    store, paths = _store(tmp_path, {"TRPG_TEXT_GEN_MAX_TOKENS": "8192"})
+    paths.data_dir.mkdir(parents=True)
+    paths.config_file.write_text(
+        json.dumps({"text_gen_max_tokens": 2048, "generation_defaults_version": 6}), encoding="utf-8",
+    )
+
+    runtime = store.load()
+
+    assert runtime.generation_defaults_migrated is True
+    assert runtime.state["generation_defaults_version"] == 7
+    assert runtime.state["text_gen_max_tokens"] == 8192
+    store.save(runtime.state)
+    assert store.load().state["text_gen_max_tokens"] == 8192
 
 
 def test_image_prompt_reuse_defaults_on_but_preserves_explicit_off(tmp_path):
