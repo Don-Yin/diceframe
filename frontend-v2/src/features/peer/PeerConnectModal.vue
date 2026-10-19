@@ -77,7 +77,7 @@ function close(): void {
           <p class="peer-experimental-note">{{ t('peerExperimentalNote') }}</p>
           <div class="peer-intro-actions">
             <button @click="close">{{ t('cancel') }}</button>
-            <button class="success" @click="step = 'connect'">{{ t('peerStartSetup') }}</button>
+            <button class="primary" @click="step = 'connect'">{{ t('peerStartSetup') }}</button>
           </div>
         </div>
       </div>

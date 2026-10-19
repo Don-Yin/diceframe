@@ -27,6 +27,7 @@ from src.adventures import (
     LoadedAdventureBundle,
     is_builtin_adventure_directory,
 )
+from src.adventures.scene_context import project_scene_objectives
 from src.adventures.graph_v2 import (
     ADVENTURE_GRAPH_FORMAT_V2,
     AdventureGraphV2Error,
@@ -59,6 +60,37 @@ class AdventureDependencies:
     adventure_resolver: AdventureResolver | None = None
 
 
+def _user_adventure_root(
+    dependencies: AdventureDependencies,
+    *,
+    create: bool = False,
+) -> Path:
+    """Return the writable user source without falling back to builtin data.
+
+    The resolver deliberately keeps a registered user source even before its
+    directory exists.  Authoring code must use that explicit source; the
+    resolver's compatibility ``adventures_dir`` property is allowed to fall
+    back to builtin only for legacy read paths.
+    """
+
+    resolver = dependencies.adventure_resolver
+    if resolver is None and isinstance(dependencies.adventure_loader, AdventureResolver):
+        resolver = dependencies.adventure_loader
+    if resolver is not None:
+        source = resolver.source_for("user")
+        if source is None:
+            raise ValueError("custom adventures require a registered user Adventure source")
+        root = source.loader.adventures_dir
+    else:
+        root = dependencies.adventure_loader.adventures_dir
+        builtin_root = dependencies.builtin_adventures_dir
+        if builtin_root is not None and root.resolve() == Path(builtin_root).resolve():
+            raise ValueError("custom adventures require a separate user Adventure source")
+    if create:
+        root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def _runtime_for_rule(
     dependencies: AdventureDependencies,
     rule_id: str,
@@ -78,23 +110,8 @@ def _runtime_for_rule(
 def _compatibility(
     bundle: LoadedAdventureBundle, runtime: Any | None, world_id: str,
 ) -> tuple[str, list[str]]:
-    reasons: list[str] = []
-    manifest = bundle.manifest
-    if runtime is None:
-        reasons.append("ruleset_runtime_unavailable")
-    else:
-        formats = set(getattr(runtime.capabilities, "adventure_formats", ()) or ())
-        if manifest.format not in formats:
-            reasons.append("adventure_format_unsupported")
-        if runtime.runtime_id != manifest.required_runtime_id:
-            reasons.append("runtime_id_mismatch")
-        if runtime.runtime_version < manifest.required_runtime_version:
-            reasons.append("runtime_version_too_old")
-    if (
-        manifest.world_policy == "fixed"
-        and str(world_id or "") != manifest.recommended_world_id
-    ):
-        reasons.append("world_mismatch")
+    from src.adventures.compatibility import compatibility_reasons
+    reasons = compatibility_reasons(bundle.manifest, runtime, world_id)
     return ("compatible" if not reasons else "incompatible", reasons)
 
 
@@ -138,7 +155,9 @@ def list_adventures(
             "source_kind": resolution.source_kind,
             "source_id": resolution.source_id,
             "custom": not builtin,
-            "editable": not builtin and not usages,
+            # A plugin/builtin package is never directly editable, even when it
+            # is not bound to a save; the UI must offer Copy/Fork instead.
+            "editable": _user_owned_package(dependencies, resolution) and not usages,
             "in_use": len(usages),
         })
     conflicts = _source_conflicts(dependencies, language)
@@ -211,6 +230,60 @@ def _is_builtin_bundle(
     )
 
 
+def _user_owned_package(
+    dependencies: AdventureDependencies,
+    resolution: AdventureResolution,
+) -> bool:
+    """Whether this server may overwrite or delete the resolved package.
+
+    Only an explicit ``user`` source owns writable files.  ``builtin`` and
+    ``plugin`` packages are read-only and must be copied into the user source
+    first.  A legacy single-loader resolution carries no source identity, so
+    ownership is then proven by the real path (after ``resolve()``) living
+    inside the writable user root — never by assuming "unknown" means user.
+    """
+
+    if resolution.source_kind and resolution.source_kind != "user":
+        return False
+    if _is_builtin_bundle(dependencies, resolution.bundle):
+        return False
+    try:
+        user_root = _user_adventure_root(dependencies).resolve()
+    except (OSError, ValueError):
+        # No verifiable writable user source: fail closed.
+        return False
+    root = resolution.bundle.root.resolve()
+    return root != user_root and root.is_relative_to(user_root)
+
+
+def _writable_user_package(
+    dependencies: AdventureDependencies,
+    adventure_id: str,
+    language: str = "",
+) -> AdventureResolution:
+    """Resolve an edit/delete target and enforce user-source ownership first."""
+
+    resolution = _resolve_with_source(dependencies, adventure_id, language)
+    if not _user_owned_package(dependencies, resolution):
+        if resolution.source_kind == "plugin":
+            raise PermissionError(
+                "plugin adventures are read-only; copy the package into user "
+                "adventures before editing or deleting it"
+            )
+        if (
+            resolution.source_kind == "builtin"
+            or _is_builtin_bundle(dependencies, resolution.bundle)
+        ):
+            raise PermissionError(
+                "built-in adventures must be copied before editing or deleting"
+            )
+        raise PermissionError(
+            "adventure is not owned by the user adventure directory; copy the "
+            "package before editing or deleting it"
+        )
+    return resolution
+
+
 def _resolve_bundle(
     dependencies: AdventureDependencies,
     adventure_id: str,
@@ -269,12 +342,18 @@ def _json_files(root: Path) -> dict[str, Any]:
     return result
 
 
+def adventure_bundle_files(bundle: LoadedAdventureBundle) -> dict[str, Any]:
+    """Portable editable JSON snapshot of an already validated owner bundle."""
+    return _json_files(bundle.root)
+
+
 def adventure_detail(
     dependencies: AdventureDependencies,
     adventure_id: str,
     language: str = "",
 ) -> dict[str, Any]:
-    bundle = _resolve_bundle(dependencies, adventure_id, language)
+    resolution = _resolve_with_source(dependencies, adventure_id, language)
+    bundle = resolution.bundle
     usages = _bound_games(dependencies, bundle.manifest.adventure_id)
     builtin = _is_builtin_bundle(dependencies, bundle)
     return {
@@ -286,14 +365,16 @@ def adventure_detail(
             "format": bundle.manifest.format,
             "content_digest": bundle.content_digest,
             "custom": not builtin,
-            "editable": not builtin and not usages,
+            "source_kind": resolution.source_kind,
+            "source_id": resolution.source_id,
+            "editable": _user_owned_package(dependencies, resolution) and not usages,
             "bound_games": usages,
             "files": _json_files(bundle.root),
         },
     }
 
 
-def _validate_directory_id(value: Any) -> str:
+def validate_directory_id(value: Any) -> str:
     directory_id = str(value or "").strip().lower()
     if not _DIRECTORY_ID_RE.fullmatch(directory_id):
         raise ValueError("adventure directory_id must use lowercase canonical characters")
@@ -346,7 +427,8 @@ def _validated_stage(
     directory_id: str,
     files: dict[str, Any],
 ) -> tuple[Path, Any]:
-    parent = dependencies.adventure_loader.adventures_dir.parent
+    parent = _user_adventure_root(dependencies).parent
+    parent.mkdir(parents=True, exist_ok=True)
     temporary = tempfile.TemporaryDirectory(prefix="diceframe-adventure-", dir=parent)
     root = Path(temporary.name) / directory_id
     root.mkdir()
@@ -366,8 +448,9 @@ def copy_adventure(
     language: str = "",
 ) -> dict[str, Any]:
     source = _resolve_bundle(dependencies, adventure_id, language)
-    directory_id = _validate_directory_id(body.get("directory_id"))
-    target = dependencies.adventure_loader.adventures_dir / directory_id
+    directory_id = validate_directory_id(body.get("directory_id"))
+    user_root = _user_adventure_root(dependencies)
+    target = user_root / directory_id
     if target.exists():
         raise ValueError(f"adventure directory already exists: {directory_id}")
     new_id = _validate_package_id(body.get("adventure_id") or f"user:{directory_id}")
@@ -399,6 +482,7 @@ def copy_adventure(
                 tutorial["summary"] = str(body["summary"]).strip()
     staged, temporary = _validated_stage(dependencies, directory_id, files)
     try:
+        user_root.mkdir(parents=True, exist_ok=True)
         shutil.move(str(staged), str(target))
     finally:
         temporary.cleanup()
@@ -409,6 +493,53 @@ def copy_adventure(
         "directory_id": directory_id,
         "content_digest": bundle.content_digest,
     }
+
+
+def review_native_adventure_fork(dependencies: AdventureDependencies, payload: dict[str, Any], directory_id: str,
+                                source: LoadedAdventureBundle | None = None) -> dict[str, Any]:
+    """Validate an editable native snapshot in its original graph format."""
+    from copy import deepcopy
+    if source is not None and any(path.is_file() and path.suffix.lower() != ".json" for path in source.root.rglob("*")):
+        raise ValueError("native adventure Fork currently requires a JSON-only package; copy declared module images separately")
+    directory = validate_directory_id(directory_id)
+    identity = f"user:{directory}"
+    _ensure_identity_available(dependencies, identity)
+    if (_user_adventure_root(dependencies) / directory).exists():
+        raise ValueError("adventure target already exists")
+    files = deepcopy(payload.get("files"))
+    if not isinstance(files, dict) or not isinstance(files.get("manifest.json"), dict):
+        raise ValueError("native adventure files are required")
+    manifest = files["manifest.json"]
+    manifest.update({"adventure_id": identity, "custom": True})
+    # Locale projections must show the reviewed name too; otherwise an overlay
+    # silently hides the user's edit when the copied adventure is selected.
+    graph = files.get("adventure.json")
+    if isinstance(graph, dict):
+        name = (graph.get("tutorial") or {}).get("name") or graph.get("name")
+        for value in files.values():
+            if isinstance(value, dict) and value.get("target", {}).get("kind") == "adventure":
+                fields = value.get("fields", {})
+                if name and isinstance(fields, dict):
+                    if isinstance(fields.get("tutorial"), dict):
+                        fields["tutorial"]["name"] = name
+                    elif "name" in fields:
+                        fields["name"] = name
+    staged, temporary = _validated_stage(dependencies, directory, files)
+    try:
+        bundle = AdventureBundleLoader(staged.parent).load(directory)
+        return {"directory_id": directory, "files": files, "format": bundle.manifest.format}
+    finally:
+        temporary.cleanup()
+
+
+def create_native_adventure_fork(dependencies: AdventureDependencies, payload: dict[str, Any], directory_id: str,
+                                source: LoadedAdventureBundle) -> dict[str, Any]:
+    checked = review_native_adventure_fork(dependencies, payload, directory_id, source)
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, value in checked["files"].items():
+            archive.writestr(f"{directory_id}/{name}", json.dumps(value, ensure_ascii=False))
+    return import_adventure(dependencies, output.getvalue(), directory_id)
 
 
 def create_adventure(
@@ -422,8 +553,9 @@ def create_adventure(
     and one chapter so it can be selected immediately, while all rich content is
     optional and can be added later through the structured editor.
     """
-    directory_id = _validate_directory_id(body.get("directory_id"))
-    target = dependencies.adventure_loader.adventures_dir / directory_id
+    directory_id = validate_directory_id(body.get("directory_id"))
+    user_root = _user_adventure_root(dependencies)
+    target = user_root / directory_id
     if target.exists():
         raise ValueError(f"adventure directory already exists: {directory_id}")
     adventure_id = _validate_package_id(body.get("adventure_id") or f"user:{directory_id}")
@@ -466,15 +598,16 @@ def create_adventure(
             "schema_version": 1,
             "adventure_id": adventure_id,
             "version": str(body.get("version") or "1.0.0").strip(),
-            "format": "diceframe:adventure-graph-v1",
+            "format": ADVENTURE_GRAPH_FORMAT_V2,
+            "reference_policy": "adventure-local",
             "world_policy": world_policy,
             "recommended_world_id": world_id,
             "required_runtime": {
                 "id": runtime_id,
                 "minimum_version": minimum_runtime_version,
             },
-            "default_locale": "zh-CN",
-            "supported_locales": ["zh-CN", "en", "de"],
+            "default_locale": "zh-CN" if language == "zh-CN" else "en",
+            "supported_locales": ["zh-CN", "en"],
             "custom": True,
         },
         "adventure.json": {
@@ -482,19 +615,21 @@ def create_adventure(
             "kind": "adventure",
             "id": stem,
             "source_ref": source_ref,
+            "name": name, "summary": summary,
             "recommended_world_id": world_id,
             "automation_level": "guided",
             "estimated_minutes": int(body.get("estimated_minutes", 60) or 60),
-            "start_step_id": step_id,
-            "chapters": [{"id": chapter_id, "step_ids": [step_id]}],
-            "steps": [{
-                "id": step_id,
-                "chapter_id": chapter_id,
-                "scene_ref": f"scene:{scene_id}",
-                "requires": "none",
-                "choice_ids": [],
+            "format": ADVENTURE_GRAPH_FORMAT_V2,
+            "start_node_ids": [step_id],
+            "chapters": [{"id": chapter_id}],
+            "nodes": [{
+                "id": step_id, "type": "scene", "chapter_id": chapter_id,
+                "name": "开场" if language == "zh-CN" else "Opening",
+                "description": "冒险从这里开始。" if language == "zh-CN" else "The adventure begins here.",
+                "scene_ref": f"scene:{scene_id}", "visibility": "public",
+                "transitions": [], "on_complete": [],
             }],
-            "choices": [],
+            "objectives": [], "milestones": [],
         },
         f"content/scenes/{scene_id}.json": {
             "schema_version": 1,
@@ -505,40 +640,19 @@ def create_adventure(
             "npc_refs": [],
         },
     }
-    _SCAFFOLD_TEXT = {
-        "zh-CN": {"chapter_1": "第一章", "opening": "开场", "narration": "冒险从这里开始。", "opening_scene": "开场场景"},
-        "en": {"chapter_1": "Chapter 1", "opening": "Opening", "narration": "The adventure begins here.", "opening_scene": "Opening Scene"},
-        "de": {"chapter_1": "Kapitel 1", "opening": "Eröffnung", "narration": "Das Abenteuer beginnt hier.", "opening_scene": "Eröffnungsszene"},
-    }
-    for locale in ("zh-CN", "en", "de"):
-        localized_name = name
-        localized_summary = summary
-        scaffold_text = _SCAFFOLD_TEXT[locale]
+    for locale, scene_name in (("zh-CN", "开场场景"), ("en", "Opening Scene")):
         files[f"locales/{locale}/adventure.json"] = {
-            "locale_schema_version": 1,
-            "locale": locale,
-            "target": {"kind": "adventure", "id": stem},
-            "fields": {"tutorial": {
-                "name": localized_name,
-                "summary": localized_summary,
-                "chapters": {chapter_id: {"name": scaffold_text["chapter_1"]}},
-                "steps": {step_id: {
-                    "title": scaffold_text["opening"],
-                    "narration": scaffold_text["narration"],
-                    "objective": "",
-                    "hint": "",
-                }},
-                "choices": {},
-            }},
+            "locale_schema_version": 1, "locale": locale,
+            "target": {"kind": "adventure", "id": stem}, "fields": {},
         }
         files[f"locales/{locale}/scenes/{scene_id}.json"] = {
-            "locale_schema_version": 1,
-            "locale": locale,
+            "locale_schema_version": 1, "locale": locale,
             "target": {"kind": "scene", "id": scene_id},
-            "fields": {"name": scaffold_text["opening_scene"], "description": ""},
+            "fields": {"name": scene_name, "description": ""},
         }
     staged, temporary = _validated_stage(dependencies, directory_id, files)
     try:
+        user_root.mkdir(parents=True, exist_ok=True)
         shutil.move(str(staged), str(target))
     finally:
         temporary.cleanup()
@@ -552,9 +666,11 @@ def update_adventure(
     body: dict[str, Any],
     language: str = "",
 ) -> dict[str, Any]:
-    current = _resolve_bundle(dependencies, adventure_id, language)
-    if _is_builtin_bundle(dependencies, current):
-        raise PermissionError("built-in adventures must be copied before editing")
+    # Ownership is validated before any staging or filesystem change: builtin
+    # and plugin packages may only be edited after an explicit Copy/Fork.
+    current = _writable_user_package(
+        dependencies, adventure_id, language,
+    ).bundle
     usages = _bound_games(dependencies, current.manifest.adventure_id)
     if usages:
         raise PermissionError("adventure is bound to a save and cannot be edited")
@@ -564,6 +680,8 @@ def update_adventure(
     manifest = files.get("manifest.json")
     if not isinstance(manifest, dict) or str(manifest.get("adventure_id") or "") != adventure_id:
         raise ValueError("editing cannot change canonical adventure identity")
+    if current.manifest.reference_policy and manifest.get("reference_policy") != current.manifest.reference_policy:
+        raise ValueError("editing cannot change the adventure reference policy")
     staged, temporary = _validated_stage(
         dependencies, current.root.name, files,
     )
@@ -588,9 +706,9 @@ def delete_adventure(
     dependencies: AdventureDependencies,
     adventure_id: str,
 ) -> dict[str, Any]:
-    bundle = _resolve_bundle(dependencies, adventure_id)
-    if _is_builtin_bundle(dependencies, bundle):
-        raise PermissionError("built-in adventures cannot be deleted")
+    # Ownership is validated before ``rmtree``; a plugin package must never be
+    # deleted by an adventure-management call.
+    bundle = _writable_user_package(dependencies, adventure_id).bundle
     usages = _bound_games(dependencies, bundle.manifest.adventure_id)
     if usages:
         raise PermissionError("adventure is bound to a save and cannot be deleted")
@@ -656,8 +774,9 @@ def import_adventure(
         raise ValueError("adventure package is missing manifest.json")
     adventure_id = _validate_package_id(manifest.get("adventure_id"))
     _ensure_identity_available(dependencies, adventure_id)
-    wanted_directory = _validate_directory_id(directory_id or root)
-    target = dependencies.adventure_loader.adventures_dir / wanted_directory
+    wanted_directory = validate_directory_id(directory_id or root)
+    user_root = _user_adventure_root(dependencies)
+    target = user_root / wanted_directory
     if target.exists():
         raise ValueError(f"adventure directory already exists: {wanted_directory}")
     manifest["custom"] = True
@@ -666,6 +785,7 @@ def import_adventure(
         dependencies, wanted_directory, files,
     )
     try:
+        user_root.mkdir(parents=True, exist_ok=True)
         shutil.move(str(staged), str(target))
     finally:
         temporary.cleanup()
@@ -748,6 +868,7 @@ def game_adventure_projection(
     instance: Any,
     *,
     viewer_is_gm: bool,
+    viewer_uid: str = "",
 ) -> dict[str, Any]:
     """Return only the bound v2 graph that this viewer may inspect.
 
@@ -844,7 +965,7 @@ def game_adventure_projection(
         for node in projection.get("nodes", [])
         if isinstance(node, dict)
     }
-    progress = adventure_runtime_state.progress(instance)
+    progress = adventure_runtime_state.progress_snapshot(instance)
     progress = progress if isinstance(progress, dict) else {}
     active_nodes = [
         node_id
@@ -854,6 +975,35 @@ def game_adventure_projection(
     # The client receives only server-derived, viewer-safe active identities.
     # It never infers completable nodes from graph transitions.
     projection["progress"] = {"active_nodes": active_nodes}
+    if viewer_is_gm:
+        suggestions = progress.get("completion_suggestions")
+        projected_suggestions = [
+            {
+                "proposal_id": row["proposal_id"],
+                "node_id": row["node_id"],
+                "reason": row["reason"],
+                "evidence_rounds": list(row["evidence_rounds"]),
+            }
+            for row in suggestions[:64]
+            if isinstance(row, dict)
+            and isinstance(row.get("proposal_id"), str)
+            and 1 <= len(row["proposal_id"]) <= 80
+            and isinstance(row.get("node_id"), str)
+            and row["node_id"] in active_nodes
+            and isinstance(row.get("reason"), str) and 0 < len(row["reason"]) <= 500
+            and isinstance(row.get("evidence_rounds"), list)
+            and 1 <= len(row["evidence_rounds"]) <= 5
+            and all(isinstance(round_number, int) and not isinstance(round_number, bool)
+                    and round_number >= 0 for round_number in row["evidence_rounds"])
+        ] if isinstance(suggestions, list) else []
+        if projected_suggestions:
+            projection["progress"]["completion_suggestions"] = projected_suggestions
+    visible_choices = {node['id']: {transition.get('choice_id') for transition in node.get('transitions', [])} for node in projection['nodes'] if node.get('choice_mode') == 'exclusive'}
+    if visible_choices:
+        selected = progress.get('selected_choices', {})
+        projection['progress']['selected_choices'] = {node_id: choice for node_id, choice in selected.items() if node_id in visible_choices and choice in visible_choices[node_id]} if isinstance(selected, dict) else {}
+        requests = progress.get('choice_requests', [])
+        projection['progress']['choice_requests'] = [dict(row) for row in requests[:256] if isinstance(row, dict) and set(row) == {'node_id', 'choice_id', 'actor_uid'} and row['node_id'] in active_nodes and row['choice_id'] in visible_choices.get(row['node_id'], set()) and (viewer_is_gm or row['actor_uid'] == viewer_uid)] if isinstance(requests, list) else []
     return {
         "ok": True,
         "adventure": {
@@ -861,5 +1011,6 @@ def game_adventure_projection(
             "available": True,
             "format": bundle.manifest.format,
             "projection": projection,
+            "scene_objectives": project_scene_objectives(graph, progress, viewer_is_gm=viewer_is_gm),
         },
     }

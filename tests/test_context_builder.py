@@ -1,12 +1,11 @@
 """上下文拼接器测试。"""
 
+from src.engine.modules import game_config
+
 import logging
 
 import pytest
-from src.engine.modules import (
-    checks, economy_state, narrative_notes, private_channels, progression_state,
-    table_settings,
-)
+from src.engine.modules import checks, economy_state, narrative_notes, private_channels, progression_state
 from src.llm.context_builder import (
     _INVENTORY_STATE_LIMIT,
     _KEY_ITEMS_STATE_LIMIT,
@@ -516,7 +515,7 @@ def _manual_roll_instance(requests):
     instance.modules = {"progression": {**progression_state.fresh(), "round": 2}}
     narrative_notes.replace_scene(instance, "测试场景")
     narrative_notes.replace_game_time(instance, "")
-    table_settings.replace_difficulty(instance, "normal")
+    game_config.replace_difficulty(instance, "normal")
     private_channels.replace_private_log(instance, {})
     instance.modules = {}
     checks.replace_manual_roll_requests(instance, list(requests))

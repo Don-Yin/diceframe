@@ -26,6 +26,10 @@ const MUTATING_OPERATIONS = new Set<PeerGameOperation>([
   'character.rest',
   'character.advancement.apply',
   'roll.resolve',
+  'check_modes.request',
+  'push.resolve',
+  'recovery.request',
+  'recovery.claim',
 ])
 const MAX_REQUESTS_PER_MINUTE = 120
 const MAX_IN_FLIGHT_PER_PEER = 8
@@ -82,6 +86,12 @@ const OPERATION_FIELD_WHITELIST: Record<PeerGameOperation, readonly string[]> = 
   'game.map': [],
   'game.player_context': [],
   'roll.requests': [],
+  'check_modes.read': [],
+  'check_modes.request': ['expected_revision', 'run_id', 'context_id', 'mode', 'reason'],
+  'recovery.read': [],
+  'recovery.request': ['run_id', 'operation_id', 'expected_revision', 'kind', 'healer_uid', 'skill_id'],
+  'recovery.claim': ['run_id', 'operation_id', 'expected_revision', 'source_id'],
+  'push.resolve': ['check_id', 'operation', 'run_id', 'round_number', 'expected_revision', 'reason'],
   'roll.resolve': ['run_id', 'request_id'],
   'player.create': [
     'character_name', 'race', 'class', 'background', 'hp',
@@ -174,10 +184,11 @@ export class PeerHostGameBridge {
     try {
       const sanitized = sanitizePayload(operation, payload)
       const result = await this.dispatch(peerId, operation, sanitized)
-      if (
+      const recoveryChanged = !operation.startsWith('recovery.') || (result.ok === true && !result.duplicate)
+      if (recoveryChanged && (
         MUTATING_OPERATIONS.has(operation)
         || (operation === 'kp.question' && sanitized.visibility === 'party')
-      ) this.onMutation()
+      )) this.onMutation()
       return result
     } finally {
       this.release(peerId)
@@ -304,6 +315,11 @@ export class PeerHostGameBridge {
     }
     if (operation === 'game.characters') return read('/characters')
     if (operation === 'roll.requests') return read('/roll-requests')
+    if (operation === 'check_modes.read') return read('/check-modes')
+    if (operation === 'recovery.read') return read('/recovery')
+    if (operation === 'recovery.request') return write('/recovery/request', payload)
+    if (operation === 'recovery.claim') return write('/recovery/claim', payload)
+    if (operation === 'check_modes.request') return write(`/check-modes/seats/${encodeURIComponent(actorId)}/request`, payload)
     if (operation === 'game.log') {
       const page = boundedInteger(payload.page, 1, 10_000, 1)
       const perPage = boundedInteger(payload.per_page, 1, 100, 50)
@@ -334,6 +350,13 @@ export class PeerHostGameBridge {
     if (operation === 'check.reveal') {
       const checkId = requiredIdentifier(payload.check_id, 'check_id')
       return write(`/checks/${encodeURIComponent(checkId)}/reveal`, {})
+    }
+    if (operation === 'push.resolve') {
+      const checkId = requiredIdentifier(payload.check_id, 'check_id')
+      const choice = requiredIdentifier(payload.operation, 'operation')
+      if (!['request', 'confirm', 'decline'].includes(choice)) throw new Error('Keeper decisions require the host')
+      const { check_id: _checkId, operation: _operation, ...choiceBody } = payload
+      return write(`/checks/${encodeURIComponent(checkId)}/push/${choice}`, choiceBody)
     }
     if (operation === 'payment.resolve') {
       const paymentId = requiredIdentifier(payload.payment_id, 'payment_id')
@@ -437,6 +460,10 @@ export class PeerRemoteGameClient {
     else if (method === 'GET' && parsed.tail === '/map') operation = 'game.map'
     else if (method === 'GET' && parsed.tail === '/player-context') operation = 'game.player_context'
     else if (method === 'GET' && parsed.tail === '/roll-requests') operation = 'roll.requests'
+    else if (method === 'GET' && parsed.tail === '/check-modes') operation = 'check_modes.read'
+    else if (method === 'GET' && parsed.tail === '/recovery') operation = 'recovery.read'
+    else if (method === 'POST' && parsed.tail === '/recovery/request') operation = 'recovery.request'
+    else if (method === 'POST' && parsed.tail === '/recovery/claim') operation = 'recovery.claim'
     else if (method === 'POST' && parsed.tail === '/players') operation = 'player.create'
     else if (method === 'POST' && parsed.tail === '/action') operation = 'action.submit'
     else if (method === 'POST' && parsed.tail === '/kp-question') operation = 'kp.question'
@@ -445,6 +472,7 @@ export class PeerRemoteGameClient {
     else {
       const luck = /^\/checks\/([^/]+)\/luck$/u.exec(parsed.tail)
       const reveal = /^\/checks\/([^/]+)\/reveal$/u.exec(parsed.tail)
+      const push = /^\/checks\/([^/]+)\/push\/(request|confirm|decline)$/u.exec(parsed.tail)
       const payment = /^\/payments\/([^/]+)$/u.exec(parsed.tail)
       const away = /^\/players\/([^/]+)\/away$/u.exec(parsed.tail)
       const character = /^\/character\/([^/]+)$/u.exec(parsed.tail)
@@ -453,7 +481,13 @@ export class PeerRemoteGameClient {
       const rest = /^\/character\/([^/]+)\/rest$/u.exec(parsed.tail)
       const advancement = /^\/character\/([^/]+)\/advancement\/(preview|apply)$/u.exec(parsed.tail)
       const roll = /^\/roll-requests\/([^/]+)\/roll$/u.exec(parsed.tail)
-      if (method === 'POST' && luck) {
+      const checkMode = /^\/check-modes\/seats\/([^/]+)\/request$/u.exec(parsed.tail)
+      if (method === 'POST' && checkMode) {
+        operation = 'check_modes.request'
+      } else if (method === 'POST' && push) {
+        operation = 'push.resolve'
+        payload = { ...body, check_id: decodeURIComponent(push[1]), operation: push[2] }
+      } else if (method === 'POST' && luck) {
         operation = 'luck.resolve'
         payload = { ...body, check_id: decodeURIComponent(luck[1]) }
       } else if (method === 'POST' && reveal) {

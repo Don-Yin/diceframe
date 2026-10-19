@@ -39,6 +39,8 @@ the real ``RoundProcessor`` does at its commit point).
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import logging
 from copy import deepcopy
 from dataclasses import dataclass
@@ -65,7 +67,7 @@ from src.webui.services.turns import (
     resume_after_control_change,
     submit_action,
 )
-from src.engine.modules import ruleset_runtime, table_settings
+from src.engine.modules import ruleset_runtime
 from src.engine.player_control import set_away_control_policy
 
 GAME_KEY = "web|ai-takeover|bot"
@@ -146,7 +148,7 @@ def make_instance(
     instance = GameInstance(game_key=GAME_KEY_PARTS, rule_id="test")
     instance.state = GameState.ACTIVE_ACTION
     instance.round_number = 1
-    table_settings.replace_solo_mode(instance, solo)
+    game_config.replace_solo_mode(instance, solo)
     for uid in (*humans, *ai):
         sheet = HUMAN_SHEET if uid in humans else AI_SHEET
         instance.put_player(uid, {

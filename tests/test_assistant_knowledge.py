@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 
 import pytest
 
@@ -65,6 +66,42 @@ async def test_unrelated_query_returns_no_context(knowledge_docs):
     result = await assistant_knowledge.search_knowledge("量子物理光谱", "zh-CN")
     assert result.context == ""
     assert result.sources == []
+
+
+@pytest.mark.asyncio
+async def test_agent_documentation_prefers_current_local_files_and_never_fetches_unversioned_remote(knowledge_docs, monkeypatch):
+    async def forbidden(lang):
+        pytest.fail("Agent documentation must not query a moving remote guide")
+    monkeypatch.setattr(assistant_knowledge, "_fetch_remote_docs", forbidden)
+    result = await assistant_knowledge.search_knowledge("插件怎么安装", "zh-CN", current_version_only=True)
+    assert "插件商店" in result.context
+    assert result.sources[0]["source"] == "docs/GUIDE_CN.md"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metadata,accepted", [
+    (None, False),
+    ({"schema": 1, "application_version": "0.0.0"}, False),
+    ({"schema": 2, "application_version": assistant_knowledge.__version__}, False),
+    ({"schema": 1, "application_version": assistant_knowledge.__version__}, True),
+])
+async def test_agent_packaged_documentation_requires_matching_version_and_excludes_remote_guides(knowledge_docs, monkeypatch, tmp_path, metadata, accepted):
+    source = "docs/GUIDE_CN.md"
+    knowledge_docs.unlink()
+    bundle = tmp_path / "index.json"
+    data = {"zh": [{"source": source, "heading": "插件安装", "text": "current bundled plugin help",
+        "tokens": {"插件": 1, "安装": 1}, "heading_tokens": ["插件"]},
+        {"source": "docs/zh/guide.md", "heading": "插件安装", "text": "outdated remote instructions",
+        "tokens": {"插件": 20, "安装": 20}, "heading_tokens": ["插件"]}]}
+    if metadata is not None:
+        data["_meta"] = metadata
+    bundle.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(assistant_knowledge, "INDEX_FILE", bundle)
+    result = await assistant_knowledge.search_knowledge("插件安装", "zh-CN", current_version_only=True)
+    assert bool(result.context) is accepted
+    assert "outdated remote" not in result.context
+    if accepted:
+        assert result.sources == [{"source": source, "heading": "插件安装"}]
 
 
 @pytest.mark.asyncio

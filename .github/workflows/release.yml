@@ -240,6 +240,7 @@ jobs:
             tags="${tags},ghcr.io/${owner}/diceframe:latest,docker.io/falconku/diceframe:latest"
           fi
           {
+            echo "runtime_api=$(python -c 'from src.docker_launcher.contracts import RUNTIME_API; print(RUNTIME_API)')"
             echo "version=${version}"
             echo "seed_sha=${seed_sha}"
             echo "tags=${tags}"
@@ -275,4 +276,4 @@ jobs:
             io.diceframe.seed.version=${{ steps.meta.outputs.version }}
             io.diceframe.seed.sha256=${{ steps.meta.outputs.seed_sha }}
             io.diceframe.launcher.schema=1
-            io.diceframe.runtime.api=1
+            io.diceframe.runtime.api=${{ steps.meta.outputs.runtime_api }}

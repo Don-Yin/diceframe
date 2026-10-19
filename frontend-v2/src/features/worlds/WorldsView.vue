@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api, errorMessage } from '@/api/client'
 import type { AdventuresResponse, GmStyle, SceneImageRef, WorldCloneResponse, WorldListResponse, WorldSummary, WorldTemplateSummary, WorldTemplatesResponse } from '@/api/types'
-import { resolveSceneImageUrl, revokeSceneImageUrl, SCENE_IMAGE_ACCEPT, uploadSceneImage } from '@/api/sceneImages'
+import { pickSceneImageReference, resolveSceneImageUrl, revokeSceneImageUrl, SCENE_IMAGE_ACCEPT, uploadSceneImage } from '@/api/sceneImages'
 import { ruleSceneUrl } from '@/composables/useBackgroundImages'
 import { useConfirm } from '@/composables/useConfirm'
 import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/composables/useLocale'
 import { filterByContentLanguage } from '@/utils/contentLanguage'
 import Modal from '@/components/ui/Modal.vue'
+import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
+import WorldDefinitionEditor, { type WorldDefinitionClonePayload } from './WorldDefinitionEditor.vue'
+import WorldMaterialsDialog from './WorldMaterialsDialog.vue'
+import { worldsCopy } from './copy'
 
 type GalleryCard = {
   id: string
@@ -20,6 +24,7 @@ type GalleryCard = {
   lorebookCount: number
   defaultRule: string
   sceneImage?: SceneImageRef
+  sceneImages?: SceneImageRef[]
   gmStyle: GmStyle | null
   adventureName: string
 }
@@ -27,19 +32,26 @@ type GalleryCard = {
 const DEFAULT_STYLE: GmStyle = { tone: '', verbosity: 'normal', pace: 'normal', custom_instructions: '' }
 
 const { locale, t } = useLocale()
+const copy = computed(() => worldsCopy(locale.value))
 const router = useRouter()
+const route = useRoute()
 const toast = useToast()
 const { confirm } = useConfirm()
 
 const cards = ref<GalleryCard[]>([])
+const loadedWorldIds = ref(new Set<string>())
+const materialsTarget = ref<GalleryCard | null>(null)
 const coverUrls = ref<Record<string, string>>({})
 const error = ref('')
 const busy = ref(false)
 const previewCard = ref<GalleryCard | null>(null)
 const styleForm = ref<GmStyle>({ ...DEFAULT_STYLE })
 const styleBusy = ref(false)
+const metadataEdit = ref(false)
 const coverInput = ref<HTMLInputElement | null>(null)
 const coverTargetId = ref('')
+let lastRouteEditRequest = ''
+let previewContextEpoch = 0
 
 // 用户世界的头图：走创建页同一条 /scene-images 上传 + 模板写回路径
 function changeCover(card: GalleryCard) {
@@ -84,6 +96,7 @@ function templateCard(template: WorldTemplateSummary): GalleryCard | null {
     lorebookCount: Number(template.lorebook_count || 0),
     defaultRule: String(template.default_rule || ''),
     sceneImage: template.scene_image,
+    sceneImages: template.scene_images,
     gmStyle: template.gm_style ?? null,
     adventureName: '',
   }
@@ -101,6 +114,7 @@ function worldCard(world: WorldSummary): GalleryCard | null {
     lorebookCount: Number(world.entry_count || 0),
     defaultRule: '',
     gmStyle: world.gm_style ?? null,
+    sceneImages: world.scene_images,
     adventureName: '',
   }
 }
@@ -135,6 +149,16 @@ async function load() {
       merged.push(card)
     }
     cards.value = merged
+    loadedWorldIds.value = new Set((worldData.worlds || []).map(world => String(world.id || world.world_id || '')))
+    const requestedWorld = typeof route.query.world === 'string' ? route.query.world : ''
+    const editRequest = route.query.edit === '1' && requestedWorld ? `${requestedWorld}:edit` : ''
+    if (editRequest && editRequest !== lastRouteEditRequest) {
+      const requestedCard = merged.find(card => card.id === requestedWorld && card.source === 'user')
+      if (requestedCard) {
+        lastRouteEditRequest = editRequest
+        openMetadataEditor(requestedCard)
+      }
+    }
     void loadCovers(merged)
   } catch (cause: unknown) {
     error.value = errorMessage(cause)
@@ -180,7 +204,8 @@ async function loadCovers(list: GalleryCard[]) {
   const next: Record<string, string> = {}
   await Promise.all(list.map(async card => {
     try {
-      next[card.id] = await resolveSceneImageUrl(card.sceneImage, card.defaultRule)
+      const selected = pickSceneImageReference(card.sceneImage, card.sceneImages, `worlds:${card.id}`, false)
+      next[card.id] = await resolveSceneImageUrl(selected, card.defaultRule)
     } catch {
       next[card.id] = ruleSceneUrl(card.defaultRule)
     }
@@ -203,6 +228,20 @@ function useForGame(card: GalleryCard) {
   void router.push({ name: 'create', query: { world: card.id } })
 }
 
+function editMaterials(card: GalleryCard) {
+  if (card.source === 'plugin' || !loadedWorldIds.value.has(card.id)) {
+    closePreview()
+    materialsTarget.value = card
+    return
+  }
+  void router.push({ name: 'lorebook', query: { world: card.id } })
+}
+
+function editCopiedMaterials(worldId: string) {
+  materialsTarget.value = null
+  void router.push({ name: 'lorebook', query: { world: worldId } })
+}
+
 async function cloneWorld(card: GalleryCard) {
   busy.value = true
   try {
@@ -213,6 +252,23 @@ async function cloneWorld(card: GalleryCard) {
     if (!result.ok) throw new Error(result.error || 'clone-failed')
     toast.success(t('worldsCloned'))
     await load()
+    const clonedId = String(result.world_id || '')
+    if (clonedId) {
+      const clonedCard = cards.value.find(candidate => candidate.id === clonedId) || {
+        id: clonedId,
+        name: String(result.name || card.name),
+        description: card.description,
+        language: String(result.language || card.language || locale.value),
+        source: 'user' as const,
+        lorebookCount: card.lorebookCount,
+        defaultRule: card.defaultRule,
+        sceneImage: card.sceneImage,
+        sceneImages: card.sceneImages,
+        gmStyle: null,
+        adventureName: '',
+      }
+      openMetadataEditor(clonedCard)
+    }
   } catch (cause: unknown) {
     toast.error(errorMessage(cause))
   } finally {
@@ -231,7 +287,7 @@ async function deleteWorld(card: GalleryCard) {
     const result = await api<{ ok: boolean; error?: string }>(`/worlds/${encodeURIComponent(card.id)}`, { method: 'DELETE' })
     if (!result.ok) throw new Error(result.error || 'delete-failed')
     toast.success(t('worldsDeleted'))
-    previewCard.value = null
+    closePreview()
     await load()
   } catch (cause: unknown) {
     toast.error(errorMessage(cause))
@@ -239,8 +295,56 @@ async function deleteWorld(card: GalleryCard) {
 }
 
 function openPreview(card: GalleryCard) {
+  previewContextEpoch += 1
   previewCard.value = card
   styleForm.value = { ...(card.gmStyle || DEFAULT_STYLE) }
+  metadataEdit.value = false
+}
+
+function openMetadataEditor(card: GalleryCard) {
+  openPreview(card)
+  metadataEdit.value = true
+}
+
+function closePreview() {
+  previewContextEpoch += 1
+  previewCard.value = null
+  metadataEdit.value = false
+}
+
+async function onDefinitionSaved(payload: { worldId: string }) {
+  const card = previewCard.value
+  if (!card || card.id !== payload.worldId) return
+  closePreview()
+  toast.success(t('worldsUpdated'))
+  await load()
+}
+
+async function onDefinitionCloned(payload: WorldDefinitionClonePayload) {
+  const sourceCard = previewCard.value
+  const contextEpoch = previewContextEpoch
+  if (!sourceCard || sourceCard.id !== payload.sourceWorldId) return
+  busy.value = true
+  try {
+    await load()
+    if (contextEpoch !== previewContextEpoch || previewCard.value?.id !== payload.sourceWorldId) return
+    const clonedCard = cards.value.find(candidate => candidate.id === payload.worldId) || {
+      id: payload.worldId,
+      name: String(payload.name || sourceCard.name),
+      description: sourceCard.description,
+      language: String(payload.language || sourceCard.language || locale.value),
+      source: 'user' as const,
+      lorebookCount: sourceCard.lorebookCount,
+      defaultRule: sourceCard.defaultRule,
+      sceneImage: sourceCard.sceneImage,
+      sceneImages: sourceCard.sceneImages,
+      gmStyle: null,
+      adventureName: '',
+    }
+    openMetadataEditor(clonedCard)
+  } finally {
+    busy.value = false
+  }
 }
 
 async function saveStyle() {
@@ -253,7 +357,7 @@ async function saveStyle() {
     )
     if (!result.ok) throw new Error(result.error || 'save-failed')
     toast.success(t('worldsGmStyleSaved'))
-    previewCard.value = null
+    closePreview()
     await load()
   } catch (cause: unknown) {
     toast.error(errorMessage(cause))
@@ -290,13 +394,12 @@ function coverStyle(card: GalleryCard): Record<string, string> {
 
 <template>
   <section class="view archive-page worlds-page">
-    <header class="view-title archive-hero">
-      <div>
-        <span class="section-kicker">{{ t('worldsKicker') }}</span>
-        <h1>{{ t('navWorlds') }}</h1>
-        <p class="muted">{{ t('worldsIntro') }}</p>
-      </div>
-    </header>
+    <ContentPageHeader
+      class="view-title archive-hero worlds-page-heading"
+      kicker="WORLD ATLAS"
+      :title="t('navWorlds')"
+      :description="copy.intro"
+    />
 
     <p v-if="error" class="notice">{{ error }}</p>
 
@@ -313,7 +416,7 @@ function coverStyle(card: GalleryCard): Record<string, string> {
       </label>
     </div>
     <div class="worlds-grid">
-      <article v-for="card in pagedCards" :key="card.id" class="world-card">
+      <article v-for="card in pagedCards" :key="card.id" class="world-card" :data-world-id="card.id">
         <div class="world-card-cover" :style="coverStyle(card)" />
         <div class="world-card-badges">
           <span class="world-card-badge" :class="`world-card-badge-${card.source}`">{{ sourceLabel(card) }}</span>
@@ -321,12 +424,16 @@ function coverStyle(card: GalleryCard): Record<string, string> {
         </div>
         <div class="world-card-body">
           <h2 :title="card.name">{{ card.name }}</h2>
+          <span class="world-card-purpose">{{ copy.purpose }}</span>
           <p v-if="card.description" class="world-card-desc">{{ card.description }}</p>
           <p class="world-card-meta">
-            {{ languageLabel(card) }} · {{ t('worldsEntryCount', { count: card.lorebookCount }) }}
+            {{ languageLabel(card) }} · {{ copy.materialCount.replace('{count}', String(card.lorebookCount)) }}
           </p>
+          <p class="world-card-material-hint">{{ copy.materialHint }}</p>
           <div class="world-card-actions">
             <button class="primary" :disabled="busy" @click="useForGame(card)">{{ t('worldsActionUse') }}</button>
+            <button class="world-card-lorebook" data-testid="world-edit-lore" :disabled="busy" @click="editMaterials(card)">{{ copy.editMaterials }}</button>
+            <button v-if="card.source === 'user'" data-testid="world-edit" @click="openMetadataEditor(card)">{{ t('worldsActionEdit') }}</button>
             <button @click="openPreview(card)">{{ t('worldsActionPreview') }}</button>
             <button class="world-card-clone" :disabled="busy || card.source === 'user'" @click="cloneWorld(card)">
               {{ t('worldsActionClone') }}
@@ -353,15 +460,33 @@ function coverStyle(card: GalleryCard): Record<string, string> {
       @change="onCoverFilePicked"
     >
 
-    <Modal v-if="previewCard" :title="previewCard.name" @close="previewCard = null">
-      <p v-if="previewCard.description" class="muted">{{ previewCard.description }}</p>
-      <p class="muted">
-        {{ sourceLabel(previewCard) }} · {{ languageLabel(previewCard) }} · {{ t('worldsEntryCount', { count: previewCard.lorebookCount }) }}
-      </p>
+    <WorldMaterialsDialog
+      v-if="materialsTarget"
+      :world-id="materialsTarget.id"
+      :world-name="materialsTarget.name"
+      @close="materialsTarget = null"
+      @created="editCopiedMaterials"
+    />
 
-      <div class="world-style-editor">
+    <Modal v-if="previewCard" :title="previewCard.name" @close="closePreview">
+      <p class="muted">
+        {{ sourceLabel(previewCard) }} · {{ languageLabel(previewCard) }} · {{ copy.materialCount.replace('{count}', String(previewCard.lorebookCount)) }}
+      </p>
+      <WorldDefinitionEditor
+        :world-id="previewCard.id"
+        :mode="metadataEdit ? 'edit' : 'view'"
+        :source="previewCard.source"
+        :initial-name="previewCard.name"
+        :initial-description="previewCard.description"
+        :initial-language="previewCard.language"
+        @saved="onDefinitionSaved"
+        @cloned="onDefinitionCloned"
+        @cancel="closePreview"
+      />
+
+      <div v-if="!metadataEdit" class="world-style-editor">
         <h3>{{ t('worldsGmStyle') }}</h3>
-        <template v-if="canEditStyle">
+        <template v-if="canEditStyle && !metadataEdit">
           <label>
             <span>{{ t('worldsGmStyleTone') }}</span>
             <input v-model="styleForm.tone" type="text" maxlength="120">
@@ -393,11 +518,12 @@ function coverStyle(card: GalleryCard): Record<string, string> {
       </div>
 
       <template #actions>
-        <button @click="previewCard = null">{{ t('close') }}</button>
+        <button @click="closePreview">{{ t('close') }}</button>
+        <button v-if="previewCard && previewCard.source === 'user' && !metadataEdit" @click="openMetadataEditor(previewCard)">{{ t('worldsActionEdit') }}</button>
         <button v-if="previewCard && previewCard.source === 'user'" class="danger" @click="deleteWorld(previewCard)">
           {{ t('worldsActionDelete') }}
         </button>
-        <template v-if="canEditStyle">
+        <template v-if="canEditStyle && !metadataEdit">
           <button @click="resetStyle">{{ t('worldsGmStyleReset') }}</button>
           <button class="primary" :disabled="styleBusy" @click="saveStyle">{{ t('worldsGmStyleSave') }}</button>
         </template>

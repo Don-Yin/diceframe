@@ -359,6 +359,7 @@ class DiceFrameBridgeService:
             str(result.get("gm_uid") or ""),
             players,
             language,
+            str(result.get("bot_surface") or "none"),
         )
         world = str(result.get("world_name") or result.get("game_key") or game_key)
         return localized_text(

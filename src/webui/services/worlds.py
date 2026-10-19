@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import logging
 import re
@@ -15,12 +16,15 @@ from typing import Any
 
 from src.engine.language import DEFAULT_LANGUAGE, localized_text, normalize_language
 from src.content.gm_style import normalize_gm_style
-from src.content.worlds import load_world_template as load_content_world
+from src.content.worlds import (
+    load_world_definition,
+    load_world_template as load_content_world,
+)
 from src.generation import creator
 from src.lorebook.bootstrap import ensure_world_from_template
 from src.template_catalog import is_user_template_file
 from src.webui.services._common import MAX_LOREBOOK_CHARS
-from src.content_modules.projection import ContentProjectionService
+from src.content_modules.projection import ContentProjectionService, entries_for_world
 
 logger = logging.getLogger("trpg")
 
@@ -35,6 +39,12 @@ _LEGACY_GAME_TEMPLATE_SUFFIXES = (
     " (Copied Lorebook)",
     " (Blank Lorebook)",
 )
+_MAX_WORLD_SETTING_CHARS = 16000
+_MAX_STARTER_SCENE_CHARS = 8192
+
+
+def _recovery_digest(value: Any) -> str:
+    return "sha256:" + hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -47,6 +57,38 @@ class WorldDependencies:
     invalidate_lorebook_index: Callable[[str], None] | None
     list_instances: Callable[[], list[Any]]
     content_projection: ContentProjectionService | None = None
+
+
+def authoring_recovery_snapshot(dependencies: WorldDependencies, identity: str) -> dict[str, Any]:
+    """Return a bounded, side-effect-free snapshot for narrative metadata undo."""
+    world_id = str(identity or "").strip()
+    definition = get_world_definition(dependencies, world_id)
+    world = definition.get("world") if isinstance(definition, dict) else None
+    if definition.get("ok") is not True or not isinstance(world, dict) or world.get("source") != "user" or world.get("editable") is not True:
+        raise ValueError("内置或插件世界不可编辑")
+    path = _template_path(dependencies.worlds_dir, world_id, require_canonical=True) if dependencies.worlds_dir else None
+    if path is None or not path.is_file() or not is_user_template_file(path, "worlds"):
+        raise ValueError("无法证明世界模板属于用户且可编辑")
+    try:
+        stat = path.stat()
+        content_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise ValueError("世界模板读取失败") from exc
+    lore = dependencies.lorebook.get_world(world_id)
+    if not isinstance(lore, dict):
+        raise ValueError("世界元数据不存在")
+    fields = {
+        "name": str(world.get("world_name") or ""),
+        "description": str(world.get("description") or ""),
+        "language": str(world.get("language") or DEFAULT_LANGUAGE),
+        "world_setting": str(world.get("world_setting") or ""),
+        "starter_scene": str(world.get("starter_scene") or ""),
+    }
+    return {
+        "target_name": fields["name"],
+        "fields": fields,
+        "version": _recovery_digest({"bytes": content_digest, "mtime_ns": stat.st_mtime_ns, "lore": lore}),
+    }
 
 
 def _user_world_base(name: str) -> str:
@@ -107,7 +149,7 @@ def _user_template_from_lore(
     if not world:
         return None
     description = str(world.get("description") or "")
-    entries = dependencies.lorebook.list_entries(world_id)
+    entries = entries_for_world(dependencies.lorebook, world_id)
     return {
         "world_id": world_id,
         "world_name": str(world.get("name") or world_id),
@@ -152,7 +194,7 @@ def list_worlds(dependencies: WorldDependencies) -> dict[str, Any]:
         entries = (
             dependencies.content_projection.for_world_authoring(w["id"])
             if dependencies.content_projection is not None
-            else dependencies.lorebook.list_entries(w["id"])
+            else entries_for_world(dependencies.lorebook, w["id"])
         )
         w["entry_count"] = len(entries)
         w["gm_style"] = _read_user_template_gm_style(
@@ -161,17 +203,161 @@ def list_worlds(dependencies: WorldDependencies) -> dict[str, Any]:
     return {"worlds": worlds, "total": len(worlds)}
 
 
-def create_world(dependencies: WorldDependencies, name: str, description: str = "",
-                 language: str = DEFAULT_LANGUAGE) -> dict[str, Any]:
-    name = (name or "").strip()
+def _narrative_error(world_setting: str | None, starter_scene: str | None) -> str | None:
+    for value, limit, label in (
+        (world_setting, _MAX_WORLD_SETTING_CHARS, "世界设定"),
+        (starter_scene, _MAX_STARTER_SCENE_CHARS, "开场场景"),
+    ):
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            return f"{label}必须是文本"
+        if len(value) > limit:
+            return f"{label}过长（上限 {limit} 字）"
+    return None
+
+
+def create_world(
+    dependencies: WorldDependencies, name: str, description: str = "",
+    language: str = DEFAULT_LANGUAGE, *,
+    world_setting: str | None = None, starter_scene: str | None = None,
+) -> dict[str, Any]:
+    if not isinstance(name, str):
+        return {"ok": False, "error": "世界书名称必须是文本"}
+    name = name.strip()
     if not name:
         return {"ok": False, "error": "世界书名称不能为空"}
+    if not isinstance(description, str):
+        return {"ok": False, "error": "世界描述必须是文本"}
+    if not isinstance(language, str):
+        return {"ok": False, "error": "世界语言必须是文本"}
+    if error := _narrative_error(world_setting, starter_scene):
+        return {"ok": False, "error": error}
     world_id = _new_user_world_id(dependencies, name)
+    return create_imported_world(
+        dependencies, world_id, name, description, language,
+        world_setting=world_setting, starter_scene=starter_scene,
+    )
+
+
+def update_world(
+    dependencies: WorldDependencies,
+    world_id: str,
+    name: str,
+    description: str = "",
+    language: str = DEFAULT_LANGUAGE,
+    *,
+    world_setting: str | None = None,
+    starter_scene: str | None = None,
+) -> dict[str, Any]:
+    """Update the metadata of a user-owned world without replacing its entries."""
+    if not isinstance(world_id, str):
+        return {"ok": False, "error": "世界 id 不合法"}
+    world_id = str(world_id or "").strip()
+    if not _WORLD_TEMPLATE_ID_RE.fullmatch(world_id):
+        return {"ok": False, "error": "世界 id 不合法"}
+    world = dependencies.lorebook.get_world(world_id)
+    if not world:
+        return {"ok": False, "error": "世界不存在"}
+    if not isinstance(name, str):
+        return {"ok": False, "error": "世界书名称必须是文本"}
+    name = name.strip()
+    if not name:
+        return {"ok": False, "error": "世界书名称不能为空"}
+    if not isinstance(description, str):
+        return {"ok": False, "error": "世界描述必须是文本"}
+    if not isinstance(language, str):
+        return {"ok": False, "error": "世界语言必须是文本"}
+    if error := _narrative_error(world_setting, starter_scene):
+        return {"ok": False, "error": error}
+    worlds_dir = dependencies.worlds_dir
+    if not worlds_dir:
+        return {"ok": False, "error": "世界模板目录未配置"}
+    try:
+        path = _ensure_user_world_template(dependencies, world_id)
+    except OSError:
+        logger.exception("物化自建世界模板失败: %s", world_id)
+        return {"ok": False, "error": "世界模板创建失败"}
+    if path is None or not path.is_file() or not is_user_template_file(path, "worlds"):
+        return {"ok": False, "error": "内置或插件世界不可修改，请先克隆为我的世界"}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"ok": False, "error": "世界模板读取失败"}
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "世界模板格式不正确"}
+    original_data = copy.deepcopy(data)
+    description = description.strip()
+    language = normalize_language(language or str(world.get("language") or DEFAULT_LANGUAGE))
+    data["world_name"] = name
+    data["description"] = description
+    if world_setting is not None:
+        data["world_setting"] = world_setting
+    if starter_scene is not None:
+        data["starter_scene"] = starter_scene
+    data["language"] = language
+    update_metadata = getattr(dependencies.lorebook, "update_world_metadata", None)
+    if not callable(update_metadata):
+        return {"ok": False, "error": "世界存储不支持编辑"}
+    original_world = copy.deepcopy(world)
+    try:
+        _write_json_atomic(path, data)
+        update_metadata(world_id, name=name, description=description, language=language)
+    except Exception:
+        # Keep the file and Lorebook metadata aligned if either side rejects the
+        # update.  The template is already parsed, so restoration is bounded to
+        # this one user-owned file and cannot touch source templates.
+        try:
+            _write_json_atomic(path, original_data)
+        except OSError:
+            logger.exception("回滚世界模板失败: %s", world_id)
+        try:
+            update_metadata(
+                world_id,
+                name=str(original_world.get("name") or original_world.get("world_name") or ""),
+                description=str(original_world.get("description") or ""),
+                language=str(original_world.get("language") or DEFAULT_LANGUAGE),
+            )
+        except Exception:
+            logger.exception("回滚世界元数据失败: %s", world_id)
+        logger.exception("保存世界模板失败: %s", world_id)
+        return {"ok": False, "error": "世界模板保存失败"}
+    return {"ok": True, "world_id": world_id, "name": name, "description": description, "language": language}
+
+
+def create_imported_world(dependencies: WorldDependencies, world_id: str, name: str,
+                          description: str = "", language: str = DEFAULT_LANGUAGE,
+                          provenance: dict[str, Any] | None = None, *,
+                          world_setting: str | None = None,
+                          starter_scene: str | None = None) -> dict[str, Any]:
+    """Create a reviewed user world at a stable identity; never overwrite."""
+    if not _WORLD_TEMPLATE_ID_RE.fullmatch(world_id) or not world_id.startswith("custom_book_"):
+        raise ValueError("imported world requires a canonical user identity")
+    if not str(name).strip():
+        raise ValueError("world name is required")
+    if dependencies.lorebook.get_world(world_id) is not None or (
+        dependencies.worlds_dir and (dependencies.worlds_dir / f"{world_id}.json").exists()
+    ):
+        raise ValueError("world target already exists")
+    if provenance is not None and not isinstance(provenance, dict):
+        raise ValueError("world import provenance must be an object")
+    if error := _narrative_error(world_setting, starter_scene):
+        raise ValueError(error)
     language = normalize_language(language)
     dependencies.lorebook.create_world(
         world_id, name, description=description or "", language=language,
     )
     try:
+        if dependencies.worlds_dir and any(value is not None for value in (provenance, world_setting, starter_scene)):
+            template = _user_template_from_lore(dependencies, world_id)
+            if template is not None:
+                if provenance is not None:
+                    template["import_source"] = copy.deepcopy(provenance)
+                if world_setting is not None:
+                    template["world_setting"] = world_setting
+                if starter_scene is not None:
+                    template["starter_scene"] = starter_scene
+                _write_json_atomic(dependencies.worlds_dir / f"{world_id}.json", template)
         if _ensure_user_world_template(dependencies, world_id) is None:
             dependencies.lorebook.delete_world(world_id)
             return {"ok": False, "error": "自建世界模板创建失败"}
@@ -180,6 +366,66 @@ def create_world(dependencies: WorldDependencies, name: str, description: str = 
         logger.exception("创建自建世界模板失败: %s", world_id)
         return {"ok": False, "error": "自建世界模板创建失败"}
     return {"ok": True, "world_id": world_id, "name": name, "language": language}
+
+
+def review_world_fork(dependencies: WorldDependencies, payload: dict[str, Any], world_id: str) -> dict[str, Any]:
+    """Prepare a native world and its separate Book at a new user identity."""
+    from src.content.worlds import world_definition_draft
+    from src.lorebook.importer import draft_lorebook_import
+    if not _WORLD_TEMPLATE_ID_RE.fullmatch(world_id) or not world_id.startswith("custom_book_"):
+        raise ValueError("world fork requires a canonical user identity")
+    if dependencies.worlds_dir is None:
+        raise ValueError("user world directory is unavailable")
+    if dependencies.lorebook.get_world(world_id) or (dependencies.worlds_dir / f"{world_id}.json").exists():
+        raise ValueError("world target already exists")
+    definition = copy.deepcopy(payload.get("definition"))
+    if not isinstance(definition, dict):
+        raise ValueError("world definition must be an object")
+    version = int(definition.get("world_schema_version", 1))
+    if version not in {1, 2, 3}:
+        raise ValueError("unsupported world definition schema")
+    if version == 3:
+        world_definition_draft(definition)
+    name = str(definition.get("world_name") or definition.get("name") or "").strip()
+    if not name:
+        raise ValueError("world name is required")
+    book_payload = payload.get("book")
+    if not isinstance(book_payload, dict):
+        raise ValueError("world fork requires a reviewed primary Book")
+    book = draft_lorebook_import(book_payload)
+    # User-world files still use the owner's legacy read projection. The DB
+    # primary Book owns entries; the mirror is derived only after the DB write.
+    template = {key: value for key, value in definition.items()
+                if not key.startswith("_") and key not in {"primary_lorebook_ref", "starter_lorebook", "source_plugin", "plugin_id", "readonly"}}
+    template.update({"world_schema_version": 2, "world_id": world_id, "world_name": name,
+                     "custom": True, "language": normalize_language(definition.get("language"))})
+    return {"template": template, "book": book}
+
+
+def create_world_fork(dependencies: WorldDependencies, payload: dict[str, Any], world_id: str) -> dict[str, Any]:
+    """Create-only native World/Book transaction; never bootstrap over user data."""
+    from src.lorebook.importer import commit_lorebook_import
+    checked = review_world_fork(dependencies, payload, world_id)
+    template, book = checked["template"], checked["book"]
+    if dependencies.worlds_dir is None:
+        raise ValueError("user world directory is unavailable")
+    path = dependencies.worlds_dir / f"{world_id}.json"
+    wrote_file = False
+    try:
+        with dependencies.lorebook.transaction():
+            dependencies.lorebook.create_world(world_id, template["world_name"],
+                description=str(template.get("description") or ""), language=template["language"])
+            book_id = dependencies.lorebook.primary_world_book_id(world_id)
+            book.source.update({"kind": "user", "source_id": world_id, "external_id": book_id})
+            commit_lorebook_import(dependencies.lorebook, book, {"scope_kind": "world", "scope_id": world_id}, book_id=book_id)
+            template["starter_lorebook"] = entries_for_world(dependencies.lorebook, world_id)
+            _write_json_atomic(path, template)
+            wrote_file = True
+    except BaseException:
+        if wrote_file:
+            path.unlink(missing_ok=True)
+        raise
+    return {"ok": True, "world_id": world_id, "name": template["world_name"], "language": template["language"]}
 
 
 def clone_world_from_template(
@@ -310,6 +556,9 @@ def set_user_world_scene_image(
     if not isinstance(data, dict):
         return {"ok": False, "error": "世界模板格式不正确"}
     data["scene_image"] = scene_image
+    # An explicit user choice pins the world cover; remove an automatically
+    # generated pool so future saves do not silently override that choice.
+    data.pop("scene_images", None)
     _write_json_atomic(path, data)
     return {"ok": True, "scene_image": scene_image}
 
@@ -368,6 +617,93 @@ def _load_clone_source(
     return None
 
 
+def get_world_definition(
+    dependencies: WorldDependencies,
+    world_id: str,
+    language: str = "",
+) -> dict[str, Any]:
+    """Return the bounded, owner-only World definition projection.
+
+    The projection deliberately excludes lore entries and all template-private
+    fields.  User files are read as authored (canonical) content; bundled and
+    plugin templates may receive a read-only locale overlay.  This function
+    never materializes a legacy user template or writes any storage.
+    """
+    world_id = str(world_id or "").strip()
+    if not _WORLD_TEMPLATE_ID_RE.fullmatch(world_id):
+        return {"ok": False, "error": "世界 id 不合法"}
+    requested_language = normalize_language(language) if language else ""
+    worlds_dir = dependencies.worlds_dir
+    data: dict[str, Any] | None = None
+    source = "builtin"
+
+    if worlds_dir:
+        path = _template_path(worlds_dir, world_id, require_canonical=True)
+        if path is None:
+            return {"ok": False, "error": "世界 id 不合法"}
+        if path.is_file():
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return {"ok": False, "error": "世界模板读取失败"}
+            if not isinstance(raw, dict):
+                return {"ok": False, "error": "世界模板格式不正确"}
+            if is_user_template_file(path, "worlds"):
+                data = raw
+                source = "user"
+            else:
+                # load_world_definition applies only the typed locale display
+                # overlay and keeps mechanics / identity canonical.
+                try:
+                    data = load_world_definition(
+                        worlds_dir, world_id, requested_language,
+                    ) or raw
+                except (OSError, ValueError):
+                    data = raw
+
+    if data is None and dependencies.plugin_host:
+        for item in dependencies.plugin_host.contributions.list("world_template"):
+            if item.path.stem != world_id:
+                continue
+            try:
+                candidate = dependencies.plugin_host.load_world_template(
+                    item.key, requested_language,
+                ) or {}
+            except Exception:
+                logger.warning("插件世界模板读取失败: %s", item.path, exc_info=True)
+                return {"ok": False, "error": "世界模板读取失败"}
+            if isinstance(candidate, dict) and candidate:
+                data = candidate
+                source = "plugin"
+            break
+
+    if data is None and world_id.startswith(("custom_", "ai_")):
+        # Legacy lore-only worlds remain viewable, but GET must not call the
+        # materializing helper because reads are required to be side-effect free.
+        data = _user_template_from_lore(dependencies, world_id)
+        if data is not None:
+            source = "user"
+    if data is None:
+        return {"ok": False, "error": "世界不存在"}
+
+    effective_language = str(
+        data.get("active_locale") or data.get("language") or requested_language or DEFAULT_LANGUAGE,
+    )
+    return {
+        "ok": True,
+        "world": {
+            "world_id": str(data.get("world_id") or world_id),
+            "world_name": str(data.get("world_name") or data.get("name") or world_id),
+            "description": str(data.get("description") or ""),
+            "world_setting": str(data.get("world_setting") or ""),
+            "starter_scene": str(data.get("starter_scene") or ""),
+            "language": effective_language,
+            "source": source,
+            "editable": source == "user",
+        },
+    }
+
+
 def list_entries(
     dependencies: WorldDependencies,
     world_id: str,
@@ -378,7 +714,7 @@ def list_entries(
             world_id, entry_type=entry_type,
         )
     else:
-        entries = dependencies.lorebook.list_entries(world_id, entry_type)
+        entries = entries_for_world(dependencies.lorebook, world_id, entry_type)
     return {"entries": entries, "total": len(entries)}
 
 
@@ -438,7 +774,7 @@ def import_entries(
     if len(entries) > MAX_LOREBOOK_IMPORT_ENTRIES:
         return {"ok": False, "error": f"单次导入条目过多（上限 {MAX_LOREBOOK_IMPORT_ENTRIES} 条）"}
     existing_ids = {
-        str(e.get("id")) for e in dependencies.lorebook.list_entries(world_id)
+        str(e.get("id")) for e in entries_for_world(dependencies.lorebook, world_id)
     }
     imported = 0
     failures: list[dict[str, Any]] = []
@@ -502,7 +838,7 @@ def _prepare_entry(
     if not str(entry.get("id") or "").strip():
         if existing_ids is None:
             existing_ids = {
-                str(e.get("id")) for e in dependencies.lorebook.list_entries(world_id)
+                str(e.get("id")) for e in entries_for_world(dependencies.lorebook, world_id)
             }
         entry["id"] = _entry_id_from_name(world_id, name, existing_ids, 0)
     return entry, ""
@@ -560,7 +896,8 @@ def _normalize_generated_entry(raw: dict, world_id: str, existing_ids: set[str],
 
 
 async def generate_lorebook_entries(dependencies: WorldDependencies, world_id: str, prompt: str,
-                                    language: str = DEFAULT_LANGUAGE) -> dict[str, Any]:
+                                    language: str = DEFAULT_LANGUAGE, book_id: str = "",
+                                    game_key: str = "") -> dict[str, Any]:
     prompt = (prompt or "").strip()
     if not prompt:
         return {"ok": False, "error": "请输入要生成的世界书设定"}
@@ -571,7 +908,45 @@ async def generate_lorebook_entries(dependencies: WorldDependencies, world_id: s
         return {"ok": False, "error": "世界书不存在"}
     language = normalize_language(language or world.get("language", DEFAULT_LANGUAGE))
 
-    existing_entries = dependencies.lorebook.list_entries(world_id)
+    target_book_id = str(book_id or dependencies.lorebook.primary_world_book_id(world_id))
+    target_book = dependencies.lorebook.get_lorebook(target_book_id)
+    if target_book is None:
+        return {"ok": False, "error": "lorebook target does not exist"}
+    bindings = [
+        binding for binding in dependencies.lorebook.list_bindings()
+        if str(binding.get("book_id") or "") == target_book_id
+    ]
+    if bindings:
+        allowed = False
+        game_players: set[str] = set()
+        active_game = None
+        if game_key:
+            for instance in dependencies.list_instances():
+                raw_game_key = getattr(instance, "game_key", ())
+                instance_key = raw_game_key if isinstance(raw_game_key, str) else "|".join(
+                    str(part) for part in raw_game_key
+                )
+                if instance_key == game_key:
+                    active_game = instance
+                    game_players = {str(uid) for uid in (getattr(instance, "players", {}) or {})}
+                    break
+        game_in_world = active_game is not None and str(getattr(active_game, "world_id", "") or "") == world_id
+        for binding in bindings:
+            kind = str(binding.get("scope_kind") or "")
+            scope_id = str(binding.get("scope_id") or "")
+            if kind == "global" or (kind == "world" and scope_id == world_id):
+                allowed = True
+                break
+            if kind == "game" and game_in_world and scope_id == game_key:
+                allowed = True
+                break
+            if kind == "character" and game_in_world and scope_id in game_players:
+                allowed = True
+                break
+        if not allowed:
+            return {"ok": False, "error": "lorebook target is outside the current world/game scope"}
+
+    existing_entries = dependencies.lorebook.list_book_entries(target_book_id)
     raw_entries = await creator.generate_lorebook_entries(
         dependencies.llm_client,
         prompt,
@@ -589,7 +964,12 @@ async def generate_lorebook_entries(dependencies: WorldDependencies, world_id: s
         entry = _normalize_generated_entry(raw, world_id, existing_ids, index)
         if not entry:
             continue
-        dependencies.lorebook.add_entry(entry)
+        entry["book_id"] = target_book_id
+        add_book_entry = getattr(dependencies.lorebook, "add_book_entry", None)
+        if callable(add_book_entry):
+            add_book_entry(target_book_id, entry)
+        else:
+            dependencies.lorebook.add_entry(entry)
         saved.append(entry)
     if not saved:
         return {"ok": False, "error": "AI 没有生成可保存的条目，请补充更具体的设定"}
@@ -686,7 +1066,7 @@ def _sync_user_template_lorebook(
         return
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        entries = dependencies.lorebook.list_entries(world_id)
+        entries = entries_for_world(dependencies.lorebook, world_id)
         data["starter_lorebook"] = [
             _entry_to_template_entry(e) for e in entries if isinstance(e, dict)
         ]
@@ -811,6 +1191,7 @@ def _world_template_summary(data: dict[str, Any], fallback_id: str, source: str 
         "default_rule": data.get("default_rule", "freeform_fantasy"),
         "recommended_rules": _recommended_rules(data),
         "scene_image": data.get("scene_image"),
+        "scene_images": data.get("scene_images") if isinstance(data.get("scene_images"), list) else [],
         "lorebook_count": len(data.get("starter_lorebook", [])),
         "source": source,
         "game_scoped": _is_game_scoped_template(data, str(world_id)),

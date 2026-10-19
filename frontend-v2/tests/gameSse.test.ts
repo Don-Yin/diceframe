@@ -23,4 +23,9 @@ describe('game SSE reconnect state', () => {
     expect(gameSseEffect({ type: 'narration_delta', text: 'new' })).toBe('narration-delta')
     expect(gameSseEffect({ type: 'narration_reset' })).toBe('narration-reset')
   })
+
+  it('keeps story snapshots local and clears both live render buffers on reset', () => {
+    expect(gameSseEffect({ type: 'story_update', story: { version: 1, segments: [] } })).toBe('story-update')
+    expect(gameSseEffect({ type: 'narration_reset' })).toBe('narration-reset')
+  })
 })

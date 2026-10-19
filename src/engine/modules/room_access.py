@@ -340,6 +340,17 @@ def prune_seat_credentials(instance: Any) -> list[str]:
     return departed
 
 
+def seat_credential_hash(instance: Any, uid: str) -> str:
+    """The stored digest of a seat's current credential ('' if it has none).
+
+    Rotation and removal both change it, so a holder can later confirm the
+    credential it was granted under is still the live one.
+    """
+    record = get_module_state(instance, MODULE_NAME)["seat_credentials"].get(str(uid or ""))
+    stored = record.get("hash") if isinstance(record, dict) else None
+    return stored if isinstance(stored, str) else ""
+
+
 def has_seat_token(instance: Any, uid: str) -> bool:
     return str(uid or "") in get_module_state(instance, MODULE_NAME)["seat_credentials"]
 
@@ -385,7 +396,7 @@ _SCRUBBED_SLOT_VALUES: dict[str, Any] = {
 _SCRUBBED_LEGACY_VALUES: dict[str, Any] = {"bot_bind_token": "", "room_password": "", "room_token": ""}
 
 
-def scrub_access_credentials(payload: Any) -> bool:
+def scrub_access_credentials(payload: Any, *, close_entrance: bool = False) -> bool:
     """Strip every stored access credential from a raw save payload, in place.
 
     Used on export and again on import: the room password (hash or legacy
@@ -406,13 +417,13 @@ def scrub_access_credentials(payload: Any) -> bool:
         for key, empty in _SCRUBBED_SLOT_VALUES.items():
             if key in slot:
                 slot[key] = copy.deepcopy(empty)
-        if slot_password:
+        if slot_password or close_entrance:
             slot["player_access_open"] = False
     legacy_password = bool(payload.get("room_password"))
     for key, empty in _SCRUBBED_LEGACY_VALUES.items():
         if key in payload:
             payload[key] = empty
-    if legacy_password:
+    if legacy_password or close_entrance:
         payload["player_access_open"] = False
     return slot_password or legacy_password
 

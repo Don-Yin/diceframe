@@ -36,6 +36,36 @@ class ContentProjection(Protocol):
     ) -> dict[str, Any]: ...
 
 
+def entries_for_world(
+    store: Any,
+    world_id: str,
+    entry_type: str | None = None,
+) -> list[dict[str, Any]]:
+    """Read world content through its canonical primary Book.
+
+    The legacy ``list_entries`` lookup is kept only inside this explicit
+    adapter for old integrations and pre-Book test stores.  Business modules
+    must call this boundary rather than reading World-owned entries directly.
+    """
+
+    world = str(world_id or "")
+    primary = getattr(store, "primary_world_book_id", None)
+    list_book = getattr(store, "list_book_entries", None)
+    if callable(primary) and callable(list_book):
+        book_id = str(primary(world) or "")
+        if not book_id:
+            return []
+        return list(list_book(book_id, entry_type))
+    legacy = getattr(store, "list_entries", None)
+    if callable(legacy):
+        try:
+            return list(legacy(world, entry_type))
+        except TypeError:
+            # Older adapters expose only ``list_entries(world_id)``.
+            return list(legacy(world))
+    return []
+
+
 class ContentProjectionService:
     """Canonical read-side projection over Book/Binding ownership.
 
@@ -224,4 +254,4 @@ class ContentProjectionService:
         return self.for_party(instance, entry_type=entry_type)
 
 
-__all__ = ["ContentProjection", "ContentProjectionService"]
+__all__ = ["ContentProjection", "ContentProjectionService", "entries_for_world"]

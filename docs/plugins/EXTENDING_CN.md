@@ -14,8 +14,11 @@
 6. 打包前运行：
 
 ```bash
+python scripts/validate_content_module.py path/to/plugin --json
 python scripts/package_plugin.py path/to/plugin
 ```
+
+冒险仍使用 `content-pack` 分发，声明 `content_profile: "adventure-module"`、`content_delivery_mode: "catalog"` 和 `adventure_packages`。Catalog 模式拒绝 `entrypoint`，只登记供主动使用的数据，不启动程序或灌入所有游戏。缺省 delivery 字段的旧包保留既有行为；旧执行包仍按进程风险处理。深度验证器检查声明的冒险/目录与 runtime 要求，打包成功本身不代表游玩兼容。
 
 这条路径不需要修改 `PluginHost`。
 

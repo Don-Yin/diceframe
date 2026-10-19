@@ -6,6 +6,7 @@ import type { GameDetail, GameLogResponse, HealthResponse, LogEntry, LorebookRes
 import { clearCurrentGame, readCurrentGame } from '@/stores/gameContext'
 import { parseGMText, type LoreKeywords } from '@/utils/renderer'
 import { useLocale } from '@/composables/useLocale'
+import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
 
 interface LogViewData extends GameLogResponse { _lore?: LoreKeywords }
 interface LogAction { uid: string; text: string }
@@ -24,6 +25,12 @@ const page = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
 const expandedRounds = ref<Set<number>>(new Set())
+let loadSequence = 0
+const loadedProjectionKey = ref('')
+
+function projectionKey(gameKey: string, pageNumber: number, size: number): string {
+  return `${gameKey}\u0000${pageNumber}\u0000${size}`
+}
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {}
@@ -39,16 +46,29 @@ function buildLore(entries: LoreEntry[] = []): LoreKeywords {
 }
 
 async function load() {
-  error.value = ''; data.value = { log: [] }; gameDetail.value = null; healthData.value = null; privateMsgs.value = []; total.value = 0
+  // Keep the last successful projection visible while a refresh is in flight;
+  // a transient failure must not make the current game's log disappear.
+  error.value = ''
   if (!game.value) return
+  const requestedGame = game.value
+  const requestedProjectionKey = projectionKey(requestedGame, page.value, pageSize.value)
+  if (loadedProjectionKey.value !== requestedProjectionKey) {
+    data.value = { log: [] }
+    gameDetail.value = null
+    healthData.value = null
+    privateMsgs.value = []
+    total.value = 0
+  }
+  const requestSequence = ++loadSequence
   try {
     const logParams = new URLSearchParams({ page: String(page.value), per_page: String(pageSize.value) })
     const [detail, log, health, priv] = await Promise.all([
-      api<GameDetail>(`/games/${encodeURIComponent(game.value)}`),
-      api<GameLogResponse>(`/games/${encodeURIComponent(game.value)}/log?${logParams}`),
-      api<HealthWithStatus>(`/games/${encodeURIComponent(game.value)}/health?include_resolved=true`),
-      api<PrivateLogResponse>(`/games/${encodeURIComponent(game.value)}/private-log`),
+      api<GameDetail>(`/games/${encodeURIComponent(requestedGame)}`),
+      api<GameLogResponse>(`/games/${encodeURIComponent(requestedGame)}/log?${logParams}`),
+      api<HealthWithStatus>(`/games/${encodeURIComponent(requestedGame)}/health?include_resolved=true`),
+      api<PrivateLogResponse>(`/games/${encodeURIComponent(requestedGame)}/private-log`),
     ])
+    if (game.value !== requestedGame || requestSequence !== loadSequence) return
     gameDetail.value = detail
     healthData.value = health
     privateMsgs.value = priv.messages || priv.private_log || []
@@ -60,11 +80,15 @@ async function load() {
         lore = buildLore(lb.entries || [])
       } catch { lore = undefined }
     }
+    if (game.value !== requestedGame || requestSequence !== loadSequence) return
     data.value = { ...log, _lore: lore }
+    loadedProjectionKey.value = requestedProjectionKey
   } catch (e: unknown) {
-    if (isNotFoundError(e)) {
-      clearCurrentGame(game.value)
+    if (game.value !== requestedGame || requestSequence !== loadSequence) return
+    if (isNotFoundError(e) && game.value === requestedGame) {
+      clearCurrentGame(requestedGame)
       game.value = ''
+      loadedProjectionKey.value = ''
       return
     }
     error.value = errorMessage(e)
@@ -159,7 +183,10 @@ function exportLog() {
 
 <template>
   <section class="view archive-page logs-page reference-logs-page">
-    <p v-if="error" class="error-banner">{{ error }}</p>
+    <div v-if="error" class="error-banner logs-error" role="alert">
+      <span>{{ error }}</span>
+      <button type="button" class="ghost" @click="load">{{ t('retry') }}</button>
+    </div>
 
     <main v-if="!game" class="empty empty-game">
       <section>
@@ -191,18 +218,14 @@ function exportLog() {
       </aside>
 
       <main class="logs-document">
-    <header class="view-title archive-hero logs-document-head">
-      <div>
-        <span class="section-kicker">CAMPAIGN ARCHIVE</span>
-        <h1>{{ t('gameLogs') }}</h1>
-        <p v-if="game">{{ gameDetail?.world_name || game }} · {{ gameDetail?.scene || t('notStarted') }}</p>
-        <p v-else class="muted">{{ t('noAdventureLogsHint') }}</p>
-      </div>
-      <div class="actions">
-        <button @click="load">{{ t('refresh') }}</button>
-        <button class="log-mobile-export" :disabled="!game" @click="exportLog">{{ t('export') }}</button>
-      </div>
-    </header>
+    <ContentPageHeader class="view-title archive-hero logs-document-head" kicker="ACTIVITY LOG" :title="t('gameLogs')" :description="game ? `${gameDetail?.world_name || game} · ${gameDetail?.scene || t('notStarted')}` : t('noAdventureLogsHint')">
+      <template #actions>
+        <div class="actions">
+          <button @click="load">{{ t('refresh') }}</button>
+          <button class="log-mobile-export" :disabled="!game" @click="exportLog">{{ t('export') }}</button>
+        </div>
+      </template>
+    </ContentPageHeader>
     <nav class="mode-tabs log-mobile-tabs">
       <button type="button" :class="{ active: tab === 'log' }" @click="tab = 'log'">{{ t('dialogueLog') }}</button>
       <button type="button" :class="{ active: tab === 'proclog' }" @click="tab = 'proclog'">{{ t('processingLog') }}</button>
@@ -284,3 +307,8 @@ function exportLog() {
     </div>
   </section>
 </template>
+
+<style scoped>
+.logs-document-head { padding-top: 10px !important; padding-bottom: 8px !important; }
+.logs-document-head :deep(h1) { font-size: 28px; }
+</style>

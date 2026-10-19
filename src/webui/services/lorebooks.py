@@ -7,11 +7,13 @@ Must not import sibling services; cross-service behaviour arrives injected.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from src.content_modules.projection import ContentProjection
+from src.content_modules.refs import ContentRef, ContentRefError, parse_content_ref
+from src.engine.world.contracts import SOURCE_REF_KINDS
 from src.lorebook.activation import DEFAULT_VECTOR_ACTIVATION
 from src.lorebook.exporter import export_lorebook_native, export_lorebook_v3
 from src.lorebook.store import LorebookIdentityConflict
@@ -60,7 +62,13 @@ class LorebookRowProjection:
 _LOREBOOK_ROW_PROJECTION: ContentProjection = LorebookRowProjection()
 
 
-def list_lorebooks(deps: LorebookDependencies, world_id: str = "", game_key: str = "") -> dict[str, Any]:
+def list_lorebooks(
+    deps: LorebookDependencies,
+    world_id: str = "",
+    game_key: str = "",
+    *,
+    include_all: bool = False,
+) -> dict[str, Any]:
     """List canonical books visible in a world-management scope.
 
     Each row carries the binding-derived ``scope`` / ``primary`` facts the
@@ -72,9 +80,19 @@ def list_lorebooks(deps: LorebookDependencies, world_id: str = "", game_key: str
     bindings_by_book: dict[str, list[dict[str, Any]]] = {}
     for binding in deps.lorebook.list_bindings():
         bindings_by_book.setdefault(str(binding.get("book_id") or ""), []).append(binding)
-    books = deps.lorebook.list_lorebooks(scope_kind="world", scope_id=world_id) if world_id else []
-    global_books = deps.lorebook.list_lorebooks(scope_kind="global", scope_id="")
-    game_books = _game_scoped_lorebooks(deps, game_key) if game_key else []
+    # The management endpoint keeps its historical world/game/global scope by
+    # default.  The content hub and package exporter need an explicit catalogue
+    # view so a world-bound book is not silently omitted when no world is
+    # selected.  Keeping the switch explicit avoids changing create-game
+    # binding semantics for existing callers.
+    if include_all:
+        scoped_books = deps.lorebook.list_lorebooks()
+    else:
+        scoped_books = [
+            *(deps.lorebook.list_lorebooks(scope_kind="world", scope_id=world_id) if world_id else []),
+            *deps.lorebook.list_lorebooks(scope_kind="global", scope_id=""),
+            *(_game_scoped_lorebooks(deps, game_key) if game_key else []),
+        ]
     # 完全没有 binding 的 Book 也必须可见：否则「新建世界书」和「暂不绑定」导入
     # 都会产出一本谁也管不到的隐形书，用户再也无法给它加绑定。
     unbound = [
@@ -83,14 +101,46 @@ def list_lorebooks(deps: LorebookDependencies, world_id: str = "", game_key: str
     ]
     seen: set[str] = set()
     merged = []
-    for book in [*books, *global_books, *game_books, *unbound]:
+    for book in [*scoped_books, *unbound]:
         book_id = str(book.get("id") or "")
         if not book_id or book_id in seen:
             continue
         seen.add(book_id)
         bindings = bindings_by_book.get(book_id, [])
-        merged.append(_LOREBOOK_ROW_PROJECTION.project(book, context={"bindings": bindings}))
+        row = _LOREBOOK_ROW_PROJECTION.project(book, context={"bindings": bindings})
+        row["entry_count"] = len(deps.lorebook.list_book_entries(book_id))
+        ref = _book_content_ref(book, bindings)
+        if ref is not None:
+            row["ref"] = ref
+        merged.append(row)
     return {"books": merged}
+
+
+def _book_content_ref(book: Mapping[str, Any], bindings: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    """Expose canonical provenance for create-game bindings.
+
+    Legacy native books have no portable source identity.  The server adapts
+    those rows at this read boundary using their owning scope, while refusing
+    to invent a ref when neither a scope nor a stable book id exists.
+    """
+    book_id = str(book.get("id") or "").strip()
+    kind = str(book.get("source_kind") or "").strip().lower()
+    source_id = str(book.get("source_id") or "").strip()
+    if kind == "native" or kind not in SOURCE_REF_KINDS:
+        world_binding = next((b for b in bindings if str(b.get("scope_kind") or "") == "world" and str(b.get("scope_id") or "")), None)
+        if world_binding:
+            kind, source_id = "world", str(world_binding.get("scope_id") or "")
+        elif book_id:
+            kind, source_id = "user", book_id
+    if not kind or not source_id or not book_id:
+        return None
+    try:
+        return parse_content_ref({
+            "source_kind": kind, "source_id": source_id, "kind": "lorebook", "id": book_id,
+            "digest": str(book.get("source_digest") or ""),
+        }, default_source="").to_dict()
+    except (ContentRefError, ValueError, TypeError):
+        return None
 
 def _game_scoped_lorebooks(deps: LorebookDependencies, game_key: str) -> list[dict[str, Any]]:
     """Books bound to this game, or to one of its characters.
@@ -307,7 +357,7 @@ def _legacy_existing_refs(deps: LorebookDependencies) -> list[Any]:
                 source_kind=source_kind,
                 source_id=source_id,
                 kind="lorebook",
-                id=source_id,
+                id=str(((book.get("settings") or {}).get("diceframe_import") or {}).get("external_id") or source_id),
                 explicit=True,
                 digest=str(book.get("source_digest") or ""),
             ))
@@ -378,10 +428,48 @@ def _binding_error(binding: Any) -> dict[str, Any] | None:
     return None
 
 
-def commit_lorebook_import(deps: LorebookDependencies, payload: dict[str, Any], binding: dict[str, Any] | None = None, book_id: str | None = None) -> dict[str, Any]:
+def commit_lorebook_import(
+    deps: LorebookDependencies,
+    payload: dict[str, Any],
+    binding: dict[str, Any] | None = None,
+    book_id: str | None = None,
+    plan_digest: str = "",
+    duplicate_policy: str = "update",
+) -> dict[str, Any]:
     from src.lorebook.importer import commit_lorebook_import, draft_lorebook_import
 
     draft = draft_lorebook_import(payload)
+    preview_payload = dict(payload)
+    if duplicate_policy not in {"update", "duplicate", "skip"}:
+        return {"ok": False, "error": "invalid duplicate policy"}
+    # Changing the explicit conflict choice is part of confirmation. Fence the
+    # content and catalog against the originally reviewed plan first.
+    current = preview_lorebook_import(deps, preview_payload)
+    if (current.get("commit_plan") or {}).get("unresolved_references"):
+        return {"ok": False, "code": "IMPORT_UNRESOLVED_REFERENCES", "error": "Import has unresolved content references"}
+    if plan_digest:
+        if str(current.get("plan_digest") or "") != str(plan_digest):
+            return {"ok": False, "code": "IMPORT_PLAN_STALE", "error": "导入预览已过期，请重新预览"}
+    operations = (current.get("commit_plan") or {}).get("operations") or []
+    matched = [row for row in operations if isinstance(row, dict) and row.get("existing_ref")]
+    if matched and duplicate_policy == "skip":
+        return {"ok": True, "skipped": True, "entries": 0, "warnings": list(draft.warnings)}
+    if duplicate_policy == "duplicate":
+        if book_id:
+            return {"ok": False, "error": "duplicate requires a new book target"}
+        import uuid
+        book_id = f"import:copy:{uuid.uuid4().hex}"
+    elif matched and not book_id:
+        ref = matched[0]["existing_ref"]
+        candidates = []
+        for book in deps.lorebook.list_lorebooks():
+            external = str(((book.get("settings") or {}).get("diceframe_import") or {}).get("external_id") or book.get("source_id") or "")
+            if (book.get("source_kind"), book.get("source_id"), external) == (ref["source_kind"], ref["source_id"], ref["id"]):
+                candidates.append(str(book["id"]))
+        if len(candidates) > 1:
+            return {"ok": False, "error": "multiple matching books; select an explicit existing target"}
+        if candidates:
+            book_id = candidates[0]
     # Validate the requested binding before any canonical write so a bad
     # scope cannot leave a half-imported book behind.
     invalid = _binding_error(binding)
@@ -462,3 +550,19 @@ def commit_lorebook_plan(deps: LorebookDependencies, body: dict[str, Any]) -> di
         "entries": len(plan.draft.entries),
         "warnings": plan.draft.warnings,
     }
+
+
+def create_reviewed_lorebook(deps: LorebookDependencies, payload: dict[str, Any], book_id: str) -> dict[str, Any]:
+    """Create a user-owned reviewed book at an explicit identity without upserting."""
+    from src.lorebook.importer import commit_lorebook_import, draft_lorebook_import
+    from src.engine.world.contracts import canonical_id
+    identity = canonical_id(book_id, field="reviewed book id")
+    if preview_lorebook_import(deps, payload)["commit_plan"]["unresolved_references"]:
+        raise ValueError("unresolved lorebook references")
+    with deps.lorebook.transaction():
+        if deps.lorebook.get_lorebook(identity) is not None:
+            raise ValueError("lorebook target already exists")
+        draft = draft_lorebook_import(payload)
+        draft.source.update({"kind": "user", "id": identity, "source_id": identity, "external_id": identity})
+        commit_lorebook_import(deps.lorebook, draft, book_id=identity)
+    return {"ok": True, "book_id": identity, "entries": len(draft.entries), "warnings": draft.warnings}

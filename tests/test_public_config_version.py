@@ -21,6 +21,7 @@ def test_public_config_exposes_server_version_metadata():
 
 def test_min_client_version_is_semver_like():
     # 客户端按点分数字段比较（对齐 version_below 语义），非空且可解析才有效
+    assert MIN_CLIENT_VERSION == "0.6.0"
     parts = str(MIN_CLIENT_VERSION).strip().lstrip("vV").split(".")
     assert len(parts) >= 2
     for chunk in parts:

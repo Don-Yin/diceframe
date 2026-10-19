@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -63,7 +64,8 @@ async def test_saving_public_base_url_keeps_active_runtime(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_model_runtime_reload_reuses_live_stores_and_closes_old_client(monkeypatch, tmp_path):
+@pytest.mark.parametrize("dedicated", [False, True])
+async def test_model_runtime_reload_reuses_live_stores_and_closes_old_client(monkeypatch, tmp_path, dedicated):
     """通过真实 factory + API facade 验证热重载，而不是伪造 subsystem。"""
     original_state = dict(web_server.STATE)
     runtime_root = tmp_path / "runtime"
@@ -86,20 +88,31 @@ async def test_model_runtime_reload_reuses_live_stores_and_closes_old_client(mon
         "proxy_enabled": False,
         "proxy_url": "",
         "embedding_enabled": False,
+        "check_model_enabled": False,
     })
+    if dedicated:
+        baseline.update({
+            "ai_providers": [{"id": "local", "base_url": "http://localhost:8000/v1", "api_format": "openai", "models": ["old-model", "new-model", "judge", "judge2"]}],
+            "llm_provider_ref": "local", "check_provider_ref": "local",
+            "check_model_enabled": True, "check_model": "judge",
+        })
     web_server.STATE.clear()
     web_server.STATE.update(baseline)
     old_runtime = web_server._build_subsystems(config=baseline)
     old_session = await old_runtime.llm_client._get_session()
+    check_session = await old_runtime.check_llm_client._get_session() if dedicated else None
+    hub_config = {"enabled": True, "entry_visible": True, "message": ""}
+    hub = SimpleNamespace(rendezvous_config=AsyncMock(return_value=hub_config))
     app = {
         "subsystems": old_runtime,
-        "api": web_server._make_api(old_runtime, config=baseline),
+        "api": web_server._make_api(old_runtime, config=baseline, hub_client=hub),
         "plugin_host": None,
+        "hub_client": hub,
     }
 
     try:
         response = await web_server.api_config_post(
-            _ConfigRequest({"model": "new-model"}, app)
+            _ConfigRequest({"model": "new-model", **({"check_model": "judge2", "context_recent_rounds": 12, "llm_generation_options": {"temperature": .4}} if dedicated else {})}, app)
         )
 
         assert response.status == 200
@@ -112,9 +125,28 @@ async def test_model_runtime_reload_reuses_live_stores_and_closes_old_client(mon
         assert new_runtime.llm_client.providers["default"].model_name == "new-model"
         assert app["api"]._reg is old_runtime.registry
         assert old_session.closed is True
+        assert await app["api"].rendezvous_config() == {"ok": True, **hub_config}
+        budget = 2048 if baseline.get("assistant_agent_max_tokens") != 2048 else 4096
+        task_budget = 64000
+        api_reload = await web_server.api_config_post(
+            _ConfigRequest({"assistant_agent_max_tokens": budget,
+                            "assistant_agent_task_max_tokens": task_budget}, app)
+        )
+        assert api_reload.status == 200
+        assert app["subsystems"] is new_runtime
+        assert app["api"]._assistant_agent.deps.task_max_tokens == task_budget
+        assert app["api"]._assistant_agent.deps.max_tokens == budget
+        assert await app["api"].rendezvous_config() == {"ok": True, **hub_config}
+        if dedicated:
+            assert check_session.closed is True
+            assert new_runtime.check_llm_client.providers["check"].model_name == "judge2"
+            assert new_runtime.llm_client.generation_options == {"temperature": .4}
+            assert new_runtime.handler._prompt.context_recent_rounds == 12
     finally:
         active_runtime = app["subsystems"]
         await active_runtime.llm_client.close()
+        if active_runtime.check_llm_client:
+            await active_runtime.check_llm_client.close()
         active_runtime.lorebook_store.close()
         active_runtime.memory_store.close()
         web_server.STATE.clear()
@@ -135,7 +167,7 @@ async def test_model_request_timeout_reload_rebuilds_model_runtime(monkeypatch):
 
     monkeypatch.setattr(web_server, "save_config", lambda: None)
     monkeypatch.setattr(web_server, "_build_subsystems", build)
-    monkeypatch.setattr(web_server, "_make_api", lambda runtime, plugin_host=None, config=None: new_api)
+    monkeypatch.setattr(web_server, "_make_api", lambda runtime, plugin_host=None, config=None, hub_client=None: new_api)
     monkeypatch.setitem(web_server.STATE, "proxy_enabled", False)
     monkeypatch.setitem(web_server.STATE, "proxy_url", "")
 
@@ -151,7 +183,8 @@ async def test_model_request_timeout_reload_rebuilds_model_runtime(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_api_token_limit_reload_rebuilds_api_without_replacing_subsystems(monkeypatch):
+@pytest.mark.parametrize("token_key", ["text_gen_max_tokens", "assistant_agent_max_tokens"])
+async def test_api_token_limit_reload_rebuilds_api_without_replacing_subsystems(monkeypatch, token_key):
     runtime = _runtime()
     app = {"subsystems": runtime, "api": object(), "plugin_host": None}
     new_api = object()
@@ -161,12 +194,12 @@ async def test_api_token_limit_reload_rebuilds_api_without_replacing_subsystems(
         "_build_subsystems",
         lambda **kwargs: pytest.fail("API 生成上限不应重建游戏子系统"),
     )
-    monkeypatch.setattr(web_server, "_make_api", lambda subsystems, plugin_host=None, config=None: new_api)
+    monkeypatch.setattr(web_server, "_make_api", lambda subsystems, plugin_host=None, config=None, hub_client=None: new_api)
     monkeypatch.setitem(web_server.STATE, "proxy_enabled", False)
     monkeypatch.setitem(web_server.STATE, "proxy_url", "")
 
     response = await web_server.api_config_post(
-        _ConfigRequest({"text_gen_max_tokens": 2048}, app)
+        _ConfigRequest({token_key: 2048}, app)
     )
 
     assert response.status == 200
@@ -188,7 +221,7 @@ async def test_tts_config_reload_rebuilds_only_api_facade(monkeypatch):
         lambda **kwargs: pytest.fail("TTS 配置不应重建游戏子系统"),
     )
 
-    def make_api(subsystems, plugin_host=None, config=None):
+    def make_api(subsystems, plugin_host=None, config=None, hub_client=None):
         assert subsystems is runtime
         assert config["tts_provider"] == "openai-compatible"
         assert config["tts_provider_ref"] == "local"
@@ -239,7 +272,7 @@ async def test_imagegen_can_be_enabled_before_provider_and_model_are_selected(
     monkeypatch.setitem(web_server.STATE, "imagegen_base_url", "")
     monkeypatch.setitem(web_server.STATE, "imagegen_model", "")
 
-    def make_api(subsystems, plugin_host=None, config=None):
+    def make_api(subsystems, plugin_host=None, config=None, hub_client=None):
         assert subsystems is runtime
         service = ImageGenerationService(config, tmp_path / "generated-images")
         assert service.enabled is True

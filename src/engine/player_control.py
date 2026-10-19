@@ -313,9 +313,12 @@ def normalize_away_control_policy(raw: Any) -> str:
 def away_control_policy(instance: Any) -> str:
     """The room's away semantics, defaulting to the legacy ``pause``."""
 
-    from src.engine.modules.player_control_state import away_control_policy as _read
+    from src.engine import module_hooks
 
-    return _read(instance)
+    return normalize_away_control_policy(module_hooks.ask(
+        module_hooks.STATE_READ, instance, module_hooks.AWAY_CONTROL_POLICY,
+        default=DEFAULT_AWAY_CONTROL_POLICY,
+    ))
 
 
 def set_away_control_policy(instance: Any, policy: Any) -> str:
@@ -327,9 +330,9 @@ def set_away_control_policy(instance: Any, policy: Any) -> str:
             f"unknown away_control_policy {policy!r}; "
             f"expected one of {AWAY_CONTROL_POLICIES}"
         )
-    from src.engine.modules.player_control_state import set_away_control_policy_value
+    from src.engine import module_hooks
 
-    set_away_control_policy_value(instance, value)
+    module_hooks.record(instance, module_hooks.AWAY_CONTROL_POLICY, value)
     return value
 
 

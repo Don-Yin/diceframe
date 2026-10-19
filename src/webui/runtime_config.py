@@ -28,6 +28,8 @@ from src.migrations.config import (
     GENERATION_DEFAULTS_VERSION,
     migrate_generation_defaults,
 )
+from src.llm.generation_options import validate_generation_options, validate_recent_rounds
+from src.game_preferences import validate_preferences
 from src.network_proxy import (
     effective_proxy_url,
     is_supported_proxy_url,
@@ -43,6 +45,7 @@ from src.web_transport.listeners import (
 from src.webui.access_password import mask_access_password, normalize_access_password
 from src.webui.cors import normalize_cors_origins, parse_cors_origins
 from src.webui.services import legal as legal_svc
+from src.assistant_agent_limits import DEFAULT_TASK_MAX_TOKENS
 
 
 _SECRET_KEYS = frozenset(
@@ -78,12 +81,15 @@ class RuntimePaths:
         environ: Mapping[str, str],
     ) -> RuntimePaths:
         data_dir = Path(environ.get("TRPG_DATA_DIR") or root / "data")
+        host_dir = data_dir
+        if environ.get("TRPG_INSTALL_MODE") == "docker-managed":
+            host_dir = Path(environ.get("TRPG_DOCKER_DATA_HOME") or data_dir)
         return cls(
             root=root,
             data_dir=data_dir,
-            config_file=data_dir / "config.json",
-            secrets_file=data_dir / "secrets.json",
-            access_token_file=data_dir / "access_token.txt",
+            config_file=host_dir / "config.json",
+            secrets_file=host_dir / "secrets.json",
+            access_token_file=host_dir / "access_token.txt",
             prompts_dir=root / "prompts",
             builtin_rules_dir=root / "templates" / "rules",
             builtin_worlds_dir=root / "templates" / "worlds",
@@ -199,7 +205,7 @@ class ConfigStore:
         transport_config = parse_web_transport(saved.get("web_transport"), env)
         transport = build_server_transport(
             transport_config,
-            self.paths.data_dir,
+            self.paths.config_file.parent,
             port,
             internal_loopback_host(hosts),
         )
@@ -227,6 +233,11 @@ class ConfigStore:
         proxy_url = env.get("TRPG_PROXY_URL") or config_proxy_url or env_proxy_url
 
         state: dict[str, Any] = {
+            "llm_generation_options": validate_generation_options(saved.get("llm_generation_options", {})),
+            "context_recent_rounds": validate_recent_rounds(saved.get("context_recent_rounds", 0)),
+            "check_model_enabled": bool(saved.get("check_model_enabled", False)),
+            "check_provider_ref": str(saved.get("check_provider_ref", "")),
+            "check_model": str(saved.get("check_model", "")),
             "generation_defaults_version": GENERATION_DEFAULTS_VERSION,
             "model": model,
             "web_port": port,
@@ -287,6 +298,7 @@ class ConfigStore:
                 saved.get("imagegen_timeout_seconds", 120)
             ),
             "test_timeout_seconds": float(saved.get("test_timeout_seconds", 30)),
+            "game_defaults": validate_preferences(saved.get("game_defaults", {})),
             "economy_auto_reward_enabled": bool(
                 saved.get("economy_auto_reward_enabled", True)
             ),
@@ -325,6 +337,13 @@ class ConfigStore:
             "text_gen_max_tokens": int(
                 env.get("TRPG_TEXT_GEN_MAX_TOKENS")
                 or saved.get("text_gen_max_tokens", 4096)
+            ),
+            "assistant_agent_max_tokens": int(
+                env.get("TRPG_ASSISTANT_AGENT_MAX_TOKENS")
+                or saved.get("assistant_agent_max_tokens", 4096)
+            ),
+            "assistant_agent_task_max_tokens": int(
+                saved.get("assistant_agent_task_max_tokens", DEFAULT_TASK_MAX_TOKENS)
             ),
             "access_token": access_token,
             "bot_token": env.get("TRPG_BOT_TOKEN")

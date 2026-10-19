@@ -150,6 +150,9 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
         self._web_sync_last_round: dict[str, int] = {}
         self._web_sync_seen_actions: dict[str, set[str]] = {}
         self._web_sync_seen_luck: dict[str, set[str]] = {}
+        self._web_sync_seen_payments: dict[str, set[str]] = {}
+        self._web_sync_scene_images: dict[str, str] = {}
+        self._web_sync_run_ids: dict[str, str] = {}
         self._web_sync_failures: dict[str, int] = {}
         self._group_action_inflight: dict[str, bool] = {}
 
@@ -894,8 +897,9 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
                 quick_actions=quick_actions,
             )
             if game_key and round_number:
-                self._web_sync_last_round[game_key] = round_number
-                self._web_sync_seen_actions.setdefault(game_key, set()).clear()
+                sync_key = self._web_sync_key(group_id, game_key)
+                self._web_sync_last_round[sync_key] = round_number
+                self._web_sync_seen_actions.setdefault(sync_key, set()).clear()
             return
 
         # 未推进：行动结果简短卡（roll + 等待提示 + pending）
@@ -909,7 +913,7 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
         pending_luck = result.get("pending_luck_decisions") if isinstance(result.get("pending_luck_decisions"), list) else []
         if pending_luck:
             lines.extend(luck_prompt_lines(pending_luck, language, command_prefix="@我"))
-            seen_luck = self._web_sync_seen_luck.setdefault(game_key, set())
+            seen_luck = self._web_sync_seen_luck.setdefault(self._web_sync_key(group_id, game_key), set())
             seen_luck.update(str(check.get("check_id") or "") for check in pending_luck if isinstance(check, dict))
         if pending:
             lines.append("")

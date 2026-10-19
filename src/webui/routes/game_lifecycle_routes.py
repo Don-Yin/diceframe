@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from aiohttp import web
+from src.game_preferences import UNSET
 
 from src.webui.routes._common import (
     MAX_SEED_CHARS,
@@ -52,12 +53,11 @@ async def api_create_game(request: web.Request) -> web.Response:
         adventure_source_kind=str(body.get("adventure_source_kind", "") or ""),
         adventure_source_id=str(body.get("adventure_source_id", "") or ""),
         play_mode=str(body.get("play_mode", "") or ""),
-        narrative_perspective=str(body.get("narrative_perspective", "auto") or "auto"),
-        gm_style_override=body.get("gm_style_override"),
-        advancement_mode=str(body.get("advancement_mode", "milestone") or "milestone"),
-        advancement_authority=str(
-            body.get("advancement_authority", "ai_gm") or "ai_gm"
-        ),
+        narrative_perspective=body.get("narrative_perspective", UNSET),
+        story_mode=body.get("story_mode", UNSET),
+        gm_style_override=body.get("gm_style_override", UNSET),
+        advancement_mode=body.get("advancement_mode", UNSET),
+        advancement_authority=body.get("advancement_authority", UNSET),
         # 逐卡控制方式与「未认领角色默认」；缺省时保持旧行为（每个席位 human）。
         unclaimed_control_default=str(body.get("unclaimed_control_default", "") or ""),
         world_ref=body.get("world_ref"),
@@ -71,6 +71,8 @@ _LIFECYCLE_ERROR_STATUS = {
     "WORLD_NOT_FOUND": 404,
     "INVALID_WORLD_ID": 400,
     "INVALID_WORLD_REF": 422,
+    "INVALID_STORY_MODE": 400,
+    "UNSUPPORTED_STORYTELLING_SCHEMA": 422,
     "ADVENTURE_WORLD_LOCKED": 409,
     "ADVENTURE_RUNTIME_INIT_FAILED": 422,
     "RULESET_RUNTIME_INIT_FAILED": 422,
@@ -149,5 +151,6 @@ async def api_create_from_seed(request: web.Request) -> web.Response:
         language=str(body.get("language", "") or ""),
         scene_image=body.get("scene_image"),
         narrative_perspective=str(body.get("narrative_perspective", "") or ""),
+        story_mode=body.get("story_mode", ""),
     )
     return web.json_response(result)

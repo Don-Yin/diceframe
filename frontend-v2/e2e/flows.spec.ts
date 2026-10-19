@@ -52,7 +52,7 @@ test('gm and player render the same game through shared play components', async 
   expect(Math.abs(playerLayout.viewportHeight - playerLayout.mainBottom)).toBeLessThanOrEqual(1)
   expect(playerLayout.composerBottom).toBeGreaterThanOrEqual(playerLayout.viewportHeight - 12)
   expect(playerLayout.composerBottom).toBeLessThanOrEqual(playerLayout.viewportHeight + 1)
-  await playerPage.getByRole('button', { name: '状态' }).click()
+  await playerPage.getByTestId('play-quick-status').click()
   await expect(playerPage.getByRole('heading', { name: player.character_name, exact: true })).toBeVisible()
   await expect(playerPage.getByPlaceholder('用自然语言描述行动')).toBeVisible()
   await gmContext.close()

@@ -46,6 +46,8 @@ ROOT_FILES = [
     "LICENSE",
     "README.md",
     "README_EN.md",
+    "README_zh-CN.md",
+    "THIRD_PARTY_NOTICES.md",
     "docker-compose.yml",
     "requirements.txt",
     "requirements-portable.lock",

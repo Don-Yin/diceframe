@@ -225,6 +225,27 @@ def test_launcher_commits_healthy_candidate_and_rolls_back_failed_one(tmp_path, 
     assert json.loads(launcher.state_file.read_text(encoding="utf-8"))["state"] == "rolled-back"
 
 
+def test_launcher_can_commit_previous_payload_as_new_current(tmp_path, monkeypatch):
+    archive = _archive(tmp_path, "2.4.0")
+    checksum = tmp_path / "update.sha256"
+    checksum.write_text(
+        f"{contracts.file_sha256(archive)}  {archive.name}\n", encoding="utf-8",
+    )
+    launcher = DockerLauncher(tmp_path / "runtime", archive, checksum)
+    current = _package_tree(launcher.versions_dir, "2.4.0")
+    previous = _package_tree(launcher.versions_dir, "2.3.2")
+    monkeypatch.setattr(launcher, "_stop_child", lambda *args, **kwargs: None)
+    monkeypatch.setattr(launcher, "_spawn", lambda _path: None)
+    monkeypatch.setattr(launcher, "_prune", lambda: None)
+    monkeypatch.setattr(launcher, "_wait_healthy", lambda _path: True)
+
+    assert launcher._launch_candidate(previous, current) is True
+    pointer = json.loads(launcher.current_file.read_text(encoding="utf-8"))
+    assert pointer["version"] == "2.3.2"
+    assert pointer["relative_dir"] == launcher._relative(previous)
+    assert pointer["previous_relative_dir"] == launcher._relative(current)
+
+
 def test_launcher_uses_previous_when_current_is_damaged(tmp_path):
     archive = _archive(tmp_path, "2.4.0")
     checksum = tmp_path / "update.sha256"

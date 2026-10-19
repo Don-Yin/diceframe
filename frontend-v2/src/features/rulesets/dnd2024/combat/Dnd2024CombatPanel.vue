@@ -32,6 +32,8 @@ import type {
 import { useLocale } from '@/composables/useLocale'
 import CombatLiveBar from '@/components/play/CombatLiveBar.vue'
 import Modal from '@/components/ui/Modal.vue'
+import SpellAvailability from './SpellAvailability.vue'
+import { spellCopy } from './spellCopy'
 
 const props = defineProps<{
   gameKey: string
@@ -44,6 +46,7 @@ const emit = defineEmits<{
   navigate: [target: 'campaign']
 }>()
 const { locale, t } = useLocale()
+const spellText = computed(() => spellCopy(locale.value))
 
 const data = ref<RulesetGameplayResponse | null>(null)
 const busy = ref(false)
@@ -54,6 +57,7 @@ const selectedWeaponId = ref('')
 const selectedSpellRef = ref('')
 const selectedSlot = ref(0)
 const selectedTargetId = ref('')
+const selectedSpellTargetId = ref('')
 const nextEncounterOpen = ref(false)
 const manualEncounterOpen = ref(false)
 const movementDistance = ref(5)
@@ -279,6 +283,7 @@ const canPlanTemporaryEncounter = computed(() => Boolean(
 ))
 const attackAction = computed(() => action('attack'))
 const spellAction = computed(() => action('cast_spell'))
+const spellActor = computed(() => combat.value?.actors?.find(actor => actor.actor_id === (spellAction.value?.actor_id || `player:${props.actorId}`)))
 // 职业特性提供的战斗能力：服务端只返回当前真实可用的 capability，前端只渲染
 // 服务端给的 id / 名称 / 成本 / 目标要求，绝不自己判断职业或等级。
 const capabilityActions = computed<RulesetCombatAction[]>(() => (
@@ -331,7 +336,7 @@ const selectedSpell = computed(() => spellAction.value?.spells?.find(
   item => item.spell_ref === selectedSpellRef.value,
 ))
 const selectedTarget = computed(() => targetsFor(selectedSpell.value).find(
-  item => item.actor_id === selectedTargetId.value,
+  item => item.actor_id === selectedSpellTargetId.value,
 ))
 const latestEvents = computed(() => {
   const batches = data.value?.result?.resolved_event_batches
@@ -517,6 +522,7 @@ function friendlyCombatError(cause: unknown): string {
   if (/not your turn|requested actor is not the current actor/i.test(message)) return '现在还没轮到这个角色。请等待当前行动者结束回合。'
   if (/already been spent|action is not available/i.test(message)) return '这个动作资源本回合已经用掉了。请选择仍可用的动作，或结束回合。'
   if (/state version|stale|expected_version/i.test(message)) return '战斗状态刚刚发生变化，界面已为你刷新。请按最新状态再试一次。'
+  if (/resolve the melee hit spell decision first/i.test(message)) return '请先选择是否追加法术，结算这次命中后再继续行动。'
   if (/automatic combat turn exceeded the safety limit/i.test(message)) return '敌方自动回合未能正常结束，本次操作已安全回滚。请刷新战斗状态后重试。'
   return message
 }
@@ -524,6 +530,7 @@ function friendlyCombatError(cause: unknown): string {
 function targetsFor(spell?: RulesetCombatSpell): RulesetCombatTarget[] {
   const targets = spellAction.value?.targets || attackAction.value?.targets || []
   if (!spell || !currentActor.value) return targets
+  if (spell.trigger_target_id) return targets.filter(target => target.actor_id === spell.trigger_target_id)
   const allied = spell.mode === 'healing' || spell.mode === 'buff'
   return targets.filter(target => allied
     ? target.kind === currentActor.value?.kind
@@ -552,8 +559,8 @@ function resetSelections(): void {
   const spell = spellAction.value?.spells?.[0]
   selectedSpellRef.value = spell?.spell_ref || ''
   selectedSlot.value = spell?.available_slot_levels?.[0] ?? 0
-  const targets = spell ? targetsFor(spell) : attackAction.value?.targets || []
-  selectedTargetId.value = targets[0]?.actor_id || ''
+  selectedSpellTargetId.value = spell ? targetsFor(spell)[0]?.actor_id || '' : ''
+  selectedTargetId.value = attackAction.value?.targets?.[0]?.actor_id || ''
   capabilityTargetId.value = capabilityTargets.value[0]?.actor_id || ''
   chooseUsableWeapon()
   movementDistance.value = Math.min(5, Number(moveAction.value?.movement_remaining || 5))
@@ -569,6 +576,7 @@ function clearGameScopedState(): void {
   selectedSpellRef.value = ''
   selectedSlot.value = 0
   selectedTargetId.value = ''
+  selectedSpellTargetId.value = ''
   nextEncounterOpen.value = false
   manualEncounterOpen.value = false
   sandboxDeclared.value = false
@@ -859,10 +867,10 @@ function stageAttack(): void {
 
 function stageSpell(): void {
   const spell = selectedSpell.value
-  if (!spell || !selectedTargetId.value || !spellAction.value) return
+  if (!spell || !selectedSpellTargetId.value || !spellAction.value) return
   stage({
     type: 'cast_spell', actor_id: spellAction.value.actor_id,
-    target_id: selectedTargetId.value, spell_ref: spell.spell_ref,
+    target_id: selectedSpellTargetId.value, spell_ref: spell.spell_ref,
     slot_level: selectedSlot.value,
   })
 }
@@ -971,7 +979,7 @@ function describeEvent(event: JsonObject): string {
 watch(selectedSpellRef, () => {
   const spell = selectedSpell.value
   selectedSlot.value = spell?.available_slot_levels?.[0] ?? 0
-  selectedTargetId.value = targetsFor(spell)[0]?.actor_id || ''
+  selectedSpellTargetId.value = targetsFor(spell)[0]?.actor_id || ''
 })
 watch(explorationSpellRef, () => {
   explorationSlot.value = explorationSpell.value?.available_slot_levels?.[0] ?? 0
@@ -1319,14 +1327,15 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
         </div>
 
         <section v-if="pendingDecision" class="decision-card" aria-live="assertive">
-          <strong>{{ copy.reaction }} · {{ localizedTerm(pendingDecision.kind) }}</strong>
+          <strong>{{ pendingDecision.kind === 'melee_hit_spell' ? spellText.hit : `${copy.reaction} · ${localizedTerm(pendingDecision.kind)}` }}</strong>
+          <p v-if="pendingDecision.kind === 'melee_hit_spell'">{{ spellText.hitHint }}</p>
           <div>
-            <button class="combat-primary" :disabled="busy" @click="decide(pendingDecision, 'resolve')">{{ copy.resolve }}</button>
-            <button :disabled="busy" @click="decide(pendingDecision, 'decline')">{{ copy.decline }}</button>
+            <button v-if="pendingDecision.options.includes('resolve')" class="combat-primary" :disabled="busy" @click="decide(pendingDecision, 'resolve')">{{ copy.resolve }}</button>
+            <button :disabled="busy" @click="decide(pendingDecision, 'decline')">{{ pendingDecision.kind === 'melee_hit_spell' ? spellText.decline : copy.decline }}</button>
           </div>
         </section>
 
-        <section v-else-if="actions.length" class="available-actions">
+        <section v-if="actions.length && (!pendingDecision || pendingDecision.kind === 'melee_hit_spell')" class="available-actions">
           <h3>{{ copy.availableActions }}</h3>
           <div class="combat-actions">
           <section v-if="attackAction" class="action-card">
@@ -1390,28 +1399,31 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
             <p v-else class="range-guide">{{ copy.noCapabilityAvailable }}</p>
           </section>
 
-          <section v-if="spellAction" class="action-card">
+          <section v-if="spellAction || spellActor?.spells?.length" class="action-card" data-testid="combat-spell-card">
             <h3><NIcon :component="SparklesOutline" />{{ copy.action }} / {{ copy.bonus }} · {{ copy.cast }}</h3>
+            <template v-if="spellAction">
             <label>{{ copy.spell }}
               <select v-model="selectedSpellRef">
                 <option v-for="spellItem in spellAction.spells" :key="spellItem.spell_ref" :value="spellItem.spell_ref">
-                  {{ spellItem.name }} · {{ localizedTerm(spellItem.casting_time) }}
+                  {{ spellItem.name }} · {{ spellItem.trigger_target_id ? copy.bonus : localizedTerm(spellItem.casting_time) }}
                 </option>
               </select>
             </label>
             <label v-if="selectedSpell?.level">{{ copy.slot }}
               <select v-model.number="selectedSlot">
-                <option v-for="level in selectedSpell.available_slot_levels" :key="level" :value="level">{{ level }}</option>
+                <option v-for="level in selectedSpell.available_slot_levels" :key="level" :value="level">{{ level === 0 ? spellText.free : level }}</option>
               </select>
             </label>
             <label>{{ copy.target }}
-              <select v-model="selectedTargetId">
+              <select v-model="selectedSpellTargetId">
                 <option v-for="targetItem in targetsFor(selectedSpell)" :key="targetItem.actor_id" :value="targetItem.actor_id">
                   {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
                 </option>
               </select>
             </label>
             <button :disabled="busy || !selectedSpell || !selectedTarget" @click="stageSpell"><NIcon :component="SparklesOutline" />{{ copy.cast }}</button>
+            </template>
+            <SpellAvailability :spells="spellActor?.spells || []" />
           </section>
 
           <section v-if="explorationAction" class="action-card">

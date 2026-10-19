@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from legacy_save_fixtures import legacy_table_payload
+
 import pytest
 
 from src.engine.game_instance import GameInstance
@@ -30,6 +32,7 @@ def test_combat_extension_round_trips_through_save() -> None:
 
 def test_legacy_save_without_field_defaults_to_empty() -> None:
     payload = GameInstance(game_key=("web", "wuxia", "bot")).to_dict()
+    payload = legacy_table_payload(payload)
     payload["instance_schema_version"] = 19
     payload["modules"].pop("combat_extension")
     payload.pop("combat_extension", None)
@@ -53,7 +56,7 @@ def test_malformed_snapshot_envelope_does_not_replace_live_state() -> None:
     instance = GameInstance(game_key=("web", "wuxia", "bot"))
     combat_extension_state.replace_current(instance, _payload_with_extension())
 
-    restored = instance.restore_combat_extension_snapshot({
+    restored = combat_extension_state.restore_combat_extension_snapshot(instance, {
         "schema_version": True,
         "combat_extension": "bad",
         "entity_fields": {},
@@ -77,7 +80,7 @@ def test_capture_repairs_malformed_entity_tracking_without_crashing() -> None:
         },
     })
 
-    instance.capture_combat_extension_snapshot({
+    combat_extension_state.capture_combat_extension_snapshot(instance, {
         "player:p1": ("hp", "qi", 7),
         3: ("hp",),
     })
@@ -99,7 +102,7 @@ def test_restore_malformed_entity_tracking_is_atomic() -> None:
     }
     combat_extension_state.replace_current(instance, _payload_with_extension())
 
-    restored = instance.restore_combat_extension_snapshot({
+    restored = combat_extension_state.restore_combat_extension_snapshot(instance, {
         "schema_version": 1,
         "combat_extension": {"schema_version": 1, "pools": {}},
         "entity_fields": {
@@ -124,7 +127,7 @@ def test_discard_combat_snapshots_removes_branch_and_malformed_keys() -> None:
         "future": {"combat_extension": {}},
     })
 
-    instance.discard_combat_extension_snapshots_from(3)
+    combat_extension_state.discard_combat_extension_snapshots_from(instance, 3)
 
     assert set(combat_extension_state.round_snapshots(instance)) == {"2"}
 
@@ -136,7 +139,7 @@ def test_combat_round_snapshot_round_trips_through_save() -> None:
         "character_name": "侠客",
         "character_sheet": {"hp": 20, "qi": 30, "inventory": []},
     }
-    instance.capture_combat_extension_snapshot({
+    combat_extension_state.capture_combat_extension_snapshot(instance, {
         "player:p1": ("hp", "qi", "inventory"),
     })
 
@@ -151,7 +154,7 @@ def test_combat_round_snapshot_round_trips_through_save() -> None:
 async def test_reset_clears_combat_extension_and_round_snapshots() -> None:
     instance = GameInstance(game_key=("web", "wuxia", "bot"), gm_uid="gm")
     combat_extension_state.replace_current(instance, _payload_with_extension())
-    instance.capture_combat_extension_snapshot()
+    combat_extension_state.capture_combat_extension_snapshot(instance)
 
     await instance.reset()
 
@@ -167,12 +170,12 @@ async def test_finished_round_records_combat_snapshots_for_rollback_and_swipe() 
         "character_name": "侠客",
         "character_sheet": {"hp": 20, "qi": 30, "inventory": []},
     }
-    instance.capture_combat_extension_snapshot({
+    combat_extension_state.capture_combat_extension_snapshot(instance, {
         "player:p1": ("hp", "qi", "inventory"),
     })
     combat_extension_state.replace_current(instance, _payload_with_extension())
     instance.get_character_sheet("p1")["qi"] = 22
-    pre_swipe = instance.current_combat_extension_snapshot()
+    pre_swipe = combat_extension_state.current_combat_extension_snapshot(instance)
 
     await instance.finish_judgment(
         "本轮结束",
@@ -188,7 +191,7 @@ async def test_finished_round_records_combat_snapshots_for_rollback_and_swipe() 
 
     combat_extension_state.replace_current(instance, {})
     instance.get_character_sheet("p1")["qi"] = 1
-    assert instance.restore_combat_extension_snapshot(
+    assert combat_extension_state.restore_combat_extension_snapshot(instance, 
         entry["pre_combat_extension_snapshot"],
     )
     assert combat_extension_state.current(instance) == _payload_with_extension()

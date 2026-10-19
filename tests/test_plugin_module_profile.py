@@ -65,6 +65,21 @@ def test_vocabularies_are_the_declared_ones() -> None:
     assert set(CONTENT_DELIVERY_MODES) == {"legacy_autoimport", "catalog"}
 
 
+@pytest.mark.parametrize("profile", ["content-pack", "adventure-module"])
+def test_catalog_packages_cannot_launch_processes(profile: str) -> None:
+    with pytest.raises(ValueError, match="entrypoint"):
+        validate_content_module_profile({
+            "plugin_type": "content-pack", "content_profile": profile,
+            "content_delivery_mode": "catalog", "entrypoint": ["python", "main.py"],
+        })
+
+
+def test_legacy_process_pack_keeps_explicit_process_compatibility() -> None:
+    validate_content_module_profile({
+        "plugin_type": "content-pack", "entrypoint": ["python", "main.py"],
+    })
+
+
 def test_host_manifest_validation_rejects_bad_module_profile(tmp_path) -> None:
     """真实 manifest 校验链路：非法 profile 组合在安装时被拒。"""
 

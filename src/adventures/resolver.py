@@ -157,7 +157,10 @@ class AdventureResolver:
                 "builtin", "",
                 AdventureBundleLoader(root, allowed_directory_ids=directory_ids),
             ))
-        if user_dir is not None and Path(user_dir).is_dir():
+        # A fresh installation may not have authored any packages yet. Keep
+        # its explicit writable owner even before the directory is created;
+        # otherwise authoring falls through to the builtin templates directory.
+        if user_dir is not None:
             registry.register(AdventureSource(
                 "user", "",
                 AdventureBundleLoader(user_dir, include_builtin_directories=False),

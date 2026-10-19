@@ -6,6 +6,101 @@ export interface ChatMessage {
   content: string
 }
 
+export type AssistantContext = {
+  route: string
+  game_key?: string
+  world_id?: string
+  adventure_id?: string
+  book_id?: string
+}
+
+export type AgentEventName = 'session' | 'status' | 'tool_start' | 'tool_result' | 'draft' | 'approval' | 'navigate' | 'authorization' | 'task'
+
+export type AgentAuthorizationMode = 'suggest' | 'routine' | 'task'
+export interface AgentAuthorization {
+  mode: AgentAuthorizationMode
+  scope: Record<string, string>
+  domains: string[]
+  expires_at: number
+  max_steps: number
+  remaining_steps: number
+}
+export interface AgentTask {
+  status: string
+  completed_steps: number
+  total_steps?: number
+  used_tokens?: number
+  token_budget?: number
+  budget_reason?: 'tokens' | 'steps'
+  error?: string
+}
+export interface AgentCapability {
+  name: string
+  label: string
+  domain: string
+  version: number
+  effect: string
+  automatic: boolean
+  description: string
+  parameters?: Record<string, unknown>
+  instructions?: string
+  requires_confirmation?: boolean
+}
+
+export interface AgentDraftReview {
+  ok?: boolean
+  draft?: unknown
+  plan_digest?: string
+  blockers?: unknown[]
+  kind?: string
+  text?: string
+  [key: string]: unknown
+}
+
+export interface AgentDraftEvent {
+  draft_id: string
+  review: AgentDraftReview
+}
+
+export interface AgentApproval {
+  approval_id: string
+  plan_digest: string
+  tool: string
+  label?: string
+  arguments?: unknown
+  expires_at?: number | string
+  recovery_required?: boolean
+  expired?: boolean
+  preview?: unknown
+}
+
+export interface AgentSession {
+  ok?: boolean
+  session_id: string
+  pending: AgentApproval | null
+  drafts: Record<string, AgentDraftReview>
+  receipts: Array<{ approval_id: string; plan_digest: string; result?: unknown; response?: AgentConfirmResult }>
+  status?: string
+  authorization?: AgentAuthorization | null
+  task?: AgentTask | null
+}
+
+export interface AgentConfirmResult {
+  ok: boolean
+  result?: unknown
+  navigation?: { route: string; query?: Record<string, unknown> }
+  cancelled?: boolean
+  partial?: boolean
+  error?: string
+}
+
+export interface AgentReviewResult {
+  ok: boolean
+  draft_id: string
+  review: AgentDraftReview
+  approval?: AgentApproval
+}
+
 export interface AssistantSource {
   source: string
   heading: string
@@ -16,6 +111,7 @@ export interface AssistantStreamHandlers {
   onSources?: (sources: AssistantSource[]) => void
   /** 服务端因输出截断需放大预算重试：清空当前已显示内容后重新流式。 */
   onReset?: () => void
+  onAgentEvent?: (event: string, payload: Record<string, unknown>) => void
 }
 
 export class AssistantStreamError extends Error {
@@ -84,6 +180,32 @@ export async function streamAssistantChat(
   }
 }
 
+export async function streamAssistantAgent(
+  messages: ChatMessage[],
+  locale: string,
+  handlers: AssistantStreamHandlers,
+  signal?: AbortSignal,
+  sessionId?: string,
+  context?: AssistantContext,
+): Promise<void> {
+  const resp = await fetch(apiUrl('/assistant/agent/run'), {
+    method: 'POST',
+    headers: authHeaders(undefined, true),
+    body: JSON.stringify({
+      messages,
+      language: locale,
+      ...(sessionId ? { session_id: sessionId } : {}),
+      ...(context ? { context } : {}),
+    }),
+    signal,
+    credentials: 'include',
+  })
+  if (!resp.ok || !resp.body) {
+    throw new AssistantStreamError(await responseError(resp), `HTTP_${resp.status}`)
+  }
+  await consumeAssistantStream(resp, handlers)
+}
+
 function dispatchEvent(block: string, handlers: AssistantStreamHandlers): boolean {
   const lines = block.split(/\r?\n/)
   const event = lines.find(line => line.startsWith('event:'))?.slice(6).trim() || 'message'
@@ -95,6 +217,9 @@ function dispatchEvent(block: string, handlers: AssistantStreamHandlers): boolea
   if (!data) return false
 
   const payload = parsePayload(data)
+  if (event === 'session' || event === 'status' || event === 'tool_start' || event === 'tool_result' || event === 'draft' || event === 'approval' || event === 'navigate' || event === 'authorization' || event === 'task') {
+    handlers.onAgentEvent?.(event, payload)
+  }
   if (event === 'error') {
     throw new AssistantStreamError(
       typeof payload.error === 'string' ? payload.error : i18n.global.t('assistantError'),
@@ -114,6 +239,113 @@ function dispatchEvent(block: string, handlers: AssistantStreamHandlers): boolea
   }
   if (typeof payload.delta === 'string') handlers.onDelta(payload.delta)
   return false
+}
+
+async function consumeAssistantStream(resp: Response, handlers: AssistantStreamHandlers): Promise<void> {
+  const reader = resp.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  const consume = (final = false): boolean => {
+    while (true) {
+      const separator = buffer.match(/\r?\n\r?\n/)
+      if (!separator || separator.index === undefined) break
+      const block = buffer.slice(0, separator.index)
+      buffer = buffer.slice(separator.index + separator[0].length)
+      if (dispatchEvent(block, handlers)) return true
+    }
+    if (final && buffer.trim()) {
+      const done = dispatchEvent(buffer, handlers)
+      buffer = ''
+      return done
+    }
+    return false
+  }
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        buffer += decoder.decode()
+        consume(true)
+        return
+      }
+      buffer += decoder.decode(value, { stream: true })
+      if (consume()) {
+        await reader.cancel()
+        return
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+async function agentJson<T>(path: string, body?: Record<string, unknown>): Promise<T> {
+  const resp = await fetch(apiUrl(path), {
+    method: body ? 'POST' : 'GET',
+    headers: authHeaders(undefined, Boolean(body)),
+    ...(body ? { body: JSON.stringify(body) } : {}),
+    credentials: 'include',
+  })
+  const payload = await resp.json().catch(() => ({})) as Record<string, unknown>
+  if (!resp.ok) {
+    const message = typeof payload.error === 'string' ? payload.error : await responseError(resp)
+    throw new AssistantStreamError(message, `HTTP_${resp.status}`)
+  }
+  return payload as T
+}
+
+export function confirmAssistantAgent(
+  sessionId: string,
+  approvalId: string,
+  planDigest: string,
+  approved: boolean,
+): Promise<AgentConfirmResult> {
+  return agentJson<AgentConfirmResult>('/assistant/agent/confirm', {
+    session_id: sessionId,
+    approval_id: approvalId,
+    plan_digest: planDigest,
+    approved,
+  })
+}
+
+export function reviewAssistantAgent(
+  sessionId: string,
+  draftId: string,
+  draft: unknown,
+): Promise<AgentReviewResult> {
+  return agentJson<AgentReviewResult>('/assistant/agent/review', {
+    session_id: sessionId,
+    draft_id: draftId,
+    draft,
+  })
+}
+
+export function getAssistantAgentSession(sessionId: string): Promise<AgentSession> {
+  return agentJson<AgentSession>(`/assistant/agent/session/${encodeURIComponent(sessionId)}`)
+}
+
+export function getAssistantAgentCapabilities(query: { q?: string; domain?: string } = {}): Promise<{ ok: true; revision: string; capabilities: AgentCapability[]; total?: number }> {
+  const params = new URLSearchParams()
+  if (query.q?.trim()) params.set('q', query.q.trim())
+  if (query.domain?.trim()) params.set('domain', query.domain.trim())
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return agentJson(`/assistant/agent/capabilities${suffix}`)
+}
+
+export function authorizeAssistantAgent(input: {
+  session_id?: string
+  mode: AgentAuthorizationMode
+  scope?: Record<string, string>
+  domains?: string[]
+  max_steps?: number
+}): Promise<{ ok: true; session_id: string; authorization: AgentAuthorization | null }> {
+  return agentJson('/assistant/agent/authorization', { ...input, max_steps: Math.min(64, Math.max(1, input.max_steps ?? 32)) })
+}
+
+export function cancelAssistantAgent(sessionId: string): Promise<{ ok: true; cancelled: boolean; status?: string }> {
+  return agentJson('/assistant/agent/cancel', { session_id: sessionId })
 }
 
 function parsePayload(data: string): Record<string, unknown> {

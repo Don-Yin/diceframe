@@ -3,6 +3,8 @@ new-password length rule, export/import scrubbing and the player join flow."""
 
 from __future__ import annotations
 
+from legacy_save_fixtures import legacy_table_payload
+
 import hashlib
 import json
 import zipfile
@@ -35,6 +37,7 @@ from test_game_query_routes_http import (
     _make_app,
     _make_game,
     _owner,
+    _owner_password,  # noqa: F401 (authentication fixture for imported HTTP helpers)
     _player_url,
     _seat,
     play_env,  # noqa: F401
@@ -485,6 +488,7 @@ async def test_password_change_during_verification_issues_no_token(monkeypatch, 
 def _write_v37_save(directory, *, password: str, token: str) -> dict:
     instance = _instance()
     data = instance.to_dict()
+    data = legacy_table_payload(data)
     data["instance_schema_version"] = 37
     data["modules"]["room_access"] = {**V2_SLOT, "room_password": password, "room_token": token, "seat_credentials": {}}
     directory.mkdir(parents=True, exist_ok=True)

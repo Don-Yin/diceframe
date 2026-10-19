@@ -15,7 +15,8 @@ from src.webui.viewer import viewer_for
 
 logger = logging.getLogger("trpg")
 from src.webui.routes.game_route_common import _gm_only_inst
-from src.engine.modules import media, room_access
+from src.engine import module_hooks
+from src.engine.modules import room_access
 
 
 async def api_games(request: web.Request) -> web.Response:
@@ -53,7 +54,7 @@ async def api_game_adventure_projection(request: web.Request) -> web.Response:
     game_key = request.match_info["game_key"]
     instance = api.get_game_instance(game_key)
     viewer = viewer_for(request, instance)
-    result = api.game_adventure_projection(game_key, viewer_is_gm=viewer.is_gm)
+    result = api.game_adventure_projection(game_key, viewer_is_gm=viewer.is_gm, viewer_uid=viewer.uid)
     return (
         web.json_response(result)
         if result is not None
@@ -71,7 +72,7 @@ async def api_game_scene_image_file(request: web.Request) -> web.StreamResponse:
     reference = (
         api.resolve_default_scene_image(inst.world_id, inst.rule_id)
         if use_default
-        else media.scene_image(inst)
+        else (module_hooks.read_value(inst, module_hooks.SCENE_IMAGE) or {})
         or api.resolve_default_scene_image(inst.world_id, inst.rule_id)
     )
     path = api.resolve_scene_image_file(reference)

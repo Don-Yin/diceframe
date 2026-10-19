@@ -57,6 +57,15 @@ def test_reference_closure_rejects_unknown_kind() -> None:
         )
 
 
+def test_commit_plan_reports_unresolved_explicit_references() -> None:
+    draft = ContentDraft(
+        "lorebook", "device", "phone-1", "book-1", {},
+        references=(ContentDraft("npc", "device", "phone-1", "guard", {}).ref,),
+    )
+    plan = build_commit_plan([draft])
+    assert [ref.id for ref in plan.unresolved_references] == ["guard"]
+
+
 def test_lorebook_preview_contains_shared_draft_and_plan() -> None:
     result = preview_lorebook_import({
         "spec": "lorebook_v3",
@@ -65,3 +74,4 @@ def test_lorebook_preview_contains_shared_draft_and_plan() -> None:
 
     assert result["content_draft"].kind == "lorebook"
     assert result["commit_plan"].operations[0].action == "create"
+    assert result["plan_digest"].startswith("sha256:")

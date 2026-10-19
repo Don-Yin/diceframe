@@ -61,6 +61,25 @@ def _node_map(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {node["id"]: node for node in graph.get("nodes", [])}
 
 
+def validate_choice_state(progress: dict[str, Any], graph: dict[str, Any]) -> None:
+    if not isinstance(progress, dict):
+        raise ProgressError('adventure progress is invalid')
+    choices = {node['id']: {transition['choice_id'] for transition in node['transitions']} for node in graph['nodes'] if node.get('choice_mode') == 'exclusive'}
+    selected = progress.get('selected_choices', {})
+    requests = progress.get('choice_requests', [])
+    if not isinstance(selected, dict) or len(selected) > 256 or any(node not in choices or not isinstance(choice, str) or choice not in choices[node] for node, choice in selected.items()):
+        raise ProgressError('saved selected choices are invalid')
+    if any(node in choices and node not in selected for node in progress.get('completed_nodes', [])):
+        raise ProgressError('completed exclusive node has no recorded choice')
+    if not isinstance(requests, list) or len(requests) > 256:
+        raise ProgressError('saved choice requests are invalid')
+    for row in requests:
+        if not isinstance(row, dict) or set(row) != {'node_id', 'choice_id', 'actor_uid'} or any(not isinstance(value, str) for value in row.values()):
+            raise ProgressError('saved choice requests are invalid')
+        if row['node_id'] not in choices or row['choice_id'] not in choices[row['node_id']] or not row['actor_uid']:
+            raise ProgressError('saved choice request does not match the graph')
+
+
 def complete_node(
     progress: dict[str, Any],
     graph: dict[str, Any],
@@ -68,6 +87,7 @@ def complete_node(
     *,
     instance: Any = None,
     rules_evaluator: Any = None,
+    choice_id: str = "",
 ) -> list[str]:
     """Complete one active node; activate gate-satisfied successors.
 
@@ -76,6 +96,7 @@ def complete_node(
     """
 
     nodes = _node_map(graph)
+    validate_choice_state(progress, graph)
     if node_id not in nodes:
         raise ProgressError(f"node does not exist: {node_id!r}")
     active = progress.setdefault("active_nodes", [])
@@ -83,16 +104,34 @@ def complete_node(
         raise ProgressError(
             f"node is not active: {node_id!r} (active: {sorted(active)})"
         )
+    node = nodes[node_id]
+    transitions = node.get("transitions", [])
+    if node.get("choice_mode") == "exclusive":
+        selected = next((transition for transition in transitions if transition.get("choice_id") == choice_id), None)
+        if selected is None:
+            raise ProgressError("an explicit declared choice is required")
+        try:
+            satisfied = gates_satisfied(selected.get("conditions") or [], instance=instance, progress=progress, rules_evaluator=rules_evaluator)
+        except GateError:
+            satisfied = False
+        if not satisfied:
+            raise ProgressError("selected choice conditions are not satisfied")
+        transitions = [selected]
+    elif choice_id:
+        raise ProgressError("parallel nodes do not accept a choice")
     active.remove(node_id)
     completed = progress.setdefault("completed_nodes", [])
     if node_id not in completed:
         completed.append(node_id)
     _append_history(progress, {"kind": "node_completed", "id": node_id})
 
-    context = {"progress": progress}
+    if node.get("choice_mode") == "exclusive":
+        progress.setdefault("selected_choices", {})[node_id] = choice_id
+        _append_history(progress, {"kind": "choice_selected", "id": node_id, "choice_id": choice_id})
+        # Requests are advisory; resolution clears all requests for this node.
+        progress["choice_requests"] = [request for request in progress.get("choice_requests", []) if request.get("node_id") != node_id]
     activated: list[str] = []
-    node = nodes[node_id]
-    for transition in node.get("transitions", []):
+    for transition in transitions:
         target = str(transition.get("to") or "")
         if target in active or target in completed:
             continue  # 回流/并行边：目标已开放则 no-op。

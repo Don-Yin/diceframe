@@ -57,6 +57,7 @@ const diceHint = computed(() =>
     ? t('dndDiceHint')
     : ''
 )
+const damageDiceEnabled = computed(() => props.ruleMeta?.mechanics === 'dnd5e_core')
 
 const skills = ref<CharacterSkill[]>([])
 const background = ref('')
@@ -206,7 +207,11 @@ function finish() {
     identity,
     attributes: { ...attrs.value },
     skills: skills.value.filter(s => s.name?.trim()).map(skillToPayload),
-    equipment: equipment.value.filter(it => String(it.name || '').trim()).map(it => ({ name: String(it.name).trim(), type: it.type || 'weapon', damage: Number(it.damage) || 0, slot: it.slot || 'main_hand', quality: it.quality || 'common' })),
+    equipment: equipment.value.filter(it => String(it.name || '').trim()).map(it => ({
+      name: String(it.name).trim(), type: it.type || 'weapon', damage: Number(it.damage) || 0,
+      ...(damageDiceEnabled.value && String(it.damage_dice || '').trim() ? { damage_dice: String(it.damage_dice).trim() } : {}),
+      slot: it.slot || 'main_hand', quality: it.quality || 'common',
+    })),
     inventory: inventory.value.filter(it => String(it.name || '').trim()).map(it => ({ name: String(it.name).trim(), qty: Number(it.qty) || 1, effect: it.effect || '' })),
     background: background.value,
     gold: gold.value,
@@ -274,7 +279,7 @@ function finish() {
 
     <div v-else-if="step === 4" class="wizard-pane">
       <p class="form-hint">{{ t('itemsStepHint') }}</p>
-      <ItemEditor v-model:equipment="equipment" v-model:inventory="inventory" />
+      <ItemEditor v-model:equipment="equipment" v-model:inventory="inventory" :damage-dice-enabled="damageDiceEnabled" />
     </div>
 
     <div class="wizard-actions">

@@ -7,9 +7,12 @@ import os
 import signal
 import sys
 
-from aiohttp import web
-
 sys.path.insert(0, str(Path(__file__).parent))
+if __name__ == "__main__":
+    from src.docker_launcher.data_versions import prepare_version_data
+    prepare_version_data(Path(__file__).resolve().parent, os.environ)
+
+from aiohttp import web
 from src.runtime_env import load_project_env
 from src.runtime_asyncio import install_runtime_exception_handler
 from src.runtime_logging import RETENTION_DAYS, configure_runtime_logging
@@ -166,7 +169,8 @@ def _generate_initial_access_password() -> None:
 def _host_credentials() -> HostCredentials:
     return HostCredentials(
         state=STATE,
-        data_dir=DATA_DIR,
+        data_dir=CONFIG_FILE.parent,
+        plugin_data_dir=DATA_DIR,
         access_token_file=ACCESS_TOKEN_FILE,
         environ=os.environ,
         save_config=save_config,
@@ -280,6 +284,7 @@ api_test_proxy = CONFIG_CONTROLLER.test_proxy
 def _application_dependencies() -> ApplicationDependencies:
     return ApplicationDependencies(
         data_dir=DATA_DIR,
+        host_data_dir=CONFIG_FILE.parent,
         static_v2_dir=STATIC_V2_DIR,
         cors_origins=WEB_CORS_ORIGINS,
         transport=TRANSPORT,
@@ -299,6 +304,13 @@ def _application_dependencies() -> ApplicationDependencies:
 
 
 app = create_app(_application_dependencies())
+
+
+async def _register_application_actions(application: web.Application) -> None:
+    CONFIG_CONTROLLER.attach_agent_actions(application, application['api'])
+
+
+app.on_startup.append(_register_application_actions)
 
 
 async def _serve(loop: asyncio.AbstractEventLoop) -> bool:
@@ -366,7 +378,7 @@ async def _align_internal_api(started: list) -> None:
 
 
 if __name__ == "__main__":
-    runtime_log_path = configure_runtime_logging(DATA_DIR)
+    runtime_log_path = configure_runtime_logging(CONFIG_FILE.parent)
     logger.info("运行日志写入 %s（保留 %s 天）", runtime_log_path, RETENTION_DAYS)
     if TRANSPORT.degraded_error:
         logger.critical("%s", TRANSPORT.degraded_error)

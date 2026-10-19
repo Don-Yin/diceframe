@@ -9,6 +9,7 @@ from src.lorebook.activation import (
     python_regex_incompatibility,
 )
 from src.lorebook.domain import LoreEntryDraft, LorebookDraft
+from src.engine.language import normalize_language
 
 
 def from_lorebook_v3(payload: dict[str, Any]) -> LorebookDraft:
@@ -108,7 +109,7 @@ def from_lorebook_v3(payload: dict[str, Any]) -> LorebookDraft:
     # A previous DiceFrame export re-offers its preserved payload at book level;
     # merge it back instead of nesting it one level deeper on every round trip.
     preserved_book = book.get("preserved_extensions") if isinstance(book.get("preserved_extensions"), dict) else {}
-    known = {"name", "description", "scan_depth", "token_budget", "recursive_scanning", "entries", "extensions", "preserved_extensions"}
+    known = {"name", "description", "language", "scan_depth", "token_budget", "recursive_scanning", "entries", "extensions", "preserved_extensions"}
     unknown = {k: v for k, v in book.items() if k not in known}
     raw = dict(preserved_book.get("raw") or {})
     raw.update(unknown)
@@ -117,7 +118,7 @@ def from_lorebook_v3(payload: dict[str, Any]) -> LorebookDraft:
     warnings = [f"preserved unknown field: {k}" for k in sorted(unknown)]
     warnings.extend(sorted(regex_warnings))
     settings = {k: book[k] for k in ("scan_depth", "token_budget", "recursive_scanning") if k in book}
-    return LorebookDraft(name=str(book.get("name", "Lorebook v3") or "Lorebook v3"), description=str(book.get("description", "") or ""), settings=settings, entries=entries, source={"kind": "lorebook_v3"}, warnings=warnings, preserved_extensions={"raw": raw, "extensions": extensions})
+    return LorebookDraft(name=str(book.get("name", "Lorebook v3") or "Lorebook v3"), description=str(book.get("description", "") or ""), language=normalize_language(book.get("language")), settings=settings, entries=entries, source={"kind": "lorebook_v3"}, warnings=warnings, preserved_extensions={"raw": raw, "extensions": extensions})
 
 
 def _vector_activation(row: dict[str, Any]) -> str:

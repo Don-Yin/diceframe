@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.engine import module_hooks
 from src.engine.module_state import ModuleStateError, ModuleStateSpec, get_module_state, register_module_state
 
 MODULE_NAME = "media"
@@ -59,5 +60,22 @@ def payload_container(payload: dict[str, Any]) -> dict[str, Any]:
     return slot
 
 
+_STATE = {
+    module_hooks.SCENE_IMAGE: (scene_image, replace_scene_image),
+    module_hooks.MAP_BACKGROUND: (map_background, replace_map_background),
+}
+
+
+def record_state(instance: Any, kind: str, value: Any) -> None:
+    if kind in _STATE:
+        _STATE[kind][1](instance, value)
+
+
+def read_state(instance: Any, kind: str) -> Any:
+    return _STATE[kind][0](instance) if kind in _STATE else None
+
+
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)
 register_module_state(SPEC)
+module_hooks.register(module_hooks.STATE_RECORD, MODULE_NAME, record_state)
+module_hooks.register(module_hooks.STATE_READ, MODULE_NAME, read_state)

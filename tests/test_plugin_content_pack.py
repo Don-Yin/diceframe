@@ -433,6 +433,46 @@ def test_content_pack_scene_image_assets_are_exposed_as_plugin_references(tmp_pa
     }
 
 
+def test_content_pack_scene_image_pool_preserves_order_and_legacy_primary(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "scene-pool",
+        plugin_type="content-pack",
+        entrypoint=False,
+        manifest_extra={"contributes": {
+            "world_templates": ["content/worlds/*.json"],
+            "scene_images": ["assets/scenes/*"],
+        }},
+    )
+    pack = plugins / "scene-pool"
+    (pack / "content" / "worlds").mkdir(parents=True)
+    (pack / "assets" / "scenes").mkdir(parents=True)
+    for name in ("first.webp", "second.webp"):
+        (pack / "assets" / "scenes" / name).write_bytes(b"RIFF-scene-test")
+    (pack / "content" / "worlds" / "pool.json").write_text(json.dumps({
+        "world_id": "pool",
+        "world_name": "Pool",
+        "default_rule": "freeform_fantasy",
+        "scene_images": [
+            {"kind": "asset", "path": "assets/scenes/first.webp"},
+            {"kind": "asset", "path": "assets/scenes/second.webp"},
+        ],
+    }), encoding="utf-8")
+    config_dir = tmp_path / "data" / "scene-pool"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text(json.dumps({"enabled": True}), encoding="utf-8")
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+
+    world = host.load_world_template("pool")
+
+    assert [item["path"] for item in world["scene_images"]] == [
+        "assets/scenes/first.webp", "assets/scenes/second.webp",
+    ]
+    assert world["scene_image"] == world["scene_images"][0]
+
+
 def test_content_pack_hash_named_scene_assets_are_normalized_on_install(tmp_path):
     """作者用哈希/原名/中文命名图片也能安装：资产身份自动规范化，路径引用不变。"""
     plugins = tmp_path / "plugins"
@@ -887,6 +927,121 @@ def test_export_content_pack_flat_has_plugin_json_at_root(tmp_path):
     assert "config.schema.json" in names
     assert "content/worlds/w1.json" in names
     assert not any(n.startswith("my-pack/") for n in names), names
+
+
+def test_export_content_pack_includes_selected_adventure_and_lorebook(tmp_path):
+    """Creator exports keep native adventure files and per-game lorebook data."""
+    from types import SimpleNamespace
+    from src.webui.services.plugins import export_content_pack
+
+    host = PluginHost(tmp_path / "plugins", tmp_path / "data")
+    root = tmp_path / "adventure-source" / "lanterns"
+    root.mkdir(parents=True)
+    (root / "manifest.json").write_text(json.dumps({"adventure_id": "user:lanterns"}), encoding="utf-8")
+    (root / "adventure.json").write_text(json.dumps({"id": "lanterns", "name": "Lanterns"}), encoding="utf-8")
+    bundle = SimpleNamespace(root=root, manifest=SimpleNamespace(adventure_id="user:lanterns"))
+    resolver = SimpleNamespace(list_resolutions=lambda _language: [SimpleNamespace(bundle=bundle)])
+
+    class _Lore:
+        def list_lorebooks(self):
+            return [{"id": "book-1", "name": "Book", "source_kind": "user", "source_id": "book-1"}]
+        def list_book_entries(self, book_id):
+            return [{"id": "entry-1", "book_id": book_id, "name": "Entry", "content": "text"}]
+
+    deps = _plugin_export_dependencies(SimpleNamespace(_plugins=host, _lore=_Lore(), _rules_dir=tmp_path))
+    deps = plugin_service.PluginExportDependencies(
+        plugin_host=deps.plugin_host, lorebook=deps.lorebook, rules_dir=deps.rules_dir,
+        list_character_cards=deps.list_character_cards, media=deps.media,
+        adventure_resolver=resolver,
+    )
+    result = export_content_pack(
+        deps, "lantern-pack", "Lantern pack", "1.0.0", "desc",
+        adventure_ids=["user:lanterns"], lorebook_ids=["book-1"],
+    )
+    assert result["ok"] is True
+    with zipfile.ZipFile(io.BytesIO(result["payload"])) as archive:
+        names = set(archive.namelist())
+        assert "lantern-pack/adventures/lanterns/manifest.json" in names
+        assert "lantern-pack/content/lorebooks/book-1.json" in names
+        manifest = json.loads(archive.read("lantern-pack/plugin.json"))
+        assert manifest["content_profile"] == "adventure-module"
+        assert manifest["adventure_packages"] == ["adventures/lanterns"]
+        book = json.loads(archive.read("lantern-pack/content/lorebooks/book-1.json"))
+        assert book["entries"][0]["id"] == "entry-1"
+
+
+def test_export_content_pack_requires_and_honors_adventure_source_refs(tmp_path):
+    """Same adventure IDs from different sources must never be silently mixed."""
+    from types import SimpleNamespace
+    from src.webui.services.plugins import export_content_pack
+
+    host = PluginHost(tmp_path / "plugins", tmp_path / "data")
+    resolutions = []
+    for source_kind, source_id, directory in (("builtin", "", "builtin-copy"), ("plugin", "pack-a", "plugin-copy")):
+        root = tmp_path / directory
+        root.mkdir(parents=True)
+        (root / "manifest.json").write_text(json.dumps({"adventure_id": "shared-adventure"}), encoding="utf-8")
+        (root / "adventure.json").write_text(json.dumps({"id": "shared-adventure"}), encoding="utf-8")
+        resolutions.append(SimpleNamespace(
+            source_kind=source_kind,
+            source_id=source_id,
+            bundle=SimpleNamespace(root=root, manifest=SimpleNamespace(adventure_id="shared-adventure")),
+        ))
+
+    resolver = SimpleNamespace(list_resolutions=lambda _language: resolutions)
+    deps = plugin_service.PluginExportDependencies(
+        plugin_host=host, lorebook=None, rules_dir=tmp_path,
+        list_character_cards=lambda: {"cards": []},
+        media=plugin_service.PluginExportMediaDependencies(
+            package_scene_image=lambda *_args: None,
+            package_content_map=lambda *_args, **_kwargs: None,
+            avatar_file=lambda _asset: None,
+            generated_image_file=lambda _asset: None,
+            plugin_asset_path=lambda *_args: tmp_path / "missing",
+        ), adventure_resolver=resolver,
+    )
+    ambiguous = export_content_pack(deps, "shared-pack", "Shared", "1.0.0", "desc", adventure_ids=["shared-adventure"])
+    assert ambiguous["ok"] is False
+    assert "来源不唯一" in ambiguous["error"]
+
+    selected = export_content_pack(
+        deps, "shared-pack", "Shared", "1.0.0", "desc",
+        adventure_refs=[{"adventure_id": "shared-adventure", "source_kind": "plugin", "source_id": "pack-a"}],
+    )
+    assert selected["ok"] is True
+    with zipfile.ZipFile(io.BytesIO(selected["payload"])) as archive:
+        names = set(archive.namelist())
+        assert "shared-pack/adventures/plugin-copy/manifest.json" in names
+        assert "shared-pack/adventures/builtin-copy/manifest.json" not in names
+
+
+@pytest.mark.asyncio
+async def test_exported_adventure_module_round_trips_through_plugin_install(tmp_path):
+    from src.adventures.resolver import AdventureResolver
+    from src.webui.services.plugins import export_content_pack
+
+    host = PluginHost(tmp_path / "plugins", tmp_path / "data")
+    resolver = AdventureResolver.from_directories(Path("templates/adventures"), None)
+    deps = plugin_service.PluginExportDependencies(
+        plugin_host=host, lorebook=None, rules_dir=tmp_path,
+        list_character_cards=lambda: {"cards": []},
+        media=plugin_service.PluginExportMediaDependencies(
+            package_scene_image=lambda *_args: None,
+            package_content_map=lambda *_args, **_kwargs: None,
+            avatar_file=lambda _asset: None,
+            generated_image_file=lambda _asset: None,
+            plugin_asset_path=lambda *_args: tmp_path / "missing",
+        ), adventure_resolver=resolver,
+    )
+    result = export_content_pack(
+        deps, "greymoor-module", "Greymoor module", "1.0.0", "adventure module",
+        adventure_ids=["core:lanterns_of_greymoor"],
+    )
+    assert result["ok"] is True
+    await host.install_from_zip(result["payload"], overwrite=True)
+    runtime = host.plugins["greymoor-module"]
+    assert runtime.adventure_packages_root is not None
+    assert runtime.adventure_package_directories == ("lanterns_of_greymoor",)
 
 
 def test_cleanup_plugin_removes_imported_character_cards(tmp_path):

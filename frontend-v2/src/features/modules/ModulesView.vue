@@ -10,6 +10,9 @@ import {
 } from '@/api/modules'
 import { useLocale } from '@/composables/useLocale'
 import type { MessageKey } from '@/i18n'
+import { libraryCopy } from '@/features/library/copy'
+import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
+import { moduleCategory, moduleCopy } from './copy'
 
 type RecoveryAdventure = {
   binding?: {
@@ -29,14 +32,18 @@ type RecoveryCheck = {
   sourceMatches: boolean
 }
 
-const { t } = useLocale()
+const { t, locale } = useLocale()
+const copy = computed(() => moduleCopy(locale.value))
+const library = computed(() => libraryCopy(locale.value))
 const route = useRoute()
 const modules = ref<ModuleSummary[]>([])
 const market = ref<ModuleMarketplaceItem[]>([])
 const marketError = ref('')
 const marketKeyword = ref('')
+const marketRuleset = ref('all')
 const marketBusy = ref(false)
 const installBusy = ref('')
+const installFeedback = ref<{ id: string; kind: 'busy' | 'success' | 'error'; message: string } | null>(null)
 const error = ref('')
 const loading = ref(false)
 const importFile = ref<File | null>(null)
@@ -44,8 +51,15 @@ const preview = ref<ModulePreviewResponse | null>(null)
 const importBusy = ref(false)
 const recoveryCheck = ref<RecoveryCheck | null>(null)
 const recoveryBusy = ref(false)
-const totalContent = (module: ModuleSummary) => Object.values(module.content_counts)
+const totalContent = (module: ModuleSummary) => module.content_counts == null ? null : Object.values(module.content_counts)
   .reduce((total, count) => total + count, 0)
+function inventorySummary(module: ModuleSummary): string {
+  const category = moduleCategory(module)
+  if (category === 'unknown') return copy.value.inventoryUnknown
+  if (category === 'adventure') return copy.value.adventureSummary(module.adventure_count || 0)
+  const count = totalContent(module)
+  return count == null ? copy.value.resourceBrowse : copy.value.resourceSummary(count)
+}
 
 // §8 Recovery：入口带过来的是**存档里的绑定身份**（adventure / version /
 // content_digest / source），恢复完成的判定完全交给服务端：重新读取该局的冒险
@@ -77,7 +91,7 @@ async function loadMarketplace() {
   marketBusy.value = true
   marketError.value = ''
   try {
-    const result = await moduleApi.marketplace(marketKeyword.value)
+    const result = await moduleApi.marketplace(marketKeyword.value, marketRuleset.value)
     if (!result.ok) {
       market.value = []
       marketError.value = result.error || t('modulesOnlineUnavailable', { error: result.error_code || '' })
@@ -148,14 +162,19 @@ async function importModule() {
 
 async function installFromMarketplace(item: ModuleMarketplaceItem) {
   installBusy.value = item.id
+  installFeedback.value = { id: item.id, kind: 'busy', message: String(locale.value).startsWith('zh') ? '正在安装…' : 'Installing…' }
   error.value = ''
   try {
-    await moduleApi.installFromMarketplace(item.id, item.installed)
+    const result = await moduleApi.installFromMarketplace(item.id, item.installed)
+    if (!result.ok) throw new Error(result.error || result.error_code || (String(locale.value).startsWith('zh') ? '安装没有完成' : 'Installation was not completed'))
+    installFeedback.value = { id: item.id, kind: 'success', message: String(locale.value).startsWith('zh') ? '已安装，正在刷新列表' : 'Installed; refreshing list' }
     await load()
     await loadMarketplace()
     await checkRecovery()
+    installFeedback.value = { id: item.id, kind: 'success', message: String(locale.value).startsWith('zh') ? '已安装，列表已刷新' : 'Installed; list refreshed' }
   } catch (cause: unknown) {
     error.value = errorMessage(cause)
+    installFeedback.value = { id: item.id, kind: 'error', message: errorMessage(cause) }
   } finally {
     installBusy.value = ''
   }
@@ -206,9 +225,17 @@ async function checkRecovery() {
 
 <template>
   <section class="view modules-page">
-    <p class="eyebrow">{{ t('modulesKicker') }}</p>
-    <h1>{{ t('navModules') }}</h1>
-    <p class="view-intro">{{ t('modulesIntro') }}</p>
+    <ContentPageHeader
+      class="modules-heading"
+      kicker="CONTENT PACKS"
+      :title="recoveryAdventure ? library.sourceTitle : library.sources"
+      :description="library.sourceIntro"
+    >
+      <template #actions>
+        <RouterLink class="content-button modules-return-link" :to="{ name: 'library' }">{{ library.backLibrary }}</RouterLink>
+      </template>
+    </ContentPageHeader>
+    <p v-if="!recoveryAdventure" class="module-boundary-note">{{ t('modulesIntro') }} {{ String(locale).startsWith('zh') ? '这里管理可安装的内容来源；冒险包在冒险工作台编辑，插件页只处理运行时插件。' : 'Manage installable content sources here. Edit adventure packages in the Adventure workbench; use Plugins for runtime plugins.' }}</p>
 
     <section v-if="recoveryAdventure" class="module-recovery" role="status" data-testid="modules-recovery">
       <strong>{{ t('modulesRecoveryTitle') }}</strong>
@@ -244,29 +271,31 @@ async function checkRecovery() {
 
     <p v-if="error" class="error-text">{{ error }}</p>
 
-    <section class="modules-section" data-testid="modules-installed">
-      <h2>{{ t('modulesSectionInstalled') }}</h2>
+    <section id="modules-installed" class="modules-section" data-testid="modules-installed">
+      <div class="section-title-row"><h2>{{ t('modulesSectionInstalled') }}</h2><button type="button" :disabled="loading" @click="load">{{ t('refresh') }}</button></div>
       <p v-if="loading" class="muted">{{ t('modulesLoading') }}</p>
-      <div v-else-if="!modules.length" class="empty-state">
-        <p>{{ t('modulesEmpty') }}</p>
+      <div v-else-if="!modules.length && !error" class="empty-state">
+          <p>{{ t('modulesEmpty') }}</p>
       </div>
       <div v-else class="modules-grid">
         <RouterLink v-for="module in modules" :key="module.id" :to="{ name: 'module-detail', params: { moduleId: module.id } }" class="module-card">
           <div>
-            <p class="eyebrow">{{ module.is_module ? t('modulesAdventureModule') : t('modulesContentPack') }}</p>
+            <p class="eyebrow">{{ moduleCategory(module) === 'adventure' ? copy.adventureLabel : moduleCategory(module) === 'resource' ? copy.resourceLabel : copy.packLabel }}</p>
             <h3>{{ module.name }}</h3>
             <p class="muted">{{ t('modulesVersion', { version: module.version }) }}</p>
             <p v-if="module.status === 'disabled'" class="muted">{{ t('modulesDisabledBadge') }}</p>
+            <p class="muted">{{ inventorySummary(module) }}</p>
+            <p v-if="module.status === 'disabled' && moduleCategory(module) === 'adventure'" class="muted">{{ copy.disabledAdventures }}</p>
           </div>
           <dl>
-            <div><dt>{{ t('modulesAdventures') }}</dt><dd>{{ module.adventure_count }}</dd></div>
-            <div><dt>{{ t('modulesContentCount') }}</dt><dd>{{ totalContent(module) }}</dd></div>
+            <div><dt>{{ t('modulesAdventures') }}</dt><dd>{{ module.adventure_count ?? '—' }}</dd></div>
+            <div><dt>{{ copy.resourceContributions }}</dt><dd>{{ totalContent(module) ?? '—' }}</dd></div>
           </dl>
         </RouterLink>
       </div>
     </section>
 
-    <section class="modules-section" data-testid="modules-local-import">
+    <section id="modules-local-import" class="modules-section" data-testid="modules-local-import">
       <h2>{{ t('modulesSectionLocal') }}</h2>
       <div class="module-import" :aria-label="t('modulesImport')">
         <label>{{ t('modulesImport') }} <input type="file" accept=".dfplugin" @change="selectImportFile"></label>
@@ -279,10 +308,19 @@ async function checkRecovery() {
       </div>
     </section>
 
-    <section class="modules-section" data-testid="modules-online">
+    <section id="modules-online" class="modules-section" data-testid="modules-online">
       <h2>{{ t('modulesSectionOnline') }}</h2>
       <div class="module-market-search">
         <input v-model="marketKeyword" type="search" :placeholder="t('modulesOnlineSearchPlaceholder')" :aria-label="t('modulesOnlineSearch')" @keyup.enter="loadMarketplace">
+        <label class="module-market-filter">
+          <span>{{ t('modulesOnlineFilter') }}</span>
+          <select v-model="marketRuleset" :aria-label="t('modulesOnlineFilter')" @change="loadMarketplace">
+            <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
+            <option value="dnd2024">D&amp;D 2024</option>
+            <option value="coc">CoC</option>
+            <option value="freeform">Freeform</option>
+          </select>
+        </label>
         <button type="button" :disabled="marketBusy" @click="loadMarketplace">{{ t('modulesOnlineSearch') }}</button>
       </div>
       <p v-if="marketBusy" class="muted">{{ t('modulesLoading') }}</p>
@@ -291,10 +329,11 @@ async function checkRecovery() {
       <div v-else class="modules-grid">
         <article v-for="item in market" :key="item.id" class="module-card" :data-testid="`modules-market-${item.id}`">
           <div>
-            <p class="eyebrow">{{ item.trust_level || t('modulesContentPack') }}</p>
+            <p class="eyebrow">{{ item.content_profile === 'adventure-module' ? copy.adventureLabel : copy.resourceLabel }}</p>
             <h3>{{ item.name || item.id }}</h3>
             <p class="muted">{{ t('modulesVersion', { version: item.latest_version || item.version }) }}</p>
             <p v-if="item.description" class="muted">{{ item.description }}</p>
+            <p class="muted">{{ item.adventure_count > 0 ? copy.adventureSummary(item.adventure_count) : copy.resourceBrowse }}</p>
             <p v-if="item.update_available" class="muted">{{ t('modulesUpdateAvailable') }}</p>
             <p v-if="item.verification_error" class="error-text">{{ item.verification_error }}</p>
           </div>
@@ -302,19 +341,24 @@ async function checkRecovery() {
             <div><dt>{{ t('modulesAdventures') }}</dt><dd>{{ item.adventure_count }}</dd></div>
             <div><dt>{{ t('modulesRuntimeTargets') }}</dt><dd>{{ item.ruleset_targets.join(' · ') || '—' }}</dd></div>
           </dl>
-          <button
-            v-if="!item.installed"
-            type="button"
-            :disabled="!item.installable || installBusy === item.id"
-            @click="installFromMarketplace(item)"
-          >{{ t('modulesInstallOnline') }}</button>
-          <button
-            v-else-if="item.update_available"
-            type="button"
-            :disabled="installBusy === item.id"
-            @click="installFromMarketplace(item)"
-          >{{ t('modulesUpdateOnline', { version: item.latest_version }) }}</button>
-          <span v-else class="muted">{{ t('modulesInstalledBadge') }}</span>
+          <div class="module-market-actions">
+            <button
+              v-if="!item.installed"
+              type="button"
+              :disabled="!item.installable || installBusy === item.id"
+              :aria-busy="installBusy === item.id"
+              @click="installFromMarketplace(item)"
+            >{{ installBusy === item.id ? (String(locale).startsWith('zh') ? '正在安装…' : 'Installing…') : t('modulesInstallOnline') }}</button>
+            <button
+              v-else-if="item.update_available"
+              type="button"
+              :disabled="installBusy === item.id"
+              :aria-busy="installBusy === item.id"
+              @click="installFromMarketplace(item)"
+            >{{ installBusy === item.id ? (String(locale).startsWith('zh') ? '正在更新…' : 'Updating…') : t('modulesUpdateOnline', { version: item.latest_version }) }}</button>
+            <span v-else class="module-installed-badge">{{ t('modulesInstalledBadge') }}</span>
+            <p v-if="installFeedback?.id === item.id" class="module-install-feedback" :class="`is-${installFeedback.kind}`" role="status">{{ installFeedback.message }}</p>
+          </div>
         </article>
       </div>
     </section>
@@ -323,27 +367,46 @@ async function checkRecovery() {
 
 <style scoped>
 .modules-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); }
-.modules-section { display: grid; gap: .75rem; margin-top: 1.75rem; }
+.modules-heading { position: relative; display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 1rem; isolation: isolate; padding: 24px 0 20px; border-bottom: 1px solid color-mix(in srgb, var(--df-accent) 22%, var(--df-border-soft)); }
+.modules-heading::before { position: absolute; z-index: -1; inset: 0 0 0 30%; content: ''; background: linear-gradient(90deg, var(--df-canvas), transparent 72%), var(--df-bg-atmosphere-image) center / cover; mask-image: linear-gradient(90deg, transparent, black 42%, transparent); opacity: .2; pointer-events: none; }
+.modules-heading .eyebrow { margin: 0; color: var(--df-interactive-strong); font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.modules-heading h1 { margin: 7px 0 9px; color: var(--df-accent-strong); font-family: var(--df-font-title); font-size: clamp(30px, 3vw, 42px); line-height: 1.18; letter-spacing: .02em; }
+.modules-heading .muted { margin: .25rem 0 0; max-width: 52rem; }
+.module-boundary-note { margin: .55rem 0 0; max-width: 58rem; color: var(--df-accent-strong); font-size: .82rem; }
+.module-empty-links { margin: .3rem 0 0; }
+.modules-section { display: grid; gap: .9rem; margin-top: 2rem; }
+.section-title-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 .modules-section h2 { margin: 0; font-size: 1.05rem; }
-.module-import, .module-market-search { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; padding: 1rem; border: 1px solid var(--border-color, #d6d0c4); border-radius: 1rem; }
+.module-import, .module-market-search { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; padding: 1rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-2); }
+.module-market-filter { display: inline-flex; align-items: center; gap: .45rem; color: var(--df-text-muted); font-size: .85rem; }
+.module-market-filter select { min-height: 34px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); color: var(--df-text); background: var(--df-surface-1); }
 .module-market-search input { flex: 1 1 12rem; min-width: 0; }
-.module-recovery { margin: 1rem 0; padding: 1rem; border-left: 3px solid var(--primary); background: var(--surface-color, #fff); }
+.module-recovery { margin: 1rem 0; padding: 1rem; border: 1px solid color-mix(in srgb, var(--df-accent) 30%, var(--df-border-soft)); border-left: 3px solid var(--df-accent); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
 .module-recovery p { margin: .4rem 0 0; }
 .module-recovery-facts { display: grid; gap: .25rem; margin: .6rem 0 0; }
-.module-recovery-facts dt { color: var(--text-muted, #69707d); font-size: .78rem; }
+.module-recovery-facts dt { color: var(--df-text-muted); font-size: .78rem; }
 .module-recovery-facts dd { margin: 0; font-size: .82rem; overflow-wrap: anywhere; }
-.module-recovery-ready { color: var(--primary); }
+.module-recovery-ready { color: var(--df-success); }
 .module-recovery-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .7rem; }
 .module-recovery-resume { display: inline-flex; align-items: center; padding: .35rem .8rem; border-radius: .6rem; text-decoration: none; }
-.module-card { display: grid; gap: 1rem; padding: 1.25rem; border: 1px solid var(--border-color, #d6d0c4); border-radius: 1rem; background: var(--surface-color, #fff); }
+.module-card { display: grid; gap: 1.1rem; padding: 1.35rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-1); color: var(--df-text); text-decoration: none; }
 .module-card h3 { margin: 0; font-size: 1rem; }
 .module-card dl { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 0; }
-.module-card dt { color: var(--text-muted, #69707d); font-size: .85rem; }
+.module-card dt { color: var(--df-text-muted); font-size: .85rem; }
 .module-card dd { margin: .2rem 0 0; font-size: 1.15rem; font-weight: 700; }
+.module-market-actions { display: grid; gap: .45rem; align-content: start; margin-top: auto; }
+.module-market-actions button { width: 100%; }
+.module-installed-badge { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 .8rem; border: 1px solid color-mix(in srgb, var(--df-success) 42%, var(--df-border-soft)); border-radius: var(--df-radius-md); color: var(--df-success); background: color-mix(in srgb, var(--df-success) 8%, var(--df-surface-1)); font-size: .82rem; font-weight: 700; }
+.module-install-feedback { margin: 0; color: var(--df-text-muted); font-size: .75rem; line-height: 1.35; }
+.module-install-feedback.is-success { color: var(--df-success); }
+.module-install-feedback.is-error { color: var(--df-danger, #e07a7a); }
 @media (max-width: 480px) {
+  .modules-heading { align-items: stretch; flex-direction: column; }
+  .modules-return-link { width: 100%; min-height: 44px; justify-content: center; }
   .module-import, .module-market-search { align-items: stretch; flex-direction: column; }
   .module-import label, .module-import button, .module-market-search button { width: 100%; }
   .module-import input[type="file"] { display: block; width: 100%; margin-top: .45rem; }
+  .module-market-search input { flex: 0 0 auto; width: 100%; min-height: 36px; }
   .modules-grid { grid-template-columns: 1fr; }
   .module-card { padding: 1rem; }
 }

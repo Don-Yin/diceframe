@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pytest
+from src.engine.game_instance import GameInstance
+from src.lorebook.resolver import resolve_active_books
 
 pytest_plugins = ["tests.webapi_harness"]
 
@@ -123,3 +125,41 @@ async def test_book_binding_failure_rolls_back_instance_and_earlier_bindings(web
     assert len(calls) == 2
     assert {tuple(inst.game_key) for inst in registry.list_all()} == before
     assert lorebook.list_bindings(scope_kind="game") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected", [[], ["notes", "world:template_world"]])
+async def test_explicit_book_selection_controls_runtime_and_survives_save(web_api, selected):
+    api, store, registry, _llm, _worlds = web_api
+    store.create_world("template_world", "Template")
+    for book_id in ("notes", "excluded", "global"):
+        store.create_lorebook({"id": book_id, "name": book_id})
+        store.bind_lorebook({"id": f"bind:{book_id}", "book_id": book_id,
+                            "scope_kind": "global" if book_id == "global" else "world",
+                            "scope_id": "" if book_id == "global" else "template_world"})
+    result = await api.create_game("template_world", book_bindings=[
+        {"ref": {"source_kind": "world" if book_id.startswith("world:") else "user",
+                 "source_id": "template_world" if book_id.startswith("world:") else book_id,
+                 "kind": "lorebook", "id": book_id}}
+        for book_id in selected
+    ], players=[{"character_name": "Tester", "attributes": {"str": 10}}])
+    assert result["ok"], result
+    instance = registry.get(api._parse_key(result["game_key"]))
+    assert {ref.book_id for ref in resolve_active_books(instance, store=store)} == set(selected)
+    persisted = instance.to_dict()
+    restored = GameInstance.from_dict(persisted)
+    assert {ref.book_id for ref in resolve_active_books(restored, store=store)} == set(selected)
+    assert persisted["modules"]["content_binding"]["book_selection"] == "explicit"
+    assert {ref["id"] for ref in persisted["modules"]["content_binding"]["book_refs"]} == set(selected)
+
+
+@pytest.mark.asyncio
+async def test_unknown_explicit_book_is_rejected_without_game_or_world(web_api):
+    api, store, registry, _llm, worlds = web_api
+    result = await api.create_game("broken", create_lorebook=True, book_bindings=[
+        {"ref": {"source_kind": "user", "source_id": "missing", "kind": "lorebook", "id": "missing"}}
+    ], players=[{"character_name": "Tester", "attributes": {"str": 10}}])
+    assert not result["ok"]
+    assert result["error_code"] == "BOOK_NOT_FOUND"
+    assert store.get_world("broken") is None
+    assert not (worlds / "broken.json").exists()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import random
 from pathlib import Path
 
 from src.engine.character_utils import set_hp
@@ -54,35 +53,10 @@ class ProgressionResolver:
         return max(1, hp_die // 2 + 1 + con_mod)
 
     def skill_growth_checks(self, instance: GameInstance, growth_skills: list[dict]) -> None:
-        """CoC 技能成长检定：检定成功使用的技能有概率成长。
-
-        掷 d100 > 当前技能值 → 技能 +1d10。
-        growth_skills: LLM 输出的 SKILL_GROWTH 标签解析结果。
-        """
-        seen: set[tuple[str, str]] = set()
-        for gs in growth_skills:
-            uid = gs.get("uid", "")
-            skill_name = gs.get("skill", "")
-            if not uid or not skill_name:
-                continue
-            key = (uid, skill_name)
-            if key in seen:
-                continue
-            seen.add(key)
-            cs = instance.get_character_sheet(uid)
-            skills: list[dict] = cs.get("skills", [])
-            for skill in skills:
-                if skill.get("name") == skill_name:
-                    current_val = skill.get("value", 20)
-                    if random.randint(1, 100) > current_val:
-                        growth = random.randint(1, 10)
-                        skill["value"] = min(current_val + growth, 99)
-                        msg = (f"技能成长: {instance.players[uid].get('character_name', uid)} "
-                               f"「{skill_name}」{current_val}% → {skill['value']}%")
-                        logger.info(msg)
-                        instance.set_character_sheet(uid, cs)
-                    break
-
+        """Retired narrator-tag entry point; real checks mark deferred growth."""
+        # Legacy protocol tags are accepted as narration only. They cannot
+        # authorize development marks or consume RNG (#541).
+        return
     @staticmethod
     def calc_xp_to_level(level: int) -> int:
         """计算升到下一级需要的总 XP（简单二次增长）。"""

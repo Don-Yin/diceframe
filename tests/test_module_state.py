@@ -48,7 +48,7 @@ def test_property_proxy_returns_live_dict():
     timers = lorebook_runtime.timers(instance)
     assert timers is instance.modules["lorebook_runtime"]["timers"]
     timers["e1"] = _timer(sticky=2)
-    instance.update_lorebook_timed_state()
+    lorebook_runtime.tick(instance)
     assert lorebook_runtime.timers(instance) is timers
     assert instance.modules["lorebook_runtime"]["timers"]["e1"]["sticky_remaining"] == 1
 
@@ -164,7 +164,7 @@ def test_save_load_round_trip_preserves_timers():
     restored = GameInstance.from_dict(payload)
     assert lorebook_runtime.timers(restored) == expected
     assert lorebook_runtime.timers(restored) is restored.modules["lorebook_runtime"]["timers"]
-    restored.update_lorebook_timed_state()
+    lorebook_runtime.tick(restored)
     assert lorebook_runtime.timers(instance) == expected
 
 

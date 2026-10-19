@@ -2,12 +2,12 @@ import { mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { describe, expect, it } from 'vitest'
 import SectionWorkspaceShell from '@/components/navigation/SectionWorkspaceShell.vue'
-import type { AppNavGroupId } from '@/navigation/appNavigation'
+import { isNavItemActive, type AppNavGroupId } from '@/navigation/appNavigation'
 import { i18n } from '@/i18n'
 
 async function mountShell(routeName = 'worlds', groupId: AppNavGroupId = 'content') {
   i18n.global.locale.value = 'zh-CN'
-  const routes = ['lorebook', 'worlds', 'adventures', 'modules', 'rules', 'memory', 'logs', 'plugins', 'settings', 'overview', 'play'].map(name => ({
+  const routes = ['library', 'lorebook', 'worlds', 'adventures', 'modules', 'rules', 'memory', 'logs', 'plugins', 'settings', 'overview', 'play'].map(name => ({
     path: `/${name}`,
     name,
     component: { template: '<div />' },
@@ -27,12 +27,27 @@ describe('SectionWorkspaceShell', () => {
     const wrapper = await mountShell()
     const links = wrapper.get('nav[aria-label="内容"]').findAll('a')
 
-    expect(links.map(link => link.text())).toEqual(expect.arrayContaining(['世界书资料、人物与隐藏真相', '世界舞台、封面与叙事风格']))
-  expect(links.map(link => link.attributes('href'))).toEqual([
-    '/lorebook', '/worlds', '/adventures', '/modules', '/rules',
+    const labels = links.map(link => link.text())
+    expect(labels).toEqual(['内容库', '世界资料', '内容包', '规则'])
+    expect(links.map(link => link.attributes('href'))).toEqual([
+      '/library', '/lorebook', '/modules', '/rules',
     ])
-    expect(links[1].attributes('aria-current')).toBe('page')
+    expect(links[1].classes()).toContain('active')
     expect(wrapper.text()).toContain('content')
+  })
+
+  it('keeps worlds in world lore and adventure authoring in the adventure tab', async () => {
+    const lorebook = await mountShell('lorebook')
+    const links = lorebook.get('nav[aria-label="内容"]').findAll('a')
+    expect(links[1].attributes('href')).toBe('/lorebook')
+    expect(links[1].classes()).toContain('active')
+
+    const adventures = await mountShell('adventures')
+    const adventureLinks = adventures.get('nav[aria-label="内容"]').findAll('a')
+    expect(adventureLinks[0].classes()).toContain('active')
+    expect(isNavItemActive('lorebook', 'lorebook')).toBe(true)
+    expect(isNavItemActive('library', 'adventures')).toBe(true)
+    expect(isNavItemActive('lorebook', 'worlds')).toBe(true)
   })
 
   it('reuses the same shell for management tools', async () => {

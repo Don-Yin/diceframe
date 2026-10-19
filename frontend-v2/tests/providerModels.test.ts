@@ -13,8 +13,8 @@ import {
 // 3) 保存失败时完整回滚该用途涉及的字段
 
 describe('catalogModelRoleEligible', () => {
-  it('declares the four model-configuration roles in one extensible registry', () => {
-    expect(CATALOG_MODEL_ROLES.map(role => role.id)).toEqual(['main', 'embedding', 'imagegen', 'asr'])
+  it('declares model-configuration roles in one extensible registry', () => {
+    expect(CATALOG_MODEL_ROLES.map(role => role.id)).toEqual(['main', 'check', 'embedding', 'imagegen', 'asr'])
   })
 
   it('accepts persisted models only for a matching role', () => {

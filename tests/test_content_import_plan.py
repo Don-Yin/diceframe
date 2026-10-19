@@ -334,8 +334,8 @@ def test_v11_moves_uniqueness_to_tracked_books_and_is_idempotent() -> None:
     )
     conn.commit()
 
-    assert migrations.migrate(conn) == 11
-    assert migrations.migrate(conn) == 11
+    assert migrations.migrate(conn) == migrations.CURRENT_LOREBOOK_SCHEMA_VERSION
+    assert migrations.migrate(conn) == migrations.CURRENT_LOREBOOK_SCHEMA_VERSION
     migrations._v11(conn)
 
     row = conn.execute("SELECT external_id, import_link, import_state_digest FROM lorebooks").fetchone()

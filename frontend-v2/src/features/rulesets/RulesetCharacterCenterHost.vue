@@ -16,6 +16,7 @@ const props = withDefaults(defineProps<{
   userId?: string
   cardId?: string
   restSession?: RestSessionStatus | null
+  initialFocus?: 'rest'
 }>(), {
   language: 'zh-CN',
   gameKey: '',
@@ -46,6 +47,7 @@ function onSaved(character: CharacterSheet, reason?: 'profile' | 'rest'): void {
     :user-id="userId"
     :card-id="cardId"
     :rest-session="restSession"
+    :initial-focus="initialFocus"
     @saved="onSaved"
     @rest-pending="emit('rest-pending')"
     @cancel="emit('cancel')"

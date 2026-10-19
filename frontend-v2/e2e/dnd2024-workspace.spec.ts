@@ -123,6 +123,7 @@ test('classic fantasy recommends the professional 2024 rules as the third card i
   await page.goto('/#/create')
   const worldSelect = page.locator('.create-config-surface label').filter({ hasText: /^世界模板/ }).locator('select')
   await worldSelect.selectOption('default_fantasy')
+  await page.locator('.create-rule-settings > summary').click()
 
   const cards = page.locator('.create-recommended-rules .rec-card')
   await expect(cards).toHaveCount(3)
@@ -384,6 +385,7 @@ test('guided creation enforces proficiency limits and enters the saved game even
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/#/create')
 
+  await page.locator('.create-rule-settings > summary').click()
   const ruleSelect = page.locator('.create-config-surface label').filter({ hasText: /^规则/ }).locator('select')
   await expect(ruleSelect).toBeVisible()
   await ruleSelect.selectOption('dnd2024_srd')

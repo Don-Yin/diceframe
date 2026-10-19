@@ -28,6 +28,7 @@ from src.commands.state_items import (
     unequip_item,
 )
 from src.engine.modules import progression_state
+from src.rulesets import resource_recovery
 
 logger = logging.getLogger("trpg")
 
@@ -44,6 +45,7 @@ class PlayerStateApplier:
         players_update: dict,
         rule=None,
         allowed_player_uids: set | None = None,
+        health_runtime=None,
     ) -> dict[str, frozenset[str]]:
         """应用玩家字段更新，并汇总每个角色本轮真正变化的 live state 域。
 
@@ -51,6 +53,22 @@ class PlayerStateApplier:
         全部 mutation 完成后，对同一角色只触发一次 ruleset reconciliation。
         没有实际变化的角色不会出现在返回值里。
         """
+
+        # Validate before touching any player's sheet. An unknown recovery
+        # policy must not silently restore the unrestricted legacy tag path.
+        recovery_policy = resource_recovery.policy(rule)
+        managed_resources = resource_recovery.managed_resources(rule)
+
+        def accepts_narrative_delta(cs: dict, key: str, delta: int | float) -> bool:
+            if recovery_policy is None:
+                return True
+            if key not in managed_resources or (key not in cs and get_resource(cs, key) is None):
+                logger.warning("忽略未声明或角色不具备的恢复资源: %s", key)
+                return False
+            if delta > 0:
+                logger.info("忽略未经恢复事务授权的正向资源标签: %s %+g", key, delta)
+                return False
+            return True
 
         changed_domains: dict[str, frozenset[str]] = {}
         for uid, pud in players_update.items():
@@ -64,6 +82,7 @@ class PlayerStateApplier:
                 )
                 continue
             cs = instance.get_character_sheet(uid)
+            hp_before = int(cs.get("hp", 0) or 0)
             hp_change = pud.get("hp_change")
             if isinstance(hp_change, (int, float)):
                 max_hp = cs.get("max_hp", 100)
@@ -95,18 +114,21 @@ class PlayerStateApplier:
                 logger.info("法力变化: %s %+d -> %d", uid, int(mana_change), cs["mana"])
             # 理智值变化
             san_change = pud.get("san_change")
-            if isinstance(san_change, (int, float)):
-                prev = cs.get("sanity", 99)
+            if isinstance(san_change, (int, float)) and accepts_narrative_delta(cs, "sanity", san_change):
+                prev = cs.get("sanity", (get_resource(cs, "sanity") or {}).get("current", 99)
+                              if recovery_policy is not None else 99)
                 apply_bounded_stat_delta(
                     cs, "sanity", san_change,
-                    default_current=99, max_key="max_sanity", default_max=99,
+                    default_current=prev,
+                    max_key="max_sanity", default_max=99,
                 )
                 logger.info("理智值变化: %s %+d -> %d", uid, int(san_change), cs["sanity"])
                 self._madness.apply_madness(instance, uid, cs, prev - cs["sanity"])
             # 理智检定
             san_check_loss = pud.get("san_check_loss")
-            if san_check_loss:
-                current_san = cs.get("sanity", 50)
+            if san_check_loss and accepts_narrative_delta(cs, "sanity", -1):
+                current_san = cs.get("sanity", (get_resource(cs, "sanity") or {}).get("current", 50)
+                                     if recovery_policy is not None else 50)
                 san_res, san_verdict = check_d100(current_san)
                 try:
                     loss_dice = dice_roll(san_check_loss)
@@ -114,7 +136,7 @@ class PlayerStateApplier:
                 except Exception:
                     full_loss = 6
                 actual_loss = (full_loss + 1) // 2 if san_verdict in ("成功", "大成功") else full_loss
-                prev = cs.get("sanity", 99)
+                prev = cs.get("sanity", current_san if recovery_policy is not None else 99)
                 apply_bounded_stat_delta(
                     cs, "sanity", -actual_loss,
                     default_current=current_san, max_key="max_sanity", default_max=99,
@@ -124,33 +146,18 @@ class PlayerStateApplier:
                 self._madness.apply_madness(instance, uid, cs, prev - cs["sanity"])
             # 幸运值变化
             luck_change = pud.get("luck_change")
-            if isinstance(luck_change, (int, float)):
+            if isinstance(luck_change, (int, float)) and accepts_narrative_delta(cs, "luck", luck_change):
                 apply_bounded_stat_delta(
                     cs, "luck", luck_change,
-                    default_current=99, max_key="max_luck", default_max=99,
+                    default_current=(get_resource(cs, "luck") or {}).get("current", 99)
+                    if recovery_policy is not None else 99,
+                    max_key="max_luck", default_max=99,
                 )
                 logger.info("幸运值变化: %s %+d -> %d", uid, int(luck_change), cs["luck"])
-            # 推动检定
-            push_skill = pud.get("push_skill")
-            if push_skill:
-                skills: list[dict] = cs.get("skills", [])
-                for s in skills:
-                    if s.get("name") == push_skill:
-                        sv = s.get("value", 20)
-                        push_res, push_verdict = check_d100(sv)
-                        pushed_key = f"_pushed_{push_skill}"
-                        pushed_rounds = cs.get(pushed_key, 0)
-                        if pushed_rounds >= progression_state.round_value(instance):
-                            break  # 本轮已推动过此技能
-                        cs[pushed_key] = progression_state.round_value(instance)
-                        # 推动失败：后果加倍
-                        fail_suffix = ""
-                        if push_verdict in ("失败", "大失败"):
-                            fail_suffix = " (推动失败，后果加倍！)"
-                        logger.info("推动检定: %s 推动技能 %s d100=%d vs %d -> %s%s",
-                                    instance.players[uid].get("character_name", uid),
-                                    push_skill, push_res.natural, sv, push_verdict, fail_suffix)
-                        break
+            # Legacy LLM PUSH tags are untrusted proposals. Only the linked
+            # player/Keeper decision workflow may re-roll a failed check.
+            if pud.get("push_skill"):
+                logger.info("Ignored unconfirmed LLM Push proposal: uid=%s", uid)
             # 施法
             cast_spell = pud.get("cast_spell")
             if cast_spell:
@@ -169,10 +176,22 @@ class PlayerStateApplier:
                     if not isinstance(delta, (int, float)) or int(delta) == 0:
                         continue
                     stat_key = str(stat_key)
+                    if stat_key in {"sanity", "luck"} and not accepts_narrative_delta(cs, stat_key, delta):
+                        continue
                     if get_resource(cs, stat_key) is None and stat_key not in cs:
                         logger.warning("STAT 资源不在角色卡上，已忽略: %s %s", uid, stat_key)
                         continue
-                    after = apply_resource_delta(cs, stat_key, int(delta), rule)
+                    if recovery_policy is not None and stat_key in managed_resources:
+                        # Match SAN/LUCK's normal sheet authority. A stale
+                        # resources projection must not turn a loss into gain.
+                        before = cs.get(stat_key, (get_resource(cs, stat_key) or {}).get('current', 0))
+                        after = apply_bounded_stat_delta(cs, stat_key, int(delta), default_current=before,
+                                                         max_key='max_' + stat_key, default_max=99)
+                    else:
+                        before = (get_resource(cs, stat_key) or {}).get('current', cs.get(stat_key, 0))
+                        after = apply_resource_delta(cs, stat_key, int(delta), rule)
+                    if recovery_policy is not None and stat_key == 'sanity' and after < before:
+                        self._madness.apply_madness(instance, uid, cs, before - after)
                     logger.info("规则资源变化: %s %s %+d -> %d", uid, stat_key, int(delta), after)
                 check_resource_triggers(instance, uid, rule)
             # 死亡检测（治疗先苏醒，HP 归零再按规则落昏迷/死亡）
@@ -182,6 +201,15 @@ class PlayerStateApplier:
                             instance.players[uid].get("character_name", uid),
                             progression_state.round_value(instance), cs.get("hp", 0))
             instance.set_character_sheet(uid, cs)
+            if health_runtime is not None:
+                accepted = health_runtime.apply_narrative_hp_delta(
+                    instance, str(uid), int(cs.get("hp", 0) or 0) - hp_before,
+                )
+                if "hp_change" in pud:
+                    if accepted:
+                        pud["hp_change"] = accepted
+                    else:
+                        pud.pop("hp_change", None)
             if domains:
                 changed_domains[uid] = frozenset(domains)
         return changed_domains

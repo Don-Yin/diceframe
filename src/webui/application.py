@@ -30,6 +30,7 @@ from src.webui.routes.avatars import register_avatars
 from src.webui.routes.bot import register_bot
 from src.webui.routes.character_cards import register_character_cards
 from src.webui.routes.content import register_content
+from src.webui.routes.content_review import register as register_content_review
 from src.webui.routes.games import register_games
 from src.webui.routes.generated_images import register_generated_images
 from src.webui.routes.generation import register_generation
@@ -53,6 +54,8 @@ from src.webui.routes.updater import register_updater
 from src.webui.routes.worlds import register_worlds
 from src.webui.services.security import SecurityTransportService
 from src.webui.session import SessionManager, session_middleware
+from src.webui.update_admission import update_admission
+from src.webui.run_write_admission import run_write_admission
 from src.webui.sse_ticket import SseTicketStore
 
 
@@ -78,6 +81,7 @@ class ApplicationDependencies:
     test_connection: Handler
     test_embedding: Handler
     test_proxy: Handler
+    host_data_dir: Path | None = None
 
 
 def create_app(dependencies: ApplicationDependencies) -> web.Application:
@@ -88,18 +92,21 @@ def create_app(dependencies: ApplicationDependencies) -> web.Application:
     application.on_startup.append(dependencies.on_startup)
     application.on_cleanup.append(dependencies.on_cleanup)
     application.middlewares.append(cors_middleware)
+    application.middlewares.append(update_admission)
     application.on_response_prepare.append(cors_response_prepare)
     application.middlewares.append(session_middleware)
     application.middlewares.append(abuse_guard_middleware)
     application.middlewares.append(dependencies.auth_middleware)
     application.middlewares.append(error_code_middleware)
+    application.middlewares.append(run_write_admission)
     application.on_response_prepare.append(add_response_security_headers)
     application["_config_reload_lock"] = asyncio.Lock()
-    application["session_manager"] = SessionManager(dependencies.data_dir)
+    host_data = dependencies.host_data_dir or dependencies.data_dir
+    application["session_manager"] = SessionManager(host_data)
     application[ABUSE_GUARD_KEY] = AbuseGuard()
-    application[LOGIN_AUDIT_KEY] = LoginAuditStore(dependencies.data_dir)
-    application[DEVICE_TOKENS_KEY] = DeviceTokenStore(dependencies.data_dir)
-    application[SERVER_IDENTITY_KEY] = ServerIdentityStore(dependencies.data_dir)
+    application[LOGIN_AUDIT_KEY] = LoginAuditStore(host_data)
+    application[DEVICE_TOKENS_KEY] = DeviceTokenStore(host_data)
+    application[SERVER_IDENTITY_KEY] = ServerIdentityStore(host_data)
     application[PAIRING_SERVICE_KEY] = PairingService(
         application[DEVICE_TOKENS_KEY],
         audit=application[LOGIN_AUDIT_KEY],
@@ -117,7 +124,7 @@ def create_app(dependencies: ApplicationDependencies) -> web.Application:
     application["security_transport"] = SecurityTransportService(
         dependencies.config_state,
         dependencies.save_config,
-        dependencies.data_dir,
+        host_data,
         dependencies.transport,
     )
     register_routes(application, dependencies)
@@ -153,6 +160,7 @@ def register_routes(
     register_modules(application)
     register_character_cards(application)
     register_content(application)
+    register_content_review(application)
     register_avatars(application)
     register_scene_images(application)
     register_maps(application)

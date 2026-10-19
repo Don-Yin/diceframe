@@ -38,6 +38,8 @@ with a fake LLM client that captures every prompt it is handed.
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import logging
 from types import SimpleNamespace
 from typing import Any
@@ -54,12 +56,12 @@ from src.commands.ai_player import (
 from src.commands.check_planner import plan_round_checks
 from src.engine.checks import resolve_check_request
 from src.engine.game_instance import GameInstance, GameState
-from src.engine.modules import table_settings
+
 from src.engine.player_control import get_control, set_control
 from src.engine.world_state import apply_world_ops
 from src.rules.rule_system import RuleSystem
 from src.rulesets.registry import RulesetRuntimeRegistry
-from src.webui.services.turns import TurnDependencies, submit_action
+from src.webui.services.turns import TurnDependencies, _advance_progression, submit_action
 from src.engine.modules import private_channels, round_presentation, session_stats
 
 HUMAN_SHEET = {"hp": 10, "max_hp": 10, "attributes": {"str": 14, "dex": 10}}
@@ -104,7 +106,7 @@ def make_instance(
     instance = GameInstance(game_key=("web", "ai-player", "bot"), rule_id="test")
     instance.state = GameState.ACTIVE_ACTION
     instance.round_number = 1
-    table_settings.replace_solo_mode(instance, solo)
+    game_config.replace_solo_mode(instance, solo)
     for uid in humans:
         # 走真实席位写入路径：控制记录由聚合保证存在。
         instance.put_player(uid, {
@@ -340,7 +342,7 @@ async def test_solo_mode_fills_ai_actions_then_auto_advances() -> None:
     llm = FakePlayerLLM()
     dependencies = make_dependencies(instance, llm_client=llm)
 
-    assert table_settings.solo_mode(instance) is True
+    assert game_config.solo_mode(instance) is True
     result = await submit_action(dependencies, "game", "h1", "我点亮提灯。")
 
     assert result["payload"]["advanced"] is True
@@ -444,6 +446,24 @@ async def test_provider_failure_skips_one_seat_and_keeps_the_round(
     assert ai_actions(instance, "a2")[0]["metadata"]["generated_for_round"] == 1
     assert len(llm.calls) == 2
     assert SKIP_MARKER in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("solo", [False, True])
+async def test_all_ai_provider_failure_uses_safe_fallback_and_advances(solo: bool) -> None:
+    instance = make_instance(humans=(), ai=("a1",), solo=solo)
+    llm = FakePlayerLLM(fail_indexes=(0,))
+    dependencies = make_dependencies(instance, llm_client=llm)
+
+    result = await _advance_progression(
+        dependencies, instance, game_key="web|ai-player|bot",
+    )
+
+    assert result is not None
+    assert result["payload"]["advanced"] is True
+    assert instance.state == GameState.ACTIVE_JUDGMENT
+    action = ai_actions(instance, "a1")[0]
+    assert action["metadata"]["fallback"] is True
 
 
 # ---- 9. 幂等：(run, round, uid) 至多一条 AI 行动 -----------------------------

@@ -15,6 +15,8 @@ extraction 重构必须让这组测试在迁移前后都保持绿色；任何字
 
 from __future__ import annotations
 
+from src.engine.modules import check_presentation, game_config, narration_preferences
+
 import pytest
 
 from src.engine.modules import narrative_notes
@@ -22,7 +24,7 @@ from src.engine.game_instance import GameInstance, GameState
 from src.engine.modules import economy_state
 from src.engine.modules import legacy_combat, media, private_channels, room_access, session_stats
 from src.engine.world_state import fresh_world_state
-from src.engine.modules import checks, combat_extension_state, ruleset_runtime, table_settings
+from src.engine.modules import checks, combat_extension_state, ruleset_runtime
 from src.engine.modules import (
     adventure_runtime_state, health, lorebook_runtime, round_presentation, round_safety, world_reports,
 )
@@ -129,20 +131,20 @@ def _make_populated_instance() -> GameInstance:
     world_reports.replace_last_world_legality(instance, [{"player": "u1"}])
     world_reports.replace_last_world_events(instance, [{"event_id": "e1"}])
     round_presentation.replace_last_token_budget_bump(instance, {"kind": "narrative", "from": 1, "to": 2})
-    table_settings.replace_solo_mode(instance, True)
-    table_settings.replace_seed_code(instance, "SEED42")
-    table_settings.replace_difficulty(instance, "硬核")
-    table_settings.replace_narrative_perspective(instance, "immersive")
-    table_settings.replace_gm_style_override(instance, dict(PRESERVED_GM_STYLE_OVERRIDE))
+    game_config.replace_solo_mode(instance, True)
+    game_config.replace_seed_code(instance, "SEED42")
+    game_config.replace_difficulty(instance, "硬核")
+    narration_preferences.replace_narrative_perspective(instance, "immersive")
+    narration_preferences.replace_gm_style_override(instance, dict(PRESERVED_GM_STYLE_OVERRIDE))
     instance.language = "en"
-    table_settings.replace_entry_point(instance, "plugin")
+    game_config.replace_entry_point(instance, "plugin")
     round_presentation.replace_pending_combat_results(instance, [{"damage": 5}])
     lorebook_runtime.replace_timers(instance, {"e1": {"remaining": 3}})
     round_presentation.replace_quick_actions(instance, ["attack"])
     health.replace_health_events(instance, [{"kind": "degraded"}])
     health.replace_health_status(instance, {"degraded": True})
-    table_settings.replace_luck_timeout_seconds(instance, 90)
-    table_settings.replace_economy_reward_policy(instance, {"mode": "auto_small_cash", "auto_reward_cap": 10})
+    check_presentation.replace_luck_timeout_seconds(instance, 90)
+    economy_state.replace_reward_policy(instance, {"mode": "auto_small_cash", "auto_reward_cap": 10})
     combat_extension_state.replace_current(instance, {"schema_version": 1, "pools": {"p1": {}}})
     combat_extension_state.replace_round_snapshots(instance, {"4": {"schema_version": 1}})
     instance.pending_luck_after_recovery = True
@@ -170,16 +172,16 @@ PRESERVED_GM_STYLE_OVERRIDE = {"tone": "grim"}
 
 
 def _assert_table_settings_preserved(instance: GameInstance) -> None:
-    assert table_settings.solo_mode(instance) is True
-    assert table_settings.narrative_perspective(instance) == "immersive"
-    assert table_settings.gm_style_override(instance) == PRESERVED_GM_STYLE_OVERRIDE
+    assert game_config.solo_mode(instance) is True
+    assert narration_preferences.narrative_perspective(instance) == "immersive"
+    assert narration_preferences.gm_style_override(instance) == PRESERVED_GM_STYLE_OVERRIDE
 
 
 def _assert_table_settings_implicitly_preserved(instance: GameInstance) -> None:
-    assert table_settings.difficulty(instance) == "硬核"
-    assert table_settings.entry_point(instance) == "plugin"
-    assert table_settings.luck_timeout_seconds(instance) == 90
-    assert table_settings.economy_reward_policy(instance) == {"mode": "auto_small_cash", "auto_reward_cap": 10}
+    assert game_config.difficulty(instance) == "硬核"
+    assert game_config.entry_point(instance) == "plugin"
+    assert check_presentation.luck_timeout_seconds(instance) == 90
+    assert economy_state.reward_policy(instance) == {"mode": "auto_small_cash", "auto_reward_cap": 10}
 
 
 # The ruleset runtime binding is module state (no GameInstance attribute).
@@ -233,21 +235,21 @@ async def test_reset_keeps_seed_and_preserves_configuration_fields() -> None:
     await instance.reset(keep_seed=True)
 
     assert instance.state == GameState.CREATED
-    assert table_settings.seed_code(instance) == "SEED42"
+    assert game_config.seed_code(instance) == "SEED42"
     _assert_table_settings_preserved(instance)
     for field, expected in EXPECTED_PRESERVED.items():
         actual = getattr(instance, field)
         assert actual == expected, f"reset 必须保留 {field}"
     assert ruleset_runtime.binding(instance) == EXPECTED_PRESERVED_RULESET_BINDING, "reset 必须保留 ruleset_runtime"
     # 保留字段应是深拷贝，reset 后修改不影响旧对象引用。
-    assert table_settings.gm_style_override(instance) is not PRESERVED_GM_STYLE_OVERRIDE
+    assert narration_preferences.gm_style_override(instance) is not PRESERVED_GM_STYLE_OVERRIDE
 
 
 @pytest.mark.asyncio
 async def test_reset_without_seed_clears_seed_code() -> None:
     instance = _make_populated_instance()
     await instance.reset(keep_seed=False)
-    assert table_settings.seed_code(instance) == ""
+    assert game_config.seed_code(instance) == ""
 
 
 @pytest.mark.asyncio

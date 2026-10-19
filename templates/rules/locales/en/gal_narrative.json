@@ -1,0 +1,37 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "rule",
+    "id": "gal_narrative"
+  },
+  "rule": {
+    "rule_name": "GAL Narrative Preview",
+    "description": "An experimental no-dice, no-attribute visual-novel style mode: solo story dialogue played in the existing chat interface.",
+    "attr_hint": "GAL mode needs no attribute allocation; just write the character concept.",
+    "skill_hint": "Write 1-5 things you like or are good at; descriptive only, no numeric checks.",
+    "currency": "Gold"
+  },
+  "classes": {
+    "transfer_student": {
+      "name": "Transfer Student",
+      "description": "A new face in this town or school"
+    },
+    "club_member": {
+      "name": "Club Member",
+      "description": "Stays behind in the clubroom after class"
+    },
+    "senior": {
+      "name": "Senior",
+      "description": "An upperclassman one year ahead"
+    },
+    "childhood_friend": {
+      "name": "Childhood Friend",
+      "description": "A companion since early days"
+    },
+    "newcomer": {
+      "name": "Newcomer",
+      "description": "Just moved onto this street"
+    }
+  }
+}

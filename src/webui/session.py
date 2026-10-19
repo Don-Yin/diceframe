@@ -142,6 +142,18 @@ class SessionManager:
         self._save()
 
 
+def apply_session_cookie(request: web.Request, response: web.StreamResponse) -> None:
+    """Apply a new identity before a streaming response prepares its headers."""
+    new_token = request.get("session_token")
+    if not new_token or new_token == request.cookies.get("trpg_session"):
+        return
+    cross_origin = is_allowed_cors_origin(request)
+    response.set_cookie(
+        "trpg_session", new_token, httponly=True, path="/", max_age=7 * 86400,
+        samesite="None" if cross_origin else "Lax", secure=cross_origin,
+    )
+
+
 @web.middleware
 async def session_middleware(request: web.Request, handler) -> web.StreamResponse:
     """aiohttp 中间件：解析 session token，注入 user_id。"""
@@ -156,15 +168,6 @@ async def session_middleware(request: web.Request, handler) -> web.StreamRespons
     request["session_revoked_games"] = mgr.revoked_games(new_token)
 
     response = await handler(request)
-    if new_token != token:
-        cross_origin = is_allowed_cors_origin(request)
-        response.set_cookie(
-            "trpg_session",
-            new_token,
-            httponly=True,
-            path="/",
-            max_age=7 * 86400,
-            samesite="None" if cross_origin else "Lax",
-            secure=cross_origin,
-        )
+    if not response.prepared:
+        apply_session_cookie(request, response)
     return response

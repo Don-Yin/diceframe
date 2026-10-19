@@ -10,6 +10,11 @@ export type PeerGameOperation =
   | 'game.map'
   | 'game.player_context'
   | 'roll.requests'
+  | 'check_modes.read'
+  | 'check_modes.request'
+  | 'recovery.read'
+  | 'recovery.request'
+  | 'recovery.claim'
   | 'roll.resolve'
   | 'player.create'
   | 'player.rebind'
@@ -21,6 +26,7 @@ export type PeerGameOperation =
   | 'ruleset.decision'
   | 'luck.resolve'
   | 'check.reveal'
+  | 'push.resolve'
   | 'payment.resolve'
   | 'character.update'
   | 'character.profile'
@@ -37,6 +43,11 @@ const GAME_OPERATIONS = new Set<PeerGameOperation>([
   'game.map',
   'game.player_context',
   'roll.requests',
+  'check_modes.read',
+  'check_modes.request',
+  'recovery.read',
+  'recovery.request',
+  'recovery.claim',
   'roll.resolve',
   'player.create',
   'player.rebind',
@@ -48,6 +59,7 @@ const GAME_OPERATIONS = new Set<PeerGameOperation>([
   'ruleset.decision',
   'luck.resolve',
   'check.reveal',
+  'push.resolve',
   'payment.resolve',
   'character.update',
   'character.profile',

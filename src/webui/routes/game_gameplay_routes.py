@@ -137,6 +137,19 @@ async def api_kp_question(request: web.Request) -> web.Response:
         body = {}
     question = str(body.get("question", "") or "").strip()
     visibility = str(body.get("visibility", "private") or "private")
+    # A read-only Bot may ask the KP privately, but a party answer becomes a
+    # persisted table-talk record and broadcasts to the room.  Keep this
+    # decision at the server route boundary where the authenticated Bot
+    # surface is available; clients must not be able to widen it with JSON.
+    if request.get("bot_surface") == "read_only" and visibility != "private":
+        return web.json_response(
+            {
+                "ok": False,
+                "error_code": "BOT_READ_ONLY",
+                "error": "该对局的 Bot 绑定仅允许私下提问",
+            },
+            status=403,
+        )
     if len(question) > MAX_ACTION_CHARS:
         return web.json_response(
             {

@@ -1,0 +1,145 @@
+/* Rulesets surfaces, controls and responsive states. Edit this owner directly. */
+
+.dialog.dnd-toolbox-dialog {
+  width: min(1120px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dnd-toolbox-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 7px;
+  margin: 10px 0;
+  padding: 4px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--df-surface-1) 90%, transparent);
+}
+
+.dnd-toolbox-tabs button {
+  flex: 1 1 0;
+  min-height: 40px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.dnd-toolbox-tabs button.active {
+  border-color: color-mix(in srgb, var(--df-interactive) 48%, var(--df-border-soft));
+  color: var(--df-interactive-strong);
+  background: color-mix(in srgb, var(--df-interactive) 14%, var(--df-surface-2));
+}
+
+.dnd-toolbox-dialog > .ruleset-play-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ruleset-play-host > .campaign-panel, .ruleset-play-host > .dnd-combat {
+  align-content: start;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.ruleset-context-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ruleset-context-tools button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-color: color-mix(in srgb, var(--df-interactive) 36%, var(--df-border-soft));
+  color: var(--df-interactive-strong);
+  background: color-mix(in srgb, var(--df-interactive) 9%, var(--df-control-bg));
+  font-size: 12px;
+}
+
+.ruleset-context-tools .n-icon {
+  flex: 0 0 auto;
+  font-size: 16px;
+}
+
+@media (max-width: 800px) {
+  .ruleset-context-tools .combat-tool-trigger {
+    display: none;
+  }
+  .ruleset-context-tools {
+    position: fixed;
+    z-index: 66;
+    top: var(--play-edge-top, calc(50dvh - 24px));
+    right: 0;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .ruleset-context-tools button {
+    width: 36px;
+    min-width: 36px;
+    height: 48px;
+    min-height: 48px;
+    padding: 0;
+    border-right: 0;
+    border-radius: 10px 0 0 10px;
+    background: color-mix(in srgb, var(--df-surface-raised) 78%, transparent);
+    box-shadow: 0 8px 22px color-mix(in srgb, var(--df-canvas) 34%, transparent);
+    backdrop-filter: blur(10px) saturate(120%);
+  }
+  .ruleset-context-tools button span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 720px) {
+  .dialog.dnd-toolbox-dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: 10px;
+  }
+  .dnd-toolbox-tabs {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+}
+
+.dialog.encounter-editor-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(880px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dialog.encounter-editor-dialog > ul {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+@media (max-width: 720px) {
+  .dialog.encounter-editor-dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: 10px;
+  }
+}

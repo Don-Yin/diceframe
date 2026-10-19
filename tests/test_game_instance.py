@@ -1,4 +1,6 @@
-﻿"""GameInstance 状态机测试。"""
+"""GameInstance 状态机测试。"""
+
+from src.engine.modules import check_presentation, game_config, narration_preferences
 
 import asyncio
 from copy import deepcopy
@@ -10,7 +12,7 @@ from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.health import health_payload, mark_health_event, record_health_event
 from src.commands.progression_resolver import ProgressionResolver
 from tests.test_legacy_combat_module import bind_dnd_combat
-from src.engine.modules import checks, economy_state, health as health_state, media, private_channels, round_presentation, round_safety, ruleset_runtime, session_stats, table_settings
+from src.engine.modules import checks, economy_state, health as health_state, media, private_channels, round_presentation, round_safety, ruleset_runtime, session_stats
 
 
 def test_round_entity_snapshot_round_trips_and_defaults_empty() -> None:
@@ -109,11 +111,10 @@ def test_narrative_perspective_round_trips_and_old_saves_default_to_auto() -> No
 
     restored = GameInstance.from_dict(instance.to_dict())
     legacy_data = instance.to_dict()
-    settings = (legacy_data.get("modules") or {}).get("table_settings")
-    (settings if isinstance(settings, dict) and "narrative_perspective" in settings else legacy_data).pop("narrative_perspective")
+    legacy_data["modules"]["narration_preferences"].pop("narrative_perspective")
 
-    assert table_settings.narrative_perspective(restored) == "third_person"
-    assert table_settings.narrative_perspective(GameInstance.from_dict(legacy_data)) == "auto"
+    assert narration_preferences.narrative_perspective(restored) == "third_person"
+    assert narration_preferences.narrative_perspective(GameInstance.from_dict(legacy_data)) == "auto"
     with pytest.raises(ValueError, match="叙事视角"):
         instance.set_narrative_perspective("角色名")
 
@@ -374,7 +375,7 @@ class TestGameInstance:
 
     async def test_multiplayer_action_revision_replaces_previous_action(self):
         inst = GameInstance(game_key=("qq", "123", "bot1"))
-        table_settings.replace_solo_mode(inst, False)
+        game_config.replace_solo_mode(inst, False)
         inst.state = GameState.ACTIVE_ACTION
         await inst.add_action("user1", "先观察门口\n(系统掷骰: d20=17)")
         await inst.add_action("user1", "改为检查窗户\n(系统掷骰: d20=2)")
@@ -385,7 +386,7 @@ class TestGameInstance:
 
     async def test_pending_dice_blocks_advance_until_roll_is_applied(self):
         inst = GameInstance(game_key=("qq", "123", "bot1"))
-        table_settings.replace_solo_mode(inst, False)
+        game_config.replace_solo_mode(inst, False)
         inst.players["user1"] = {"character_name": "艾琳", "character_sheet": {"deceased": False}}
         inst.state = GameState.ACTIVE_ACTION
 
@@ -407,7 +408,7 @@ class TestGameInstance:
     async def test_solo_action_replaces_previous(self):
         # 切换行动应替换旧行动，而不是追加堆积（避免触发 3 条上限、旧检定残留）
         inst = GameInstance(game_key=("qq", "123", "bot1"))
-        table_settings.replace_solo_mode(inst, True)
+        game_config.replace_solo_mode(inst, True)
         inst.state = GameState.ACTIVE_ACTION
         await inst.add_action("user1", "第一步")
         await inst.add_action("user1", "第二步")
@@ -417,7 +418,7 @@ class TestGameInstance:
     async def test_solo_action_replaces_old_pending_dice(self):
         # 回归：solo 反复切换待掷骰行动，应只保留最新一条，且旧检定作废
         inst = GameInstance(game_key=("qq", "123", "bot1"))
-        table_settings.replace_solo_mode(inst, True)
+        game_config.replace_solo_mode(inst, True)
         inst.state = GameState.ACTIVE_ACTION
         inst.players["user1"] = {"character_name": "冒险者"}
         for i in range(5):
@@ -1374,7 +1375,7 @@ async def test_luck_timeout_schedules_and_resumes_round():
 
     inst = GameInstance(("web", "luck_timer", "bot"), state=GameState.ACTIVE_JUDGMENT)
     checks.replace_round_checks_prepared(inst, True)
-    table_settings.replace_luck_timeout_seconds(inst, 1)
+    check_presentation.replace_luck_timeout_seconds(inst, 1)
     checks.replace_last_checks(inst, [{"check_id": "a", "actor_uid": "p1", "luck_decision": "pending"}])
 
     class FakeRegistry:
@@ -1419,7 +1420,7 @@ async def test_luck_timeout_disabled_when_zero():
 
     inst = GameInstance(("web", "luck_disabled", "bot"), state=GameState.ACTIVE_JUDGMENT)
     checks.replace_round_checks_prepared(inst, True)
-    table_settings.replace_luck_timeout_seconds(inst, 0)
+    check_presentation.replace_luck_timeout_seconds(inst, 0)
     checks.replace_last_checks(inst, [{"check_id": "a", "actor_uid": "p1", "luck_decision": "pending"}])
 
     class FakeRegistry:
@@ -1456,23 +1457,23 @@ async def test_configure_session_luck_timeout_validation():
     """P1-D：configure_session 校验幸运超时范围并落字段。"""
     inst = GameInstance(("web", "luck_cfg", "bot"))
     inst.configure_session(luck_timeout_seconds=120)
-    assert table_settings.luck_timeout_seconds(inst) == 120
+    assert check_presentation.luck_timeout_seconds(inst) == 120
     inst.configure_session(luck_timeout_seconds=0)
-    assert table_settings.luck_timeout_seconds(inst) == 0
+    assert check_presentation.luck_timeout_seconds(inst) == 0
     with pytest.raises(ValueError):
         inst.configure_session(luck_timeout_seconds=9999)
     with pytest.raises(ValueError):
         inst.configure_session(luck_timeout_seconds=-1)
     # 不传则不改变已有值
     inst.configure_session()
-    assert table_settings.luck_timeout_seconds(inst) == 0
+    assert check_presentation.luck_timeout_seconds(inst) == 0
 
 
 def test_hardcore_blocks_revive():
     """P2-O：硬核难度禁止复活，角色保持死亡。"""
     from src.commands.round_effects import apply_revive_commands
     inst = GameInstance(("web", "revive_hard", "bot"))
-    table_settings.replace_difficulty(inst, "硬核")
+    game_config.replace_difficulty(inst, "硬核")
     inst.players["p1"] = {"character_name": "勇者", "character_sheet": {"hp": 0, "deceased": True, "max_hp": 50}}
     apply_revive_commands(inst, {"revive_commands": [{"uid": "p1", "method": "法术"}]})
     assert inst.players["p1"]["character_sheet"]["deceased"] is True
@@ -1482,7 +1483,7 @@ def test_normal_allows_revive():
     """P2-O：标准难度可正常复活。"""
     from src.commands.round_effects import apply_revive_commands
     inst = GameInstance(("web", "revive_ok", "bot"))
-    table_settings.replace_difficulty(inst, "标准")
+    game_config.replace_difficulty(inst, "标准")
     inst.players["p1"] = {"character_name": "勇者", "character_sheet": {"hp": 0, "deceased": True, "max_hp": 50}}
     apply_revive_commands(inst, {"revive_commands": [{"uid": "p1", "method": "法术"}]})
     cs = inst.players["p1"]["character_sheet"]

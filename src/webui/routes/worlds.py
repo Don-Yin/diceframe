@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from aiohttp import web
 
-from src.webui.routes._common import MAX_LOREBOOK_CHARS, _get_api, _require_confirmed_request
+from src.webui.routes._common import (
+    MAX_LOREBOOK_CHARS,
+    _get_api,
+    _require_confirmed_request,
+    require_content_owner,
+)
 
 
 async def api_worlds(request: web.Request) -> web.Response:
@@ -12,12 +19,18 @@ async def api_worlds(request: web.Request) -> web.Response:
 
 
 async def api_world_create(request: web.Request) -> web.Response:
+    if (denied := require_content_owner(request)) is not None:
+        return denied
     body = await request.json()
-    return web.json_response(_get_api(request).create_world(
+    if error := _narrative_request_error(body):
+        return web.json_response({"ok": False, "error": error}, status=400)
+    result = _get_api(request).create_world(
         body.get("name", ""),
         body.get("description", ""),
         body.get("language", ""),
-    ))
+        **{field: body[field] for field in ("world_setting", "starter_scene") if field in body},
+    )
+    return web.json_response(result, status=200 if result.get("ok") else 400)
 
 
 async def api_world_clone_from_template(request: web.Request) -> web.Response:
@@ -25,6 +38,53 @@ async def api_world_clone_from_template(request: web.Request) -> web.Response:
     result = _get_api(request).clone_world_from_template(
         body.get("template_id", ""),
         body.get("name", ""),
+    )
+    return web.json_response(result, status=200 if result.get("ok") else 404)
+
+
+def _narrative_request_error(body: Any) -> str | None:
+    if not isinstance(body, dict):
+        return "请求体必须是对象"
+    for field, limit, label in (
+        ("world_setting", 16000, "世界设定"),
+        ("starter_scene", 8192, "开场场景"),
+    ):
+        if field not in body:
+            continue
+        value = body[field]
+        if not isinstance(value, str):
+            return f"{label}必须是文本"
+        if len(value) > limit:
+            return f"{label}过长（上限 {limit} 字）"
+    return None
+
+
+async def api_world_update(request: web.Request) -> web.Response:
+    if (denied := require_content_owner(request)) is not None:
+        return denied
+    body = await request.json()
+    if error := _narrative_request_error(body):
+        return web.json_response({"ok": False, "error": error}, status=400)
+    narrative_kwargs = {
+        field: body[field]
+        for field in ("world_setting", "starter_scene")
+        if field in body
+    }
+    result = _get_api(request).update_world(
+        request.match_info["world_id"],
+        body.get("name", ""),
+        body.get("description", ""),
+        body.get("language", ""),
+        **narrative_kwargs,
+    )
+    return web.json_response(result, status=200 if result.get("ok") else 400)
+
+
+async def api_world_definition(request: web.Request) -> web.Response:
+    if (denied := require_content_owner(request)) is not None:
+        return denied
+    result = _get_api(request).get_world_definition(
+        request.match_info["world_id"], request.query.get("language", ""),
     )
     return web.json_response(result, status=200 if result.get("ok") else 404)
 
@@ -100,6 +160,8 @@ async def api_lorebook_import(request: web.Request) -> web.Response:
 
 
 async def api_lorebook_generate(request: web.Request) -> web.Response:
+    if (denied := require_content_owner(request)) is not None:
+        return denied
     body = await request.json()
     prompt = str(body.get("prompt", "")).strip()
     if len(prompt) > MAX_LOREBOOK_CHARS:
@@ -108,6 +170,8 @@ async def api_lorebook_generate(request: web.Request) -> web.Response:
         request.match_info["world_id"],
         prompt,
         str(body.get("language", "") or ""),
+        str(body.get("book_id", "") or ""),
+        str(body.get("game_key", "") or ""),
     )
     return web.json_response(result, status=200 if result.get("ok") else 400)
 
@@ -134,7 +198,9 @@ def register_worlds(app: web.Application) -> None:
     app.router.add_route("GET", "/api/worlds", api_worlds)
     app.router.add_route("POST", "/api/worlds", api_world_create)
     app.router.add_route("POST", "/api/worlds/clone-from-template", api_world_clone_from_template)
+    app.router.add_route("GET", "/api/worlds/{world_id}/definition", api_world_definition)
     app.router.add_route("PUT", "/api/worlds/{world_id}/gm-style", api_world_gm_style_update)
+    app.router.add_route("PUT", "/api/worlds/{world_id}", api_world_update)
     app.router.add_post("/api/worlds/user-scene-image", api_world_scene_image_set)
     app.router.add_route("DELETE", "/api/worlds/{world_id}", api_delete_world)
     app.router.add_get("/api/world-templates", api_world_templates)

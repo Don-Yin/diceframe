@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any
 
 from src.engine.player_control import is_ai_controlled
+from src.rulesets.dnd2024.content.contracts import CREATURE_TYPES
 
 from .primitives import (
     DICE_RE,
@@ -16,6 +17,8 @@ from .primitives import (
     actor_kind as _actor_kind,
     canonical as _canonical,
 )
+from .readiness import required_encounter_player_ids
+from .triggered_spells import HIT_SPELL_DECISION, free_cast_resource, hit_spell_decision
 
 
 def validate_enemy_profiles(enemies: Any) -> None:
@@ -38,6 +41,8 @@ def validate_enemy_profiles(enemies: Any) -> None:
         seen.add(enemy_id)
         if len(str(enemy.get("name") or enemy_id)) > 120:
             raise CombatIntentError("enemy name is too long")
+        if not isinstance(enemy.get("creature_type", ""), str) or (enemy.get("creature_type") and enemy["creature_type"] not in CREATURE_TYPES):
+            raise CombatIntentError("enemy creature_type must be a canonical creature type")
         for field_name, minimum, maximum in (
             ("hp", 1, 10000), ("armor_class", 1, 40),
             ("speed", 0, 200), ("position", -10000, 10000),
@@ -134,6 +139,8 @@ class CombatValidationMixin:
                 raise CombatIntentError("there is no pending encounter to prepare for")
             if submitted_by not in instance.players or submitted_by == gm_uid:
                 raise CombatIntentError("only a non-GM party member can change readiness")
+            if submitted_by not in required_encounter_player_ids(instance):
+                raise CombatIntentError("only an active human party member can change readiness")
             ready_ids = {
                 str(item) for item in request.get("ready_player_ids") or [] if str(item)
             }
@@ -198,6 +205,8 @@ class CombatValidationMixin:
             return
         if combat.get("status") != "active":
             raise CombatIntentError("combat is not active")
+        if any(row.get("kind") == HIT_SPELL_DECISION for row in combat.get("pending_decisions", [])) and intent_type not in {"cast_spell", "decision.resolve", "combat.message"}:
+            raise CombatIntentError("resolve the melee hit spell decision first")
         if intent_type == "combat.message":
             if submitted_by not in instance.players:
                 raise CombatIntentError("only a party member can send a combat message")
@@ -210,8 +219,6 @@ class CombatValidationMixin:
                 raise CombatIntentError("only the GM can end combat")
             return
         if intent_type == "decision.resolve":
-            if submitted_by != gm_uid:
-                raise CombatIntentError("only the assigned GM can resolve this reaction")
             decision = next(
                 (
                     item for item in combat.get("pending_decisions", [])
@@ -221,6 +228,13 @@ class CombatValidationMixin:
             )
             if decision is None or intent.get("option") not in decision.get("options", []):
                 raise CombatIntentError("pending decision or option is invalid")
+            if decision.get("kind") == HIT_SPELL_DECISION:
+                kind, raw_id = _actor_kind(str(decision.get("actor_id") or ""))
+                expected_owner = gm_uid if kind == "companion" or (kind == "player" and is_ai_controlled(instance, raw_id)) else decision.get("assigned_to")
+                if submitted_by != expected_owner:
+                    raise CombatIntentError("only the assigned actor can resolve this spell decision")
+            elif submitted_by != gm_uid:
+                raise CombatIntentError("only the assigned GM can resolve this reaction")
             if intent.get("option") == "resolve":
                 threat_ids = list(decision.get("threat_actor_ids") or [])
                 if not threat_ids or int(combat.get("reactions", {}).get(threat_ids[0], 0)) < 1:
@@ -369,6 +383,11 @@ class CombatValidationMixin:
             raise CombatIntentError("spell is not deterministically automated yet")
         if spell_ref not in actor["spell_refs"]:
             raise CombatIntentError("spell is not prepared or known by the actor")
+        trigger = hit_spell_decision(combat, actor["actor_id"])
+        if effect["mode"] == "triggered_damage" and trigger is None:
+            raise CombatIntentError("this spell requires a pending melee hit")
+        if trigger is not None and effect["mode"] != "triggered_damage":
+            raise CombatIntentError("resolve the melee hit spell decision first")
         cost = "bonus_action" if str(spell["casting_time"]).startswith("Bonus Action") else "action"
         if int(economy.get(cost, 0) or 0) < 1:
             raise CombatIntentError(f"the {cost.replace('_', ' ')} has already been spent")
@@ -379,11 +398,14 @@ class CombatValidationMixin:
             if slot_level != 0:
                 raise CombatIntentError("a cantrip does not use a spell slot")
         else:
-            if economy.get("slot_spell_cast"):
+            if slot_level == 0:
+                if free_cast_resource(actor, spell_ref) is None:
+                    raise CombatIntentError("the free spell cast is not available")
+            elif economy.get("slot_spell_cast"):
                 raise CombatIntentError("only one spell slot can be expended on a turn")
-            if slot_level < spell["level"]:
+            if slot_level != 0 and slot_level < spell["level"]:
                 raise CombatIntentError("slot_level is lower than the spell level")
-            if int(actor["slots"].get(str(slot_level), 0) or 0) < 1:
+            if slot_level != 0 and int(actor["slots"].get(str(slot_level), 0) or 0) < 1:
                 raise CombatIntentError("the selected spell slot is not available")
         raw_targets = intent.get("target_ids")
         target_values = raw_targets if isinstance(raw_targets, list) else [intent.get("target_id")]
@@ -393,6 +415,8 @@ class CombatValidationMixin:
         required_count = int(effect.get("target_count", 1) or 1)
         if not target_ids or len(target_ids) > required_count or len(set(target_ids)) != len(target_ids):
             raise CombatIntentError(f"spell requires 1 to {required_count} unique targets")
+        if effect["mode"] == "triggered_damage" and target_ids != [trigger["target_id"]]:
+            raise CombatIntentError("this spell must target the creature hit by the melee attack")
         for target_id in target_ids:
             target = self._actor_view(instance, combat, target_id)
             actor_side = str(actor.get("side") or "")
@@ -406,7 +430,8 @@ class CombatValidationMixin:
                 raise CombatIntentError("offensive spells require a hostile target")
             if target["hp"] <= 0 and effect["mode"] not in {"healing", "buff"}:
                 raise CombatIntentError("spell target is not active")
-            self._require_range(combat, actor["actor_id"], target_id, int(effect["range"]))
+            if effect["mode"] != "triggered_damage":
+                self._require_range(combat, actor["actor_id"], target_id, int(effect["range"]))
         damage_choices = effect.get("damage_type_choice")
         if damage_choices and intent.get("damage_type") not in damage_choices:
             raise CombatIntentError("spell damage_type choice is required")

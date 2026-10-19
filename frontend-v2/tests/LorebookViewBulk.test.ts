@@ -217,11 +217,11 @@ describe('LorebookView entry search, filters and bulk actions', () => {
     const wrapper = await mountLoaded()
     await rowFor(wrapper, '城门守卫').get('input.lore-row-select').setValue(true)
 
-    await bulkButton(wrapper, '移动到世界书').trigger('click')
+    await bulkButton(wrapper, '移动到资料册').trigger('click')
     await flushPromises()
     await wrapper.get('.lore-bulk-move-target').setValue('book:other')
 
-    const moveAction = wrapper.findAll('.actions button').find(item => item.text() === '移动到世界书')
+    const moveAction = wrapper.findAll('.actions button').find(item => item.text() === '移动到资料册')
     expect(moveAction).toBeTruthy()
     await moveAction!.trigger('click')
     await flushPromises()
@@ -235,7 +235,7 @@ describe('LorebookView entry search, filters and bulk actions', () => {
 
   it('saves book settings through the book endpoint', async () => {
     const wrapper = await mountLoaded()
-    const settingsButton = wrapper.findAll('.lore-header-actions button').find(item => item.text() === '世界书设置')
+    const settingsButton = wrapper.findAll('.lore-header-actions button').find(item => item.text() === '资料册设置')
     expect(settingsButton).toBeTruthy()
     await settingsButton!.trigger('click')
     await flushPromises()

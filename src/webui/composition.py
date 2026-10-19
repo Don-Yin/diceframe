@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from src.ai_providers import resolve_provider
+from src.assistant_agent_limits import DEFAULT_TASK_MAX_TOKENS
 from src.asr import AsrService
 from src.common_factory import TRPGSubsystems, create_trpg_subsystems
 from src.imagegen import ImageGenerationService
@@ -127,6 +128,12 @@ class RuntimeComposition:
         embedding_enabled = bool(
             runtime_config.get("embedding_enabled", False) and embedding_base_url
         )
+        check_route = resolve_provider(runtime_config, runtime_config.get("check_provider_ref", ""))
+        check_model = str(runtime_config.get("check_model") or "").strip()
+        check_provider = (
+            ProviderConfig("check", check_route["base_url"], check_route["api_key"], check_model, api_format=check_route["api_format"])
+            if check_route and check_route["base_url"] and check_model else None
+        )
         return self.factories.create_subsystems(
             data_dir=self.paths.data_dir,
             prompts_dir=self.paths.prompts_dir,
@@ -135,6 +142,10 @@ class RuntimeComposition:
             adventures_dir=self.paths.adventures_dir,
             providers=providers,
             default_provider="default",
+            check_model_enabled=bool(runtime_config.get("check_model_enabled", False)),
+            check_provider=check_provider,
+            generation_options=runtime_config.get("llm_generation_options", {}),
+            context_recent_rounds=runtime_config.get("context_recent_rounds", 0),
             embedding_enabled=embedding_enabled,
             embedding_base_url=embedding_base_url,
             embedding_api_key=embedding_api_key,
@@ -224,6 +235,8 @@ class RuntimeComposition:
                 runtime_config.get("character_gen_max_tokens", 4096)
             ),
             text_gen_max_tokens=int(runtime_config.get("text_gen_max_tokens", 1024)),
+            assistant_agent_max_tokens=int(runtime_config.get("assistant_agent_max_tokens", 4096)),
+            assistant_agent_task_max_tokens=int(runtime_config.get("assistant_agent_task_max_tokens", DEFAULT_TASK_MAX_TOKENS)),
             plugin_host=plugin_host,
             hub_client=hub_client,
             speech_service=speech_service,

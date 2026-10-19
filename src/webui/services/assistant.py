@@ -66,10 +66,10 @@ def _offline_configuration_answer(question: str, language: str) -> str:
         return (
             "The model API is not configured yet, so this setup guide is built into DiceFrame "
             "and does not call an external model.\n\n"
-            "1. Open **Settings → Model API → Main Model API**.\n"
-            "2. Select the API format supported by your provider: **OpenAI-compatible** or **Anthropic**.\n"
-            "3. Enter the provider's **Base URL**, **API Key**, and exact **Model** name.\n"
-            "4. Select **Save**, then **Test Connection**. A successful test means DF Assistant and "
+            "1. Open **Settings → Model API** and add an entry in the shared **Providers** catalog.\n"
+            "2. Select **OpenAI-compatible** or **Anthropic**, and enter that provider's **Base URL** and **API Key**.\n"
+            "3. Select that provider for **Main Model**, then enter the exact **Model** name.\n"
+            "4. Select **Save**, then **Test Connection**. A successful test means DF Agent and "
             "adventure generation can use that model.\n\n"
             "For DeepSeek, use the help button beside **Main Model API** for an example. Never send "
             "your API Key to another player."
@@ -89,11 +89,11 @@ def _offline_configuration_answer(question: str, language: str) -> str:
         return (
             "Die Modell-API ist noch nicht konfiguriert, daher ist diese Anleitung fest in DiceFrame "
             "eingebaut und ruft kein externes Modell auf.\n\n"
-            "1. Öffne **Einstellungen → Modell-API → Haupt-Modell-API**.\n"
-            "2. Wähle das vom Anbieter unterstützte API-Format: **OpenAI-kompatibel** oder **Anthropic**.\n"
-            "3. Gib die **Base-URL**, den **API-Schlüssel** und den exakten **Modellnamen** des Anbieters ein.\n"
-            "4. Klicke **Speichern**, dann **Verbindung testen**. Ein erfolgreicher Test bedeutet, dass DF "
-            "Assistent und die Abenteuer-Generierung dieses Modell nutzen können.\n\n"
+            "1. Öffne **Einstellungen → Modell-API** und füge einen Eintrag im gemeinsamen **Anbieterkatalog** hinzu.\n"
+            "2. Wähle **OpenAI-kompatibel** oder **Anthropic**, und trage **Base-URL** und **API-Schlüssel** des Anbieters ein.\n"
+            "3. Wähle diesen Anbieter für das **Hauptmodell** und gib den exakten **Modellnamen** ein.\n"
+            "4. Klicke **Speichern**, dann **Verbindung testen**. Danach können DF Agent "
+            "und die Abenteuer-Generierung dieses Modell nutzen.\n\n"
             "Für DeepSeek nutze den Hilfe-Button neben **Haupt-Modell-API** für ein Beispiel. Gib deinen "
             "API-Schlüssel niemals an andere Spieler weiter."
         )
@@ -106,10 +106,10 @@ def _offline_configuration_answer(question: str, language: str) -> str:
         )
     return (
         "当前还没有配置模型 API，所以这份说明是 DiceFrame 自带的离线指引，不会调用外部模型。\n\n"
-        "1. 打开 **设置 → 模型接口 → 主模型接口**。\n"
-        "2. 按服务商说明选择 **OpenAI 兼容** 或 **Anthropic** 接口格式。\n"
-        "3. 填写服务商提供的 **Base URL**、**API Key** 和准确的**模型名称**。\n"
-        "4. 先点 **保存**，再点 **测试连接**；测试成功后，DF 助手和冒险生成功能就能使用这个模型。\n\n"
+        "1. 打开 **设置 → 模型接口**，在共享**服务商目录**中新增服务商。\n"
+        "2. 按服务商说明选择 **OpenAI 兼容** 或 **Anthropic** 格式，填写该服务商的 **Base URL** 和 **API Key**。\n"
+        "3. 在**主模型**能力中选择刚才的服务商，填写准确的**模型名称**。\n"
+        "4. 先点 **保存**，再点 **测试连接**；测试成功后，DF Agent 和冒险生成功能就能使用这个模型。\n\n"
         "如果使用 DeepSeek，可以点“主模型接口”旁的帮助按钮查看填写示例。API Key 只保存在自己的 "
         "DiceFrame 中，不要发给玩家。"
     )
@@ -117,6 +117,16 @@ def _offline_configuration_answer(question: str, language: str) -> str:
 
 def _clean_text(value: Any, limit: int) -> str:
     return str(value or "").replace("\x00", "").strip()[:limit]
+
+
+async def offline_answer(messages, language, emit):
+    await emit("delta", {"delta": _offline_configuration_answer(messages[-1]["content"], language)})
+    await emit("navigate", {"route": "settings", "query": {"section": "api"}})
+
+
+async def agent_knowledge(question, language):
+    result = await assistant_knowledge.search_knowledge(question, language, current_version_only=True)
+    return {"context": result.context, "sources": list(result.sources)}
 
 
 def _label(language: str, en: str, zh: str, de: str) -> str:
@@ -176,7 +186,7 @@ def _system_prompt(
     runtime_log_files: int = 0,
 ) -> str:
     norm_lang = normalize_language(language)
-    lang = norm_lang if norm_lang in ("en", "de") else "zh"
+    lang = norm_lang if norm_lang in ("en", "de", "ru") else "zh"
     base = (PROMPTS_DIR / f"assistant_system_{lang}.md").read_text(encoding="utf-8")
     documents = knowledge or "（没有检索到与本问题可靠相关的公开文档片段）"
     plugins_text = _plugin_context(dependencies, query)

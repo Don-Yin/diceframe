@@ -103,6 +103,34 @@ class _FakeSession:
         return _FakeResponse()
 
 
+@pytest.mark.asyncio
+async def test_anthropic_forwards_explicit_sampling_without_rewriting_native_budget(monkeypatch):
+    provider = ProviderConfig("native", "https://synthetic.invalid", "test", "native-test", api_format="anthropic")
+    client = LLMClient([provider], "native", generation_options={"temperature": .2, "top_p": .8})
+    session = _FakeSession()
+    async def session_for_test():
+        return session
+    monkeypatch.setattr(client, "_get_session", session_for_test)
+    await client._call_anthropic(provider, "system", "input", .7, 123)
+    assert session.calls[0]["json"]["temperature"] == .2
+    assert session.calls[0]["json"]["top_p"] == .8
+    assert session.calls[0]["json"]["max_tokens"] == 123
+    assert "max_completion_tokens" not in session.calls[0]["json"]
+
+
+@pytest.mark.asyncio
+async def test_anthropic_rejects_unsupported_explicit_penalty_before_http(monkeypatch):
+    provider = ProviderConfig("native", "https://synthetic.invalid", "test", "native-test", api_format="anthropic")
+    client = LLMClient([provider], "native", generation_options={"presence_penalty": .3})
+    session = _FakeSession()
+    async def session_for_test():
+        return session
+    monkeypatch.setattr(client, "_get_session", session_for_test)
+    with pytest.raises(ValueError, match="presence_penalty"):
+        await client._call_anthropic(provider, "system", "input", .7, 123)
+    assert session.calls == []
+
+
 class _EmptyOpenAIResponse(_FakeResponse):
     async def json(self):
         return {
@@ -600,6 +628,40 @@ async def test_call_tools_retries_with_auto_tool_choice_when_forced_rejected(mon
 
 
 @pytest.mark.asyncio
+async def test_tool_provider_failure_preserves_http_status_for_safe_user_feedback(monkeypatch):
+    from src.llm.client import LLMToolCallError
+    session = _SequentialSession([
+        _ErrorOpenAIResponse(402, '{"error":{"message":"Insufficient Balance"}}'),
+        _ErrorOpenAIResponse(402, '{"error":{"message":"Insufficient Balance"}}'),
+    ])
+    provider = ProviderConfig("provider", "https://api.example.com", "test-key", "test-model")
+    client = LLMClient([provider], provider.provider_name)
+    async def fake_get_session():
+        return session
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+    with pytest.raises(LLMToolCallError) as raised:
+        await client.call_tools("system", "user", tools=[_DICE_TOOL], force_tool_choice=False)
+    assert raised.value.status_codes == frozenset({402})
+
+
+@pytest.mark.asyncio
+async def test_required_game_tool_is_not_replaced_by_plaintext_after_auto_negotiation(monkeypatch):
+    session = _SequentialSession([
+        _ErrorOpenAIResponse(400, '{"error":{"message":"Thinking mode does not support this tool_choice"}}'),
+        _JSONContentOpenAIResponse("ordinary answer without the required game adjudication"),
+        _JSONContentOpenAIResponse(json.dumps({"tool_calls": [{"name": "dice_checks", "arguments": {"checks": []}}]})),
+    ])
+    provider = ProviderConfig("thinking-model", "https://api.example.com", "test-key", "test-model")
+    client = LLMClient([provider], provider.provider_name)
+    async def fake_get_session():
+        return session
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+    result = await client.call_tools("system", "actions", tools=[_DICE_TOOL])
+    assert result.tool_calls == [{"name": "dice_checks", "arguments": {"checks": []}}]
+    assert result.native_tools is False
+
+
+@pytest.mark.asyncio
 async def test_call_tools_json_fallback_retries_with_larger_max_tokens(monkeypatch):
     """JSON 回退截断时应按预算序列放大 max_tokens 重试，而非一次失败即放弃。"""
     json_payload = json.dumps(
@@ -660,6 +722,227 @@ async def test_call_tools_json_fallback_raises_after_exhausted_budgets(monkeypat
         await client.call_tools("system", "actions", tools=[_DICE_TOOL], max_tokens=512)
     sent_budgets = [call["json"]["max_tokens"] for call in session.calls]
     assert sent_budgets == [512, 1024, 2048]
+
+
+@pytest.mark.asyncio
+async def test_call_tools_auto_openai_can_select_second_tool(monkeypatch):
+    """Explicit auto mode must let the provider choose any registered tool."""
+    class SecondToolResponse(_FakeResponse):
+        async def json(self):
+            return {
+                "choices": [{
+                    "message": {
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call-2",
+                            "type": "function",
+                            "function": {
+                                "name": "final_result",
+                                "arguments": json.dumps({"answer": "done"}),
+                            },
+                        }],
+                    },
+                    "finish_reason": "tool_calls",
+                }],
+                "usage": {"total_tokens": 7},
+            }
+
+    class SecondToolSession(_FakeSession):
+        def post(self, url, **kwargs):
+            self.calls.append({"url": url, **kwargs})
+            return SecondToolResponse()
+
+    session = SecondToolSession()
+    provider = ProviderConfig("auto", "https://api.example.com", "test-key", "auto-test")
+    client = LLMClient([provider], "auto")
+    async def fake_get_session():
+        return session
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+    tools = [_DICE_TOOL, {
+        "type": "function",
+        "function": {
+            "name": "final_result",
+            "description": "finish",
+            "parameters": {"type": "object", "properties": {"answer": {"type": "string"}}},
+        },
+    }]
+
+    result = await client.call_tools("system", "actions", tools=tools, force_tool_choice=False)
+
+    assert result.tool_calls == [{"name": "final_result", "arguments": {"answer": "done"}}]
+    assert result.content == ""
+    body = session.calls[0]["json"]
+    assert body["tool_choice"] == "auto"
+    assert body["parallel_tool_calls"] is False
+    assert provider.provider_name not in client._native_tool_unsupported
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("api_format", ["openai", "anthropic"])
+async def test_call_tools_auto_returns_ordinary_final_text(monkeypatch, api_format):
+    class TextResponse(_FakeResponse):
+        async def json(self):
+            if api_format == "anthropic":
+                return {
+                    "content": [{"type": "text", "text": "The answer is ready."}],
+                    "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 3, "output_tokens": 4},
+                }
+            return {
+                "choices": [{
+                    "message": {"content": "The answer is ready.", "tool_calls": []},
+                    "finish_reason": "stop",
+                }],
+                "usage": {"total_tokens": 7},
+            }
+
+    class TextSession(_FakeSession):
+        def post(self, url, **kwargs):
+            self.calls.append({"url": url, **kwargs})
+            return TextResponse()
+
+    session = TextSession()
+    provider = ProviderConfig(
+        "auto",
+        "https://api.anthropic.com" if api_format == "anthropic" else "https://api.example.com",
+        "test-key",
+        "auto-test",
+        api_format=api_format,
+    )
+    client = LLMClient([provider], "auto")
+    async def fake_get_session():
+        return session
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+
+    result = await client.call_tools("system", "actions", tools=[_DICE_TOOL], force_tool_choice=False)
+
+    assert result.tool_calls == []
+    assert result.content == "The answer is ready."
+    assert provider.provider_name not in client._native_tool_unsupported
+
+
+@pytest.mark.asyncio
+async def test_call_tools_auto_parses_only_explicit_json_tool_calls(monkeypatch):
+    class JsonContentResponse(_FakeResponse):
+        async def json(self):
+            return {
+                "choices": [{
+                    "message": {
+                        "content": json.dumps({
+                            "tool_calls": [{"name": "final_result", "arguments": {"answer": "done"}}],
+                        }),
+                    },
+                    "finish_reason": "stop",
+                }],
+                "usage": {"total_tokens": 5},
+            }
+
+    class JsonContentSession(_FakeSession):
+        def post(self, url, **kwargs):
+            self.calls.append({"url": url, **kwargs})
+            return JsonContentResponse()
+
+    session = JsonContentSession()
+    provider = ProviderConfig("auto", "https://api.example.com", "test-key", "auto-test")
+    client = LLMClient([provider], "auto")
+    async def fake_get_session():
+        return session
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+    final_tool = {
+        "type": "function",
+        "function": {
+            "name": "final_result",
+            "description": "finish",
+            "parameters": {"type": "object"},
+        },
+    }
+
+    result = await client.call_tools("system", "actions", tools=[_DICE_TOOL, final_tool], force_tool_choice=False)
+
+    assert result.tool_calls == [{"name": "final_result", "arguments": {"answer": "done"}}]
+
+
+@pytest.mark.asyncio
+async def test_call_tools_auto_keeps_arbitrary_json_as_content(monkeypatch):
+    class JsonContentResponse(_FakeResponse):
+        async def json(self):
+            return {
+                "choices": [{
+                    "message": {"content": json.dumps({"answer": "done"}), "tool_calls": []},
+                    "finish_reason": "stop",
+                }],
+                "usage": {"total_tokens": 5},
+            }
+
+    class JsonContentSession(_FakeSession):
+        def post(self, url, **kwargs):
+            self.calls.append({"url": url, **kwargs})
+            return JsonContentResponse()
+
+    session = JsonContentSession()
+    provider = ProviderConfig("auto", "https://api.example.com", "test-key", "auto-test")
+    client = LLMClient([provider], "auto")
+    async def fake_get_session():
+        return session
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+
+    result = await client.call_tools("system", "actions", tools=[_DICE_TOOL], force_tool_choice=False)
+
+    assert result.tool_calls == []
+    assert result.content == '{"answer": "done"}'
+
+
+@pytest.mark.asyncio
+async def test_call_tools_auto_json_fallback_accepts_any_registered_tool(monkeypatch):
+    """Fallback JSON must enumerate and validate the complete available tool set."""
+    payload = json.dumps({
+        "tool_calls": [{"name": "final_result", "arguments": {}}],
+    })
+
+    class NativeFailureResponse(_FakeResponse):
+        status = 400
+        request_info = SimpleNamespace(real_url="https://api.example.com", url="https://api.example.com", method="POST", headers={})
+        async def text(self):
+            return "native tools unavailable"
+
+    class JsonResponse(_FakeResponse):
+        async def json(self):
+            return {
+                "choices": [{"message": {"content": payload}, "finish_reason": "stop"}],
+                "usage": {"total_tokens": 11},
+            }
+
+    class FallbackSession(_FakeSession):
+        def post(self, url, **kwargs):
+            self.calls.append({"url": url, **kwargs})
+            return NativeFailureResponse() if len(self.calls) == 1 else JsonResponse()
+
+    session = FallbackSession()
+    provider = ProviderConfig("auto", "https://api.example.com", "test-key", "auto-test")
+    client = LLMClient([provider], "auto")
+    async def fake_get_session():
+        return session
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+    tools = [_DICE_TOOL, {
+        "type": "function",
+        "function": {
+            "name": "final_result",
+            "description": "finish",
+            "parameters": {
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+            },
+        },
+    }]
+
+    result = await client.call_tools("system", "actions", tools=tools, force_tool_choice=False)
+
+    assert result.native_tools is False
+    assert result.tool_calls == [{"name": "final_result", "arguments": {}}]
+    fallback_body = session.calls[1]["json"]
+    assert "dice_checks" in fallback_body["messages"][0]["content"]
+    assert "final_result" in fallback_body["messages"][0]["content"]
 
 
 class _FakeStreamContent:

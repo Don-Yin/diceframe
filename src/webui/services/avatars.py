@@ -19,7 +19,7 @@ ASSET_ID_RE = re.compile(r"^[a-f0-9]{64}$")
 
 
 def save_avatar_upload(
-    avatars_dir: Path, file_data: str, file_name: str = "",
+    avatars_dir: Path | None, file_data: str, file_name: str = "",
 ) -> dict[str, Any]:
     if not file_data:
         return {"ok": False, "error": "未提供头像文件"}
@@ -50,12 +50,13 @@ def save_avatar_upload(
 
     payload = output.getvalue()
     asset_id = hashlib.sha256(payload).hexdigest()
-    path = avatars_dir / f"{asset_id}.webp"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        tmp_path = path.with_suffix(".webp.tmp")
-        tmp_path.write_bytes(payload)
-        tmp_path.replace(path)
+    if avatars_dir is not None:
+        path = avatars_dir / f"{asset_id}.webp"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            tmp_path = path.with_suffix(".webp.tmp")
+            tmp_path.write_bytes(payload)
+            tmp_path.replace(path)
     return {
         "ok": True,
         "portrait": {"kind": "upload", "asset_id": asset_id},
@@ -107,6 +108,10 @@ class AvatarService:
         self, file_data: str, file_name: str = "",
     ) -> dict[str, Any]:
         return save_avatar_upload(self._avatars_dir, file_data, file_name)
+
+    def preview_upload(self, file_data: str, file_name: str = "") -> dict[str, Any]:
+        """Validate and predict the content identity without persisting an image."""
+        return save_avatar_upload(None, file_data, file_name)
 
     def file(self, asset_id: str) -> Path | None:
         return avatar_file(self._avatars_dir, asset_id)

@@ -2,9 +2,19 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { CheckResult, CheckRevealRecord } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
+import CocDiceFaces from '@/features/play/dice/CocDiceFaces.vue'
+import { cocCopy } from '@/features/play/dice/cocCopy'
+import PushDecisionPanel from '@/features/play/check-decisions/PushDecisionPanel.vue'
+import DiceTray from '@/features/play/dice/DiceTray.vue'
+import { dicePresentationCopy } from '@/features/play/dice/copy'
+import { reportAssistantReaction } from '@/composables/useAssistantReactions'
 
 const props = withDefaults(defineProps<{
   check: CheckResult
+  gameKey?: string
+  actorId?: string
+  isGm?: boolean
+  readonly?: boolean
   animate?: boolean
   canDecideLuck?: boolean
   busy?: boolean
@@ -13,44 +23,57 @@ const props = withDefaults(defineProps<{
   canReveal?: boolean
   revealerName?: string
 }>(), { animate: false, canDecideLuck: false, busy: false, clickMode: false, reveal: null, canReveal: false, revealerName: '' })
-const emit = defineEmits<{ luck: [check: CheckResult, spend: boolean]; reveal: [check: CheckResult] }>()
-const { t } = useLocale()
+const emit = defineEmits<{ luck: [check: CheckResult, spend: boolean]; reveal: [check: CheckResult]; refresh: [] }>()
+const { t, locale } = useLocale()
 // 点击揭示模式下：服务端结果已权威落盘，这里只做共享揭示的表现遮罩。
 // 不遮蔽数据本身（时间线公开结果），未揭示也不阻塞任何流程。
-// 超时没人揭示时只在本地翻开：不请求服务端、不记录揭示者，各客户端各自计时。
-const AUTO_REVEAL_SECONDS = 10
-const autoRevealed = ref(false)
-const autoRevealLeft = ref(AUTO_REVEAL_SECONDS)
-const pendingClickReveal = computed(() => props.clickMode && !props.reveal && !autoRevealed.value)
+// 点击模式只有服务端的共享标记能翻开；未点击不会计时，也不阻塞规则推进。
+const pendingClickReveal = computed(() => props.clickMode && !props.reveal)
 const revealed = ref(!props.animate && !pendingClickReveal.value)
 let revealTimer: number | undefined
-let autoRevealTicker: number | undefined
-
-function stopAutoReveal() {
-  if (autoRevealTicker !== undefined) window.clearInterval(autoRevealTicker)
-  autoRevealTicker = undefined
+let trayTimer: number | undefined
+const trayExpanded = ref(false)
+const recentReveal = ref(false)
+const pendingDecision = computed(() => props.check.luck_decision === 'pending'
+  || Boolean(props.check.push && ['pending', 'requested', 'offered'].includes(props.check.push.status)))
+const showTray = computed(() => !revealed.value || pendingDecision.value || recentReveal.value || trayExpanded.value)
+const trayCopy = computed(() => dicePresentationCopy(locale.value))
+watch(revealed, (value, previous) => {
+  if (trayTimer !== undefined) window.clearTimeout(trayTimer)
+  recentReveal.value = value && !previous
+  // Only live reveals reach the DF Agent avatar; history renders revealed.
+  if (recentReveal.value) reportAssistantReaction(status.value)
+  // Keep the tray expanded after a live reveal.  The old timeout made the
+  // result disappear again a few seconds after the animation, which is easy
+  // to miss during play.  `trayExpanded` remains a user-controlled opt-out:
+  // clicking the tray toggle can still collapse it deliberately.
+  if (recentReveal.value) {
+    trayExpanded.value = true
+    trayTimer = window.setTimeout(() => { recentReveal.value = false; trayTimer = undefined }, 5000)
+  }
+})
+function toggleTray() {
+  const open = !showTray.value
+  recentReveal.value = false
+  trayExpanded.value = open
 }
 
-function startAutoReveal() {
-  if (autoRevealTicker !== undefined || !pendingClickReveal.value) return
-  autoRevealLeft.value = AUTO_REVEAL_SECONDS
-  autoRevealTicker = window.setInterval(() => {
-    autoRevealLeft.value -= 1
-    if (autoRevealLeft.value > 0) return
-    stopAutoReveal()
-    autoRevealed.value = true
-  }, 1000)
+function stopRevealAnimation() {
+  if (revealTimer !== undefined) window.clearTimeout(revealTimer)
+  revealTimer = undefined
 }
 
 function startRevealTimer() {
+  stopRevealAnimation()
+  revealed.value = false
+  reportAssistantReaction('diceRoll')
   const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-  revealTimer = window.setTimeout(() => { revealed.value = true }, reduced ? 0 : 720)
+  revealTimer = window.setTimeout(() => { revealed.value = true; revealTimer = undefined }, reduced ? 0 : 720)
 }
 
 watch(pendingClickReveal, (pending) => {
-  if (pending) { revealed.value = false; startAutoReveal(); return }
-  stopAutoReveal()
-  if (props.animate && !revealTimer) startRevealTimer()
+  if (pending) { stopRevealAnimation(); revealed.value = false; return }
+  if (props.animate) startRevealTimer()
   else revealed.value = true
 })
 
@@ -95,6 +118,10 @@ const diceChips = computed<{ value: number; taken: boolean }[]>(() => {
 })
 const modeBadge = computed(() => {
   const mode = String(props.check.advantage_mode || '')
+  if (props.check.dice_mechanic === 'coc_bonus_penalty') {
+    if (mode === 'advantage') return cocCopy[locale.value].bonus
+    if (mode === 'disadvantage') return cocCopy[locale.value].penalty
+  }
   if (mode === 'advantage') return t('checkModeAdvantage')
   if (mode === 'disadvantage') return t('checkModeDisadvantage')
   return ''
@@ -110,20 +137,17 @@ const plannerSources = computed(() => {
 })
 
 onMounted(() => {
-  if (pendingClickReveal.value) { startAutoReveal(); return }
+  if (pendingClickReveal.value) return
   if (!props.animate) return
   startRevealTimer()
 })
-onUnmounted(() => {
-  if (revealTimer !== undefined) window.clearTimeout(revealTimer)
-  stopAutoReveal()
-})
+onUnmounted(() => { stopRevealAnimation(); if (trayTimer !== undefined) window.clearTimeout(trayTimer) })
 </script>
 
 <template>
   <article
     class="message check-reveal-card"
-    :class="[status, { rolling: !revealed }]"
+    :class="[revealed ? status : 'pending', { rolling: !revealed && !pendingClickReveal }]"
     :aria-label="t('checkCardLabel', { name: check.actor_name || check.actor_uid || '' })"
   >
     <div class="check-reveal-head">
@@ -135,35 +159,38 @@ onUnmounted(() => {
       </div>
       <b class="check-verdict">{{ revealed ? statusLabel : (pendingClickReveal ? t('checkRevealPending') : t('diceRolling')) }}</b>
     </div>
+    <button v-if="revealed && !pendingDecision" class="tray-toggle" data-testid="dice-tray-toggle" type="button" :aria-expanded="showTray" @click="toggleTray">{{ showTray ? trayCopy.hide : trayCopy.show }}</button>
+    <div v-show="showTray" class="tray-presentation"><DiceTray :check="check" :revealed="revealed" :rolling="!revealed && !pendingClickReveal" :animate-reveal="recentReveal" /></div>
     <p v-if="revealed" class="check-math">{{ math }}</p>
-    <details v-if="revealed">
-      <summary>{{ t('checkDetails') }}</summary>
-      <span v-if="diceChips.length" class="check-dice-chips" :aria-label="t('checkDiceFaces', { rolls: diceFaces })">
-        <span
-          v-for="(chip, index) in diceChips"
-          :key="index"
-          class="check-die-chip"
-          :class="{ taken: chip.taken }"
-        >{{ chip.value }}<small v-if="chip.taken">{{ t('checkDiceTaken') }}</small></span>
-      </span>
-      <span v-else>{{ t('checkDiceFaces', { rolls: diceFaces }) }}</span>
-      <span>{{ t('checkCalculation', { calculation: math }) }}</span>
-      <span>{{ t('checkVerdictDetail', { verdict: statusLabel }) }}</span>
-      <span v-if="typeof check.hard_threshold === 'number'">
-        {{ t('checkSuccessLevels', { normal: check.threshold ?? 0, hard: check.hard_threshold ?? 0, extreme: check.extreme_threshold ?? 0 }) }}
-      </span>
-      <span v-if="check.modifier_breakdown">{{ t('checkModifierBreakdown', { detail: check.modifier_breakdown }) }}</span>
-      <span v-if="check.advantage_note">{{ t('checkAdvantageNote', { detail: check.advantage_note }) }}</span>
-      <span v-if="plannerSources">{{ t('checkPlannerSources', { detail: plannerSources }) }}</span>
-      <span v-if="check.assist?.length">{{ t('checkAssist', { players: check.assist.join(', ') }) }}</span>
-    </details>
+    <div v-if="revealed" class="check-reveal-footer">
+      <details>
+        <summary>{{ t('checkDetails') }}</summary>
+        <CocDiceFaces v-if="check.dice_mechanic === 'coc_bonus_penalty' && check.percentile_dice" :dice="check.percentile_dice" />
+        <span v-else-if="diceChips.length" class="check-dice-chips" :aria-label="t('checkDiceFaces', { rolls: diceFaces })">
+          <span
+            v-for="(chip, index) in diceChips"
+            :key="index"
+            class="check-die-chip"
+            :class="{ taken: chip.taken }"
+          >{{ chip.value }}<small v-if="chip.taken">{{ t('checkDiceTaken') }}</small></span>
+        </span>
+        <span v-else>{{ t('checkDiceFaces', { rolls: diceFaces }) }}</span>
+        <span>{{ t('checkCalculation', { calculation: math }) }}</span>
+        <span>{{ t('checkVerdictDetail', { verdict: statusLabel }) }}</span>
+        <span v-if="typeof check.hard_threshold === 'number'">
+          {{ t('checkSuccessLevels', { normal: check.threshold ?? 0, hard: check.hard_threshold ?? 0, extreme: check.extreme_threshold ?? 0 }) }}
+        </span>
+        <span v-if="check.modifier_breakdown">{{ t('checkModifierBreakdown', { detail: check.modifier_breakdown }) }}</span>
+        <span v-if="check.advantage_note">{{ t('checkAdvantageNote', { detail: check.advantage_note }) }}</span>
+        <span v-if="plannerSources">{{ t('checkPlannerSources', { detail: plannerSources }) }}</span>
+        <span v-if="check.assist?.length">{{ t('checkAssist', { players: check.assist.join(', ') }) }}</span>
+      </details>
+      <span v-if="clickMode && reveal" class="dice-tag check-revealed-by">{{ t('checkRevealBy', { name: revealerName || reveal.by || '' }) }}</span>
+    </div>
     <div v-if="pendingClickReveal" class="check-reveal-actions">
       <button v-if="canReveal" class="dice-tag dice-tag-button" type="button" :disabled="busy" @click="emit('reveal', check)">{{ t('checkRevealAction') }}</button>
       <span v-else class="dice-tag">{{ t('checkRevealWaiting') }}</span>
-      <span class="dice-tag check-reveal-countdown">{{ t('checkRevealAutoIn', { seconds: autoRevealLeft }) }}</span>
     </div>
-    <span v-else-if="clickMode && reveal" class="dice-tag check-revealed-by">{{ t('checkRevealBy', { name: revealerName || reveal.by || '' }) }}</span>
-    <span v-else-if="clickMode && autoRevealed" class="dice-tag check-revealed-by">{{ t('checkRevealAuto') }}</span>
     <div v-if="revealed && check.luck_decision === 'pending'" class="luck-decision-actions">
       <template v-if="canDecideLuck">
         <button class="dice-tag dice-tag-button" type="button" :disabled="busy" @click="emit('luck', check, true)">{{ t('spendLuckForSuccess', { cost: check.luck_cost || 0 }) }}</button>
@@ -173,6 +200,7 @@ onUnmounted(() => {
     </div>
     <span v-else-if="revealed && check.luck_decision === 'spent' && check.luck_spent" class="dice-tag">{{ t('luckSpent', { cost: check.luck_spent }) }}</span>
     <span v-else-if="revealed && check.luck_decision === 'declined'" class="dice-tag">{{ t('luckDeclined') }}</span>
+    <PushDecisionPanel v-if="revealed" :check="check" :game-key="gameKey" :actor-id="actorId" :is-gm="isGm" :readonly="readonly" @refresh="emit('refresh')" />
   </article>
 </template>
 
@@ -181,12 +209,14 @@ onUnmounted(() => {
 :root[data-mode="light"] .check-reveal-card{background:linear-gradient(135deg,var(--df-surface-2),var(--df-surface-3))}
 :root[data-mode="light"] .check-die{background:rgba(0,0,0,.06)}
 .check-reveal-card.success{border-left-color:var(--df-success)}
+.check-reveal-card.pending{border-left-color:var(--df-border-soft)}
+.tray-toggle{display:block;margin:6px 0 0 auto;padding:3px 9px;font-size:11px;color:var(--df-text-muted);background:transparent;border:1px solid var(--df-border-soft)}
 .check-reveal-card.critical{border-left-color:var(--df-accent-strong);box-shadow:0 0 24px rgba(216,173,82,.2)}
 .check-reveal-card.fumble{border-left-color:var(--df-danger);box-shadow:0 0 22px rgba(185,58,58,.18)}
 .check-reveal-head{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:10px}
 .check-reveal-head strong{display:block;color:var(--df-accent-strong)}
 .check-reveal-head small{display:block;margin-top:2px;color:var(--df-text-muted)}
-.check-mode-badge{display:inline-block;margin-top:3px;padding:1px 7px;border:1px solid var(--df-border-soft);border-radius:8px;font-size:11px;font-weight:700}
+.check-reveal-head .check-mode-badge{display:inline-flex;width:fit-content;max-width:100%;margin-top:3px;padding:1px 7px;border:1px solid var(--df-border-soft);border-radius:8px;font-size:11px;font-weight:700}
 .check-mode-badge.advantage{color:var(--df-success);border-color:var(--df-success)}
 .check-mode-badge.disadvantage{color:var(--df-danger);border-color:var(--df-danger)}
 .check-dice-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
@@ -199,14 +229,15 @@ onUnmounted(() => {
 .success .check-verdict{color:var(--df-success)}
 .failure .check-verdict,.fumble .check-verdict{color:var(--df-danger)}
 .critical .check-verdict{color:var(--df-accent-strong)}
-.check-math{margin:8px 0 2px;padding-left:54px;font-variant-numeric:tabular-nums}
-details{margin:5px 0 0 54px;color:var(--df-text-muted);font-size:12px}
-details span{display:block;margin-top:3px}
+.check-math{margin:8px 0 2px;font-variant-numeric:tabular-nums}
+.check-reveal-footer{display:flex;align-items:flex-start;gap:12px;margin-top:10px;padding-top:8px;border-top:1px solid var(--df-border-soft)}
+details{min-width:0;flex:1;margin:0;color:var(--df-text-muted);font-size:12px;line-height:1.7;overflow-wrap:anywhere}
+details span{display:block;margin-top:5px}
 summary{cursor:pointer}
-.check-reveal-actions{margin:8px 0 0 54px}
-.check-revealed-by{display:inline-block;margin-top:6px;margin-left:54px}
-@media(max-width:520px){.check-reveal-actions,.check-revealed-by{margin-left:0}}
+.check-reveal-actions{display:flex;justify-content:center;margin:8px 0 0}
+.check-revealed-by{flex:0 1 auto;margin-top:0;max-width:45%;white-space:normal}
+@media(max-width:520px){.check-reveal-footer{flex-wrap:wrap;gap:4px 10px}.check-reveal-footer details{flex-basis:100%}.check-revealed-by{max-width:100%}}
 @keyframes check-roll{0%{transform:rotate(0) scale(.9)}50%{transform:rotate(190deg) scale(1.08)}100%{transform:rotate(360deg) scale(.9)}}
-@media(max-width:520px){.check-reveal-head{grid-template-columns:38px minmax(0,1fr)}.check-die{width:36px;height:36px}.check-verdict{grid-column:2}.check-math,details{padding-left:0;margin-left:0}}
+@media(max-width:520px){.check-reveal-head{grid-template-columns:38px minmax(0,1fr)}.check-die{width:36px;height:36px}.check-verdict{grid-column:2}.check-math{padding-left:0;margin-left:0}}
 @media(prefers-reduced-motion:reduce){.rolling .check-die{animation:none}}
 </style>

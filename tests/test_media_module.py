@@ -1,5 +1,7 @@
 """Media migration, live aliases, rollback and portable asset coverage."""
 
+from legacy_save_fixtures import legacy_table_payload
+
 from copy import deepcopy
 import base64
 import io
@@ -190,6 +192,7 @@ async def test_export_then_import_preserves_both_asset_attachments(tmp_path, leg
     if legacy:
         slot = state["modules"].pop("media")
         state.update({key: slot[key] for key in ("scene_image", "map_background")})
+        state = legacy_table_payload(state)
         state["instance_schema_version"] = 22
         state_path.write_text(json.dumps(state), encoding="utf-8")
     original_bytes = state_path.read_bytes()

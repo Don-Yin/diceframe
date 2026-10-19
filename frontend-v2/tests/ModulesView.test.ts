@@ -76,6 +76,7 @@ async function mountView(query: Record<string, string> = {}) {
     history: createMemoryHistory(),
     routes: [
       { path: '/modules', name: 'modules', component: ModulesView },
+      { path: '/library', name: 'library', component: emptyView },
       { path: '/modules/:moduleId', name: 'module-detail', component: emptyView },
       { path: '/play', name: 'play', component: emptyView },
     ],
@@ -99,6 +100,9 @@ describe('ModulesView', () => {
   it('separates installed, local import, and online modules', async () => {
     const { wrapper } = await mountView()
 
+    expect(wrapper.get('h1').text()).toBe('内容包')
+    expect(wrapper.get('.view-intro').text()).toContain('安装和更新内容包，查看资源与版本。')
+
     const installedSection = wrapper.get('[data-testid="modules-installed"]')
     const localSection = wrapper.get('[data-testid="modules-local-import"]')
     const onlineSection = wrapper.get('[data-testid="modules-online"]')
@@ -108,9 +112,36 @@ describe('ModulesView', () => {
     // 禁用中的模组仍然列在"已安装"里（否则无法再启用）。
     expect(installedSection.text()).toContain('Dormant Module')
     expect(installedSection.text()).toContain('已禁用')
+    expect(installedSection.text()).toContain('冒险内容包')
+    expect(installedSection.text()).toContain('资源包')
+    expect(installedSection.text()).toContain('不含固定剧情')
     expect(localSection.find('input[type="file"]').exists()).toBe(true)
     expect(onlineSection.text()).toContain('Other Module')
+    expect(onlineSection.text()).toContain('包含 2 个冒险')
     expect(onlineSection.text()).toContain('更新到 1.2.0')
+    expect(wrapper.find('a[href="#modules-installed"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="#modules-local-import"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="#modules-online"]').exists()).toBe(false)
+  })
+
+  it('keeps the return-to-library action after removing duplicate section links', async () => {
+    const { wrapper, router } = await mountView()
+    await wrapper.get('.content-page-heading-actions a[href="/library"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.name).toBe('library')
+    wrapper.unmount()
+  })
+
+  it('keeps a failed installed list actionable with a retry path', async () => {
+    mocks.list.mockRejectedValueOnce(new Error('installed unavailable'))
+    const { wrapper } = await mountView()
+    expect(wrapper.text()).toContain('installed unavailable')
+    const refresh = wrapper.findAll('button').find(button => button.text() === '刷新')
+    expect(refresh).toBeDefined()
+    mocks.list.mockResolvedValueOnce(installed)
+    await refresh!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="modules-installed"]').text()).toContain('Castle Module')
   })
 
   it('marks installed online modules and installs missing ones from the marketplace', async () => {
@@ -122,9 +153,22 @@ describe('ModulesView', () => {
     expect(install).toBeDefined()
     await install!.trigger('click')
     await flushPromises()
+    await vi.waitFor(() => expect(fresh.get('[role="status"]').text()).toMatch(/已安装，(正在刷新列表|列表已刷新)/))
 
     expect(mocks.installFromMarketplace).toHaveBeenCalledWith('other-module', false)
     expect(wrapper.get('[data-testid="modules-market-castle-module"]').text()).toContain('更新到 1.2.0')
+  })
+
+  it('shows the marketplace error when the install endpoint returns a failed result', async () => {
+    mocks.installFromMarketplace.mockResolvedValue({ ok: false, error: '签名校验失败' })
+    const { wrapper } = await mountView()
+
+    const fresh = wrapper.get('[data-testid="modules-market-other-module"]')
+    await fresh.findAll('button').find(button => button.text() === '从市场安装')!.trigger('click')
+    await flushPromises()
+
+    expect(fresh.get('[role="status"]').text()).toContain('签名校验失败')
+    expect(fresh.get('[role="status"]').classes()).toContain('is-error')
   })
 
   it('reports an unreachable marketplace instead of an empty one', async () => {
@@ -134,6 +178,32 @@ describe('ModulesView', () => {
     const { wrapper } = await mountView()
 
     expect(wrapper.get('[data-testid="modules-online"]').text()).toContain('mirror down')
+  })
+
+  it('does not invent a resource count that the online catalog does not provide', async () => {
+    mocks.marketplace.mockResolvedValue({ ok: true, modules: [{ ...online.modules[0], adventure_count: 0 }] })
+    const { wrapper } = await mountView()
+    const card = wrapper.get('[data-testid="modules-market-other-module"]')
+    expect(card.text()).toContain('不含固定剧情')
+    expect(card.text()).not.toContain('包含 0 项资料')
+  })
+
+  it('keeps a disabled installed adventure classified by its readable inventory', async () => {
+    mocks.list.mockResolvedValue({ ok: true, modules: [{ ...installed.modules[0], status: 'disabled', inventory_status: 'disabled' }] })
+    const { wrapper } = await mountView()
+    const section = wrapper.get('[data-testid="modules-installed"]')
+    expect(section.text()).toContain('冒险内容包')
+    expect(section.text()).toContain('启用后')
+    expect(section.text()).not.toContain('不含固定剧情')
+  })
+
+  it('treats an unreadable inventory as unknown and remains usable with nullable counts', async () => {
+    mocks.list.mockResolvedValue({ ok: true, modules: [{ ...installed.modules[0], adventure_count: null, content_counts: null, inventory_status: 'unknown' }] })
+    const { wrapper } = await mountView()
+    const section = wrapper.get('[data-testid="modules-installed"]')
+    expect(section.text()).toContain('内容清单暂不可读')
+    expect(section.text()).not.toContain('不含固定剧情')
+    expect(section.text()).not.toContain('包含 0 项资料')
   })
 
   it('validates the saved digest before offering to resume the game', async () => {

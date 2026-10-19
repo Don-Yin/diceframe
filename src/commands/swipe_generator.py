@@ -7,6 +7,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from typing import Any
 
+from src.adventures.graph_v2 import ADVENTURE_GRAPH_FORMAT_V2
 from src.commands.economy_effects import (
     currency_labels_for_rule,
     defer_narrative_effects,
@@ -17,14 +18,14 @@ from src.commands.economy_effects import (
     should_warn_unbacked_payment,
 )
 from src.engine.economy import filter_unconfirmed_purchase_grants
-from src.engine import combat_narrative, progression
+from src.engine import combat_narrative, module_hooks, progression
 from src.commands.protocol_repair import repair_malformed_protocol_response
 from src.commands.round_actions import format_check_results_constraint
 from src.commands.state_update_applier import StateUpdateApplier, discard_unresolved_player_damage
 from src.commands.tag_parser import parse_tag_state
+from src.commands.story_output import ensure_story_response, bound_story_response
 from src.engine.game_instance import GameInstance, restore_players
-from src.engine.modules import adventure_runtime_state, narrative_notes, progression_state, session_stats
-from src.engine.modules import combat_extension_state
+from src.engine.modules import adventure_runtime_state, progression_state, session_stats
 from src.engine.world_state import ensure_world_state
 from src.engine.economy import queue_effect_group, reconcile_rollback_snapshot, reverse_round_economy
 from src.imagegen.storyboards import normalize_scene_panels, storyboard_panel_metadata, storyboard_source_revision
@@ -82,7 +83,7 @@ class SwipeGenerator:
             async with instance._process_lock:
                 session_stats.require_writable(instance)
                 adventure_runtime_state.require_writable(instance)
-                narrative_notes.require_writable(instance)
+                module_hooks.preflight(instance, module_hooks.NARRATIVE_VIEW)
                 expected_run_id = instance.run_id
                 before = type(instance).from_dict(deepcopy(instance.to_dict()))
                 before.log = deepcopy(instance.log)
@@ -129,6 +130,9 @@ class SwipeGenerator:
                 break
         if not target_entry:
             return None, None
+        from src.engine.modules import resource_recovery, skill_growth
+        skill_growth.rewind_preflight(instance, round_num)
+        resource_recovery.rewind_preflight(instance, round_num)
 
         swipes = target_entry.get("swipes", [])
         if len(swipes) >= 5:
@@ -140,7 +144,13 @@ class SwipeGenerator:
             swipes = [target_entry.get("gm_response", "")]
             target_entry["swipes"] = swipes
 
+        progress_snapshot = target_entry.get("pre_adventure_progress")
         snapshot = target_entry.get("pre_state_snapshot", {})
+        if ((instance.adventure_binding or {}).get("format") == ADVENTURE_GRAPH_FORMAT_V2
+                and (not isinstance(progress_snapshot, dict) or not isinstance(snapshot, dict) or not snapshot)):
+            logger.warning("Cannot rewrite v2 adventure without its pre-round snapshots: %s round=%s",
+                           instance.game_key, round_num)
+            return None, None
         if snapshot:
             # ADR 0003 branch cut: rounds after the rewritten target belong to
             # the discarded branch. Their log entries are dropped together
@@ -151,25 +161,19 @@ class SwipeGenerator:
                 entry for entry in instance.log
                 if int(entry.get("round", 0) or 0) <= round_num
             ]
-            current_combat_snapshot = combat_extension_state.round_snapshots(instance).get(
-                str(progression_state.round_value(instance)),
-            )
-            if isinstance(current_combat_snapshot, dict):
-                if not instance.restore_combat_extension_snapshot(current_combat_snapshot):
-                    combat_extension_state.replace_current(instance, {})
+            module_hooks.run(module_hooks.ROUND_REWIND_BEGIN, instance, round_num)
             progression.rewind_for_replay(instance, round_num)
             reverse_round_economy(instance, round_num)
             restore_players(instance, reconcile_rollback_snapshot(instance, snapshot, round_num))
-            combat_snapshot = target_entry.get("pre_combat_extension_snapshot")
-            if isinstance(combat_snapshot, dict):
-                if not instance.restore_combat_extension_snapshot(combat_snapshot):
-                    combat_extension_state.replace_current(instance, {})
+            module_hooks.run(
+                module_hooks.ROUND_REWIND_RESTORE, instance, target_entry, round_num,
+                module_hooks.REWIND_SOURCE_SWIPE,
+            )
             # 世界真相同属被丢弃的分支：swipe 切回目标轮时，本轮之后写入的
             # world ops 一起撤销（ADR 0003 整轮语义）。
             world_snapshot = target_entry.get("pre_world_state")
             if isinstance(world_snapshot, dict) and world_snapshot:
                 instance.world_state = ensure_world_state(world_snapshot)
-            instance.discard_combat_extension_snapshots_from(round_num)
             logger.info("Swipe: 已恢复 pre-state snapshot (round=%d)", round_num)
 
         actions_text = "; ".join(
@@ -235,12 +239,21 @@ class SwipeGenerator:
             max_tokens=self.narrative_max_tokens,
         )
         response.content = normalize_tag_protocol(response.content)
+        response = await ensure_story_response(
+            instance, response, self.llm_client, system_prompt=gm_prompt,
+            user_message=context, max_tokens=self.narrative_max_tokens,
+            round_number=round_num, revision=len(swipes),
+        )
 
         narration = response.content
         if "---" in response.content:
             narration = response.content.split("---", 1)[0].strip()
         narration = sanitize_narration(narration)
         data = parse_tag_state(response.content, combat_model_s)
+        if getattr(response, "story", None):
+            bound_story_response(response, data, trigger=500 if instance.language == "zh-CN" else 1200,
+                                 limit=400 if instance.language == "zh-CN" else 1100)
+            narration = response.narration
         system_changes: list[str] = []
         if should_warn_unbacked_payment(
             narration, data, instance.language,
@@ -267,16 +280,25 @@ class SwipeGenerator:
         if deferred_effects:
             deferred_effects["allowed_player_uids"] = None
             queue_effect_group(instance, queued_proposals, deferred_effects)
-        if data.get("plot_update") and instance.plot_tracker:
+        plot_update = data.get("plot_update")
+        if isinstance(plot_update, dict) and "adventure_completion" in plot_update:
+            plot_update = dict(plot_update)
+            plot_update.pop("adventure_completion", None)
+        if plot_update and instance.plot_tracker:
             try:
                 instance.plot_tracker.apply_update(
-                    data.get("plot_update", {}), progression_state.round_value(instance))
+                    plot_update, progression_state.round_value(instance))
             except Exception:
                 logger.exception("Swipe 剧情更新异常，已跳过 (round=%d)", round_num)
 
         await instance.finish_judgment_with_swipe(
             narration, round_num,
             state_changes=system_changes if system_changes else None,
+            story=getattr(response, "story", None),
+            adventure_completion_candidate=(
+                data.get("plot_update", {}).get("adventure_completion")
+                if isinstance(data.get("plot_update"), dict) else None
+            ),
         )
         combat_narrative.consume_pending_events(
             instance, pending_combat_event_ids,
@@ -297,7 +319,7 @@ class SwipeGenerator:
             normalized_panels,
             narration=str(target_entry.get("gm_response") or ""),
             actions=target_entry.get("actions") or [],
-            current_scene=str(narrative_notes.scene(instance) or ""),
+            current_scene=str(module_hooks.narrative_view(instance)["scene"] or ""),
             source_revision=storyboard_source_revision(target_entry),
         )
         prompt_history = target_entry.setdefault("swipe_scene_image_prompts", [])

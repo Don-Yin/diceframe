@@ -19,7 +19,9 @@
       "focus_points": "Focus Points",
       "unarmed_strike": "Unarmed Strike",
       "action": "Action",
-      "bonus_action": "Bonus Action"
+      "bonus_action": "Bonus Action",
+      "paladin": "Paladin",
+      "paladins_smite": "Paladin’s Smite"
     }
   }
 }

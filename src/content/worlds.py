@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from src.engine.language import content_locale_candidates
 
 _DISPLAY_FIELDS = frozenset({"world_name", "description", "world_setting", "starter_scene"})
 _LORE_DISPLAY_FIELDS = frozenset({"name", "keywords", "content"})
@@ -103,6 +104,11 @@ def _world_draft_from_definition(data: dict[str, Any]) -> WorldDraft:
         source=copy.deepcopy(data.get("source") or {}),
         warnings=tuple(str(item) for item in data.get("warnings", []) if item),
     )
+
+
+def world_definition_draft(data: dict[str, Any]) -> WorldDraft:
+    """Validate a supplied canonical v3 definition without reading storage."""
+    return _world_draft_from_definition(copy.deepcopy(data))
 
 
 def _safe_lore_id_part(value: Any) -> str:
@@ -288,10 +294,10 @@ def load_world_definition(worlds_dir: str | Path, world_id: str, locale: str = "
     if version < 2:
         return raw
     if requested:
-        exact = root / "locales" / requested / f"{world_id}.json"
-        fallback = root / "locales" / requested.split("-", 1)[0] / f"{world_id}.json"
-        overlay_path = exact if exact.exists() else fallback
-        if overlay_path.exists():
+        for candidate in content_locale_candidates(requested):
+            overlay_path = root / "locales" / candidate / f"{world_id}.json"
+            if not overlay_path.exists():
+                continue
             overlay = json.loads(overlay_path.read_text(encoding="utf-8"))
             if not isinstance(overlay, dict):
                 raise ValueError("world locale overlay must be an object")

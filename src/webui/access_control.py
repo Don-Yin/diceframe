@@ -12,7 +12,9 @@ from src.webui.access_password import (
     verify_access_password,
 )
 from src.engine.modules import room_access
+from src.engine.modules import adventure_runtime_state
 from src.webui.device_tokens import DEVICE_TOKENS_KEY
+from src.webui.sse_ticket import SSE_GRANT_KEY, BotGrant, OwnerGrant, token_digest
 from src.webui.services._common import canonical_game_key
 from src.webui.routes.auth import ACCESS_PASSWORD_CONFIGURED_KEY
 
@@ -21,6 +23,14 @@ SEAT_TOKEN_HEADER = "X-Seat-Token"
 # Room tokens are only accepted as a header: a URL query would land them in
 # access logs. (SSE needs no room token; it authenticates with a ticket.)
 ROOM_TOKEN_HEADER = "X-Room-Token"
+
+#: A share request to a game whose player entrance the GM closed. Clients key
+#: on ``error_code``; ``error`` stays for older clients.
+PLAYER_ACCESS_CLOSED_BODY = {
+    "ok": False,
+    "error_code": "PLAYER_ACCESS_CLOSED",
+    "error": "本局玩家入口已关闭",
+}
 
 #: Id of the paired device whose token authenticated the request ('' for the
 #: access password or no owner credential). Audit only, never authorization.
@@ -39,6 +49,17 @@ _BOT_PUBLIC_ENDPOINTS = frozenset(
     }
 )
 
+# A read-only Bot surface may still use transport/session operations that do
+# not submit an action or mutate the game.  Everything else is denied before
+# the route handler runs, so direct HTTP callers cannot bypass the Bridge.
+# ``verify-room-password`` is deliberately absent: a correct password mints a
+# room token and persists it (evicting the oldest ones), so it is a write, not
+# a read.  A private ``kp-question`` call is the only admitted non-GET path and
+# never persists (the route rejects party answers from a read-only surface).
+_BOT_READ_ONLY_POST_TAILS = frozenset({
+    "kp-question",
+})
+
 
 class WebAccessControl:
     def __init__(self, state: dict) -> None:
@@ -49,6 +70,9 @@ class WebAccessControl:
         bot_header = str(request.headers.get("X-Bot-Token") or "")
         if request.path.startswith("/api/bot/") or bot_header:
             return await self._handle_bot_request(request, handler, bot_header)
+        # Lets a long-lived stream re-check the owner credential it was opened
+        # with (see owner_grant / owner_revocation).
+        request[ACCESS_CONTROL_KEY] = self
 
         if request.path.endswith("/sse") and request.query.get("ticket"):
             game_key = self.bot_request_game_key(request)
@@ -65,6 +89,7 @@ class WebAccessControl:
                 )
             request["user_id"] = ticket.user_id
             request["sse_ticket_authenticated"] = True
+            request[SSE_GRANT_KEY] = ticket.grant
             return await handler(request)
 
         token = normalize_access_password(self.state.get("access_token"))
@@ -123,7 +148,7 @@ class WebAccessControl:
         if share_uid and (request.query.get("user") or request.get("seat_token_uid")):
             if not owner_authenticated and self.player_access_is_closed(request):
                 return web.json_response(
-                    {"ok": False, "error": "本局玩家入口已关闭"},
+                    PLAYER_ACCESS_CLOSED_BODY,
                     status=403,
                 )
             if not owner_authenticated and self.share_uid_is_gm_seat(request, share_uid):
@@ -165,7 +190,7 @@ class WebAccessControl:
                 if share_active:
                     if self.player_access_is_closed(request):
                         return web.json_response(
-                            {"ok": False, "error": "本局玩家入口已关闭"},
+                            PLAYER_ACCESS_CLOSED_BODY,
                             status=403,
                         )
                     if self.share_uid_is_gm_seat(request, share_uid):
@@ -202,6 +227,14 @@ class WebAccessControl:
         request["bot_authenticated"] = True
         if plugin_identity:
             request["plugin_authenticated"] = plugin_identity
+        # Lets a long-lived stream re-check the bot credential it was opened
+        # with (see bot_revocation).
+        request[ACCESS_CONTROL_KEY] = self
+        request[BOT_GRANT_KEY] = BotGrant(
+            token_digest=token_digest(bot_header),
+            via_global=global_authenticated,
+            plugin_id=str((plugin_identity or {}).get("plugin_id") or ""),
+        )
         if request.path.startswith("/api/bot/"):
             return await handler(request)
         game_key = self.bot_request_game_key(request)
@@ -237,12 +270,97 @@ class WebAccessControl:
             "gm_uid"
         ):
             return web.json_response(
-                {"ok": False, "error": "本局玩家入口已关闭"},
+                PLAYER_ACCESS_CLOSED_BODY,
                 status=403,
             )
+        surface = (
+            api.bot_surface(game_key)
+            if api is not None and hasattr(api, "bot_surface")
+            else adventure_runtime_state.BOT_SURFACE_NONE
+        )
+        if surface not in adventure_runtime_state.BOT_SURFACES:
+            return web.json_response(
+                {
+                    "ok": False,
+                    "error_code": "BOT_SURFACE_UNSUPPORTED",
+                    "error": "该对局的 Bot 权限面无效，已拒绝请求",
+                },
+                status=403,
+            )
+        request["bot_surface"] = surface
+        if surface == adventure_runtime_state.BOT_SURFACE_NONE:
+            return web.json_response(
+                {
+                    "ok": False,
+                    "error_code": "BOT_SURFACE_DISABLED",
+                    "error": "该玩法模式不支持 Bot 操作",
+                },
+                status=403,
+            )
+        if surface == adventure_runtime_state.BOT_SURFACE_READ_ONLY:
+            path_tail = request.path.rsplit("/", 1)[-1]
+            if request.method != "GET" and path_tail not in _BOT_READ_ONLY_POST_TAILS:
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error_code": "BOT_READ_ONLY",
+                        "error": "该对局的 Bot 绑定仅允许读取和只读提问",
+                    },
+                    status=403,
+                )
         request["user_id"] = actor
         request["bot_actor"] = actor
         return await handler(request)
+
+    def access_password_marker(self) -> str:
+        """The stored access password hash ('' when none is configured)."""
+        return normalize_access_password(self.state.get("access_token"))
+
+    def owner_grant(self, request: web.Request) -> OwnerGrant:
+        """Snapshot the owner credential ``request`` was authenticated with."""
+        return OwnerGrant(
+            paired_device_id=str(request.get(PAIRED_DEVICE_ID_KEY, "") or ""),
+            access_password_hash=self.access_password_marker(),
+        )
+
+    def owner_revocation(self, app: web.Application, grant: OwnerGrant) -> dict | None:
+        """Why a stream opened under ``grant`` may no longer be served (None while it may).
+
+        A paired device loses access only when its pairing is revoked (an
+        access password change keeps pairings, except the first one, which
+        revokes them all). A stream opened with the access password, or on a
+        server without one, loses access when the stored password changes.
+        """
+        if grant.paired_device_id:
+            devices = app.get(DEVICE_TOKENS_KEY)
+            if devices is None or not devices.has(grant.paired_device_id):
+                return {"error_code": "PAIRED_DEVICE_REVOKED", "error": "此设备的配对已被吊销，请重新登录"}
+            return None
+        if self.access_password_marker() != grant.access_password_hash:
+            return {"error_code": "ACCESS_PASSWORD_CHANGED", "error": "访问密码已更改，请重新登录"}
+        return None
+
+    def bot_revocation(self, app: web.Application, grant: BotGrant) -> dict | None:
+        """Why a stream opened under bot ``grant`` may no longer be served (None while it may).
+
+        The global Bot API token it matched is still the configured one, or
+        the plugin whose API token it was still holds that token with HTTP
+        access and has not been turned off (stricter than admission, see
+        PluginHost.api_token_active). A plugin stream is not affected by global token rotation, nor
+        the other way round.
+        """
+        if grant.via_global:
+            configured = str(self.state.get("bot_token") or "")
+            if configured and hmac.compare_digest(grant.token_digest, token_digest(configured)):
+                return None
+        if grant.plugin_id:
+            plugin_host = app.get("plugin_host")
+            if plugin_host is not None and plugin_host.api_token_active(
+                grant.plugin_id, grant.token_digest,
+            ):
+                return None
+            return {"error_code": "PLUGIN_TOKEN_REVOKED", "error": "插件 API Token 已失效或插件已停用"}
+        return {"error_code": "BOT_TOKEN_REVOKED", "error": "Bot API Token 已更换，请更新 Bot 配置"}
 
     @staticmethod
     def is_public_ruleset_builder_request(request: web.Request) -> bool:
@@ -416,6 +534,12 @@ class WebAccessControl:
         if len(parts) < 4:
             return ""
         tail = parts[3]
+        if tail == "recovery":
+            if request.method == "GET" and len(parts) == 4:
+                return "seat"
+            if request.method == "POST" and len(parts) == 5 and parts[4] in {"request", "claim"}:
+                return "seat"
+            return ""
         if request.method == "GET" and tail in _LOBBY_GET_TAILS and len(parts) == 4:
             return "lobby"
         if request.method == "POST" and tail in _LOBBY_POST_TAILS and len(parts) == 4:
@@ -427,6 +551,18 @@ class WebAccessControl:
             and parts[4] == "claim"
         ):
             return "lobby"
+        if tail == "profile" and (
+            (request.method == "GET" and len(parts) == 4)
+            or (request.method == "POST" and len(parts) == 5 and parts[4] == "actions")
+        ):
+            return "seat"
+        if tail in {"ai-seats", "check-modes"} and request.method in {"GET", "PUT", "POST"}:
+            return "seat"
+        if (
+            request.method == "POST" and tail == "checks" and len(parts) == 7
+            and parts[5] == "push" and parts[6] in {"request", "offer", "reject", "confirm", "decline"}
+        ):
+            return "seat"
         if request.method == "GET" and tail in {
             "adventure",
             "characters",
@@ -491,3 +627,12 @@ class WebAccessControl:
         except Exception:
             return False
         return bool(instance and not room_access.player_access_open(instance))
+
+
+#: The access control that authenticated the request, for re-checking the
+#: owner credential of a long-lived stream.
+ACCESS_CONTROL_KEY = web.RequestKey("access_control", WebAccessControl)
+
+#: The bot credential a bot request was authenticated with, for re-checking a
+#: long-lived bot stream.
+BOT_GRANT_KEY = web.RequestKey("bot_grant", BotGrant)

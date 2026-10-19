@@ -7,11 +7,13 @@ tone 兼容、None=继承世界与显式中性覆盖的严格区分、最终 Pro
 
 from __future__ import annotations
 
+from src.engine.modules import narration_preferences
+
 import json
 
 import pytest
 
-from src.engine.modules import table_settings
+
 from src.commands.prompt_composer import PromptComposer
 from src.content.gm_style import (
     normalize_gm_style,
@@ -67,9 +69,9 @@ def test_normalize_gm_style_override_none_and_invalid():
 def test_instance_setter_normalizes_and_rejects():
     inst = _instance()
     inst.set_gm_style_override(None)
-    assert table_settings.gm_style_override(inst) is None
+    assert narration_preferences.gm_style_override(inst) is None
     inst.set_gm_style_override({"pace": "super_fast"})
-    assert table_settings.gm_style_override(inst) == {
+    assert narration_preferences.gm_style_override(inst) == {
         "tone": "", "verbosity": "normal", "pace": "normal", "custom_instructions": "",
     }
     with pytest.raises(ValueError):
@@ -125,7 +127,7 @@ def test_compose_uses_world_style_when_override_none(tmp_path, monkeypatch):
 def test_compose_override_replaces_world_style(tmp_path, monkeypatch):
     composer = _composer(tmp_path, monkeypatch)
     inst = _instance()
-    table_settings.replace_gm_style_override(inst, {"tone": "humorous"})
+    narration_preferences.replace_gm_style_override(inst, {"tone": "humorous"})
     prompt = composer.compose_gm_prompt(inst, world_data=WORLD_DARK)
     assert "自然的幽默感" in prompt
     assert "克制、压抑、紧张" not in prompt
@@ -136,7 +138,7 @@ def test_explicit_neutral_override_does_not_inherit_world(tmp_path, monkeypatch)
     """必须区分 None=继承 与 全缺省 dict=显式中性覆盖。"""
     composer = _composer(tmp_path, monkeypatch)
     inst = _instance()
-    table_settings.replace_gm_style_override(inst, {
+    narration_preferences.replace_gm_style_override(inst, {
         "tone": "", "verbosity": "normal", "pace": "normal", "custom_instructions": "",
     })
     prompt = composer.compose_gm_prompt(inst, world_data=WORLD_DARK)
@@ -158,13 +160,13 @@ def test_prompt_safety_line_survives_custom_instructions():
 
 def test_gm_style_override_save_roundtrip():
     inst = _instance()
-    table_settings.replace_gm_style_override(inst, {
+    narration_preferences.replace_gm_style_override(inst, {
         "tone": "literary", "verbosity": "detailed", "pace": "slow", "custom_instructions": "x",
     })
     restored = GameInstance.from_dict(json.loads(json.dumps(inst.to_dict())))
-    assert table_settings.gm_style_override(restored) is not None
-    assert table_settings.gm_style_override(restored)["tone"] == "literary"
-    assert table_settings.gm_style_override(restored)["pace"] == "slow"
+    assert narration_preferences.gm_style_override(restored) is not None
+    assert narration_preferences.gm_style_override(restored)["tone"] == "literary"
+    assert narration_preferences.gm_style_override(restored)["pace"] == "slow"
 
 
 def test_old_save_without_gm_style_override_is_none():
@@ -172,15 +174,15 @@ def test_old_save_without_gm_style_override_is_none():
     data = inst.to_dict()
     data.pop("gm_style_override", None)
     restored = GameInstance.from_dict(data)
-    assert table_settings.gm_style_override(restored) is None  # 跟随世界
+    assert narration_preferences.gm_style_override(restored) is None  # 跟随世界
 
 
 @pytest.mark.asyncio
 async def test_reset_preserves_gm_style_override():
     inst = _instance()
-    table_settings.replace_gm_style_override(inst, {"tone": "dark"})
+    narration_preferences.replace_gm_style_override(inst, {"tone": "dark"})
     await inst.reset()
-    assert table_settings.gm_style_override(inst) == {"tone": "dark"}
+    assert narration_preferences.gm_style_override(inst) == {"tone": "dark"}
 
 
 # ---- service ----
@@ -211,8 +213,8 @@ async def test_set_gm_style_service_roundtrip_and_errors(tmp_path):
     persisted = GameInstance.from_dict(
         json.loads(registry._save_path(key).read_text(encoding="utf-8")),
     )
-    assert table_settings.gm_style_override(persisted) is not None
-    assert table_settings.gm_style_override(persisted)["tone"] == "literary"
+    assert narration_preferences.gm_style_override(persisted) is not None
+    assert narration_preferences.gm_style_override(persisted)["tone"] == "literary"
 
     follow = await service.set_gm_style(game_key, None)
     assert follow == {"ok": True, "gm_style_override": None}
@@ -231,7 +233,7 @@ def test_game_detail_hides_gm_style_override_from_players(tmp_path):
     instance = _instance()
     instance.gm_uid = "gm"
     instance.players["ally"] = {"character_name": "Mira", "character_sheet": {}}
-    table_settings.replace_gm_style_override(instance, {
+    narration_preferences.replace_gm_style_override(instance, {
         "tone": "dark", "verbosity": "normal", "pace": "normal",
         "custom_instructions": "保持克制，暂时不要透露真正凶手是镇长。",
     })

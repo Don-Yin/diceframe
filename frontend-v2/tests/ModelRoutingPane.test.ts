@@ -44,7 +44,9 @@ function setup(config: Partial<AppConfig>, supported = true) {
       plugins: [i18n],
       stubs: {
         HelpButton: true,
+        GenerationSettings: true,
         TestResultCard: true,
+        TtsVoiceProfiles: true,
         teleport: true,
       },
     },
@@ -89,6 +91,36 @@ it('persists the OpenAI default voice after switching from Edge TTS', async () =
     tts_provider: 'openai-compatible', tts_provider_ref: 'local', tts_default_voice: 'alloy',
   })
   expect(store.config.tts_default_voice).toBe('alloy')
+  wrapper.unmount()
+})
+
+it('owns speech engine parameters and tests inside the TTS and ASR cards', async () => {
+  const { wrapper } = setup({
+    ai_providers: [{ id: 'local', name: 'Local', base_url: 'http://localhost:8000/v1', api_format: 'openai', models: ['tts-1', 'whisper-1'] }],
+    tts_provider: 'openai-compatible', tts_provider_ref: 'local', tts_model: 'tts-1',
+    tts_audio_format: 'mp3', tts_cache_mb: 256,
+    asr_provider: 'openai-compatible', asr_provider_ref: 'local', asr_model: 'whisper-1', asr_timeout_seconds: 60,
+  })
+  const tts = wrapper.get('#settings-tts-model')
+  const asr = wrapper.get('#settings-asr')
+  expect(tts.find('tts-voice-profiles-stub').exists()).toBe(true)
+  await tts.findAll('select').find(select => select.find('option[value="opus"]').exists())!.setValue('opus')
+  await tts.get('.model-role-actions button').trigger('click')
+  await asr.get('.model-role-actions button').trigger('click')
+  expect(wrapper.emitted('test-tts')).toHaveLength(1)
+  expect(wrapper.emitted('test-asr')).toHaveLength(1)
+
+  await wrapper.get('.model-routing-save').trigger('click')
+  await flushPromises()
+  const post = mocks.api.mock.calls.find(([, options]) => options?.method === 'POST')
+  expect(JSON.parse(post![1].body)).toMatchObject({ tts_audio_format: 'opus', tts_cache_mb: 256, asr_timeout_seconds: 60 })
+  wrapper.unmount()
+})
+
+it('keeps engine-only TTS fields hidden for the browser voice', () => {
+  const { wrapper } = setup({ ai_providers: [], tts_provider: 'browser', asr_provider: 'disabled' })
+  expect(wrapper.get('#settings-tts-model').find('.model-role-actions').exists()).toBe(false)
+  expect(wrapper.get('#settings-asr').find('.model-role-actions').exists()).toBe(false)
   wrapper.unmount()
 })
 

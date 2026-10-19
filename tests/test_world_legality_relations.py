@@ -7,11 +7,13 @@ v1 fact 路径与旧存档（空 relations）行为完全不变。
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import asyncio
 
 import pytest
 
-from src.engine.modules import table_settings
+
 from src.engine.game_instance import GameInstance
 from src.engine.world_legality import evaluate_world_requirements
 from src.engine.world_state import apply_world_ops
@@ -130,7 +132,7 @@ def test_old_save_without_relations_keeps_fact_only_behaviour() -> None:
 def test_severed_relation_survives_rollback_restoration() -> None:
     """severed 状态随世界容器快照走：rollback 恢复到 severed 之前，则不再阻断。"""
     instance = make_instance()
-    table_settings.replace_solo_mode(instance, True)
+    game_config.replace_solo_mode(instance, True)
     _establish_locations(instance)
     asyncio.run(instance.start_round())
     asyncio.run(instance.add_action("p1", "过桥"))

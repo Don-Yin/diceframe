@@ -47,6 +47,7 @@ class JsonBridgeStore:
         gm_uid: str,
         roster: list[dict[str, Any]] | None = None,
         language: str = "zh-CN",
+        bot_surface: str = "full",
     ) -> None:
         async with self._lock:
             self.groups[str(stream_id)] = {
@@ -55,6 +56,7 @@ class JsonBridgeStore:
                 "gm_uid": gm_uid,
                 "roster": roster or [],
                 "language": str(language or "zh-CN"),
+                "bot_surface": str(bot_surface or "none"),
             }
             self.players[self.player_key(stream_id, gm_platform_id)] = {
                 "game_key": game_key,

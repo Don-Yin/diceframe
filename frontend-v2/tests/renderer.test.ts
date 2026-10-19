@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { parseGMText } from '../src/utils/renderer'
 
 describe('renderer', () => {
+  it('keeps each authored narration paragraph separate even when both are long', () => {
+    const first = '你示意恩恩把提灯压低，沿着树根寻找通向旧码头的小径。'.repeat(5)
+    const second = '韦恩举着灯，朝身后的调查员招手，远处传来船只靠岸的声音。'.repeat(5)
+    for (const separator of ['\n', '\r\n', '\n\n']) {
+      const block = parseGMText(`${first}${separator}${second}`)
+      expect(block.paragraphs).toHaveLength(2)
+      expect(block.paragraphs[0]).toContain('你示意恩恩')
+      expect(block.paragraphs[1]).toContain('韦恩举着灯')
+    }
+  })
+
   it('keeps bullet-like narration as separate readable items', () => {
     const block = parseGMText('你推开门。\n- 火把忽然熄灭\n- 石阶下传来脚步声')
     expect(block.paragraphs).toHaveLength(3)

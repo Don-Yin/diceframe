@@ -17,6 +17,17 @@ function label(item: unknown) { if (typeof item === 'string') return item; if (i
 
 const cs = computed<CharacterSheet>(() => props.player?.character_sheet || {})
 const hp = computed(() => getResourceValue(cs.value, 'hp'))
+function hasNumericValue(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== '' && Number.isFinite(Number(value))
+}
+const hasHp = computed(() => {
+  const resource = cs.value.resources?.hp
+  return Boolean(
+    (resource && (hasNumericValue(resource.current) || hasNumericValue(resource.max)))
+    || hasNumericValue(cs.value.hp)
+    || hasNumericValue(cs.value.max_hp),
+  )
+})
 const hpPct = computed(() => Math.max(0, Math.min(100, hp.value.current / Math.max(1, hp.value.max) * 100)))
 const gold = computed(() => getCurrencyAmount(cs.value))
 // canonical 金额统一经 formatter（25 美分 → $0.25），无 currency_system 时回退「label 金额」。
@@ -36,6 +47,19 @@ const attrs = computed(() => {
 const specials = computed(() => buildSpecialStats(cs.value, props.ruleMeta?.rule_special_stats))
 const primaries = computed(() => primaryResourceList(cs.value, props.ruleMeta))
 function pct(cur: number, max: number) { return Math.max(0, Math.min(100, cur / Math.max(1, max) * 100)) }
+/** Keep the compact status rail readable when a ruleset exposes several resources. */
+function resourceColor(key: string): string {
+  const normalized = String(key || '').toLowerCase().replace(/[^a-z0-9]+/g, '_')
+  if (normalized === 'hp' || normalized === 'health' || normalized === 'hit_points') return 'stat-hp'
+  if (normalized === 'sanity' || normalized === 'san') return 'stat-sanity'
+  if (normalized === 'luck') return 'stat-luck'
+  if (normalized === 'qi' || normalized === 'mana' || normalized === 'mp' || normalized === 'magic') return 'stat-qi'
+  if (normalized === 'stamina' || normalized === 'energy' || normalized === 'endurance') return 'stat-stamina'
+  if (normalized === 'humanity') return 'stat-humanity'
+  if (normalized === 'heat' || normalized === 'stress') return 'stat-heat'
+  if (normalized.includes('cyber') || normalized === 'body') return 'stat-cyber'
+  return 'stat-resource'
+}
 
 const PREVIEW_LIMIT = 4
 const showItemsModal = ref(false)
@@ -74,7 +98,8 @@ function equipmentDetail(it: CharacterItem): string {
   const parts: string[] = []
   const ty = typeLabel(it.type); if (ty) parts.push(ty)
   if (it.slot && it.slot !== 'none') { const sl = slotLabel(it.slot); if (sl) parts.push(sl) }
-  if (typeof it.damage === 'number' && it.damage) parts.push(`${t('damage')} ${it.damage}`)
+  if (it.damage_dice) parts.push(`${t('damage')} ${it.damage_dice}`)
+  else if (typeof it.damage === 'number' && it.damage) parts.push(`${t('damage')} ${it.damage}`)
   if (it.quality) parts.push(it.quality)
   return parts.join(' · ')
 }
@@ -160,8 +185,10 @@ function submitLevelUp(attrs: Record<string, number>) {
       </div>
     </div>
     <div class="character-vitals">
-      <div class="hp"><span>HP</span><strong>{{ hp.current }} / {{ hp.max }}</strong></div>
-      <div class="hpbar"><i :style="{ width: hpPct + '%' }" /></div>
+      <template v-if="hasHp">
+        <div class="hp stat-hp"><span>HP</span><strong>{{ hp.max > 0 ? `${hp.current} / ${hp.max}` : hp.current }}</strong></div>
+        <div v-if="hp.max > 0" class="hpbar stat-hp"><i :style="{ width: hpPct + '%' }" /></div>
+      </template>
       <div v-if="deathSaves && cs.status === 'downed'" class="stat-row">
         <div class="stat-head"><span class="stat-label">{{ t('deathSaves') }}</span><strong>{{ deathSaves.success }}✓ / {{ deathSaves.failure }}✗</strong></div>
       </div>
@@ -171,9 +198,9 @@ function submitLevelUp(attrs: Record<string, number>) {
         <div v-if="s.max" class="hpbar"><i :style="{ width: pct(s.current, s.max) + '%' }" /></div>
       </div>
 
-      <div v-for="r in primaries" :key="r.key" class="stat-row">
-        <div class="stat-head"><span class="stat-label">{{ r.label }}</span><strong>{{ r.current }} / {{ r.max }}</strong></div>
-        <div class="hpbar"><i :style="{ width: pct(r.current, r.max) + '%' }" /></div>
+      <div v-for="r in primaries" :key="r.key" class="stat-row" :class="resourceColor(r.key)">
+        <div class="stat-head"><span class="stat-label">{{ r.label }}</span><strong>{{ r.max > 0 ? `${r.current} / ${r.max}` : r.current }}</strong></div>
+        <div v-if="r.max > 0" class="hpbar"><i :style="{ width: pct(r.current, r.max) + '%' }" /></div>
       </div>
     </div>
 
@@ -191,7 +218,7 @@ function submitLevelUp(attrs: Record<string, number>) {
       @cancel="showLevelUp = false"
     />
     <div class="chips character-attributes">
-      <span v-for="a in attrs" :key="a.key">{{ a.name }} {{ a.value }}</span>
+      <span v-for="a in attrs" :key="a.key"><small>{{ a.name }}</small> <strong>{{ a.value }}</strong></span>
     </div>
     <button v-if="showAdvancedCenter" type="button" class="character-center-trigger" @click="emit('open-character-center')">{{ t('advancedCharacterCenter') }}</button>
     <details class="character-detail-block"><summary>{{ t('skills') }}</summary>
@@ -279,11 +306,136 @@ function submitLevelUp(attrs: Record<string, number>) {
 </template>
 
 <style scoped>
+.character {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md, 12px);
+  background: var(--df-surface-1);
+  color: var(--df-text);
+}
+.character > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+}
+.character > header h2 {
+  margin: 0;
+  color: var(--df-accent-strong);
+  font-size: 0.95rem;
+  letter-spacing: .04em;
+}
+.character-profile {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 9px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-sm, 8px);
+  background: var(--df-surface-2, var(--df-surface-1));
+}
+.portrait-edit-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 10px;
+  background: var(--df-control-bg, var(--df-surface-1));
+  color: var(--df-text);
+  cursor: pointer;
+}
+.portrait-edit-button span {
+  position: absolute;
+  inset: auto 2px 2px;
+  padding: 2px 3px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 65%);
+  color: #fff;
+  font-size: 9px;
+  line-height: 1.15;
+}
+.portrait-edit-button:hover { border-color: var(--df-accent); }
+.character-title { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 7px; min-width: 0; }
+.character-title h3 { flex: 1 1 100%; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.12rem; }
+.character-title .gold { margin-left: auto; color: var(--df-warning); font-size: .82rem; font-weight: 700; }
+.character-vitals { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 7px; }
+.hp, .stat-row {
+  --resource-color: var(--df-accent);
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-sm, 8px);
+  background: var(--df-surface-2, var(--df-surface-1));
+}
+.stat-row,
+.hp.stat-hp { border-color: color-mix(in srgb, var(--resource-color) 42%, var(--df-border-soft)); background: color-mix(in srgb, var(--resource-color) 7%, var(--df-surface-2, var(--df-surface-1))); }
+.stat-row .stat-label, .stat-row .stat-head strong, .hp.stat-hp span, .hp.stat-hp strong { color: color-mix(in srgb, var(--resource-color) 78%, var(--df-text)); }
+.stat-hp { --resource-color: #e36b68; }
+.stat-sanity { --resource-color: #b989d6; }
+.stat-luck { --resource-color: #f5c842; }
+.stat-qi { --resource-color: #4fb3a8; }
+.stat-stamina { --resource-color: #64c4e8; }
+.stat-cyber { --resource-color: #6f9ee8; }
+.stat-humanity { --resource-color: #5fd38d; }
+.stat-heat { --resource-color: #ff6b6b; }
+.stat-resource { --resource-color: var(--df-interactive); }
+.hp { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.hp span, .stat-label { color: var(--df-text-muted); font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.hp { grid-column: 1 / -1; }
+.hp strong, .stat-head strong { font-size: .9rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hpbar { grid-column: 1 / -1; height: 5px; overflow: hidden; border-radius: 999px; background: var(--df-border-soft); }
+.hpbar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--resource-color, var(--df-danger, #c65b5b)) 72%, #fff), var(--resource-color, var(--df-accent))); transition: width .2s ease; }
+.stat-row { grid-column: 1 / -1; }
+.stat-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.character-attributes, .character-specials { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); gap: 6px; }
+.attribute, .special-stat { padding: 7px 8px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm, 8px); background: var(--df-surface-2, var(--df-surface-1)); }
+.character-attributes > span { display: block; padding: 7px 8px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm, 8px); background: var(--df-surface-2, var(--df-surface-1)); font-size: .8rem; font-weight: 650; }
+.attribute-name, .special-stat-name { display: block; overflow: hidden; color: var(--df-text-muted); font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
+.attribute-value, .special-stat-value { display: block; margin-top: 2px; font-size: 1rem; font-weight: 750; font-variant-numeric: tabular-nums; }
+.character-detail-block { border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm, 8px); background: var(--df-surface-2, var(--df-surface-1)); }
+.character-detail-block > summary { padding: 8px 10px; color: var(--df-text); cursor: pointer; font-size: .82rem; font-weight: 700; list-style-position: inside; }
+.character-detail-block > summary::marker { color: var(--df-accent); }
+.character-detail-block > .chips, .character-detail-block > .item-groups { padding: 0 10px 9px; }
+.item-groups { display: grid; gap: 8px; }
+.item-group { display: grid; gap: 5px; }
+.item-label { color: var(--df-text-muted); font-size: .69rem; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+.item-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.item-chip, .character-detail-block .chips > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 27px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 5px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--df-surface-3) 58%, transparent), var(--df-surface-1));
+  color: var(--df-text-secondary);
+  font-size: .76rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.character-detail-block .chips > span { border-left: 2px solid var(--df-interactive); }
+.character-detail-block .item-chip { border-left: 2px solid var(--df-accent); }
+.item-more-count { color: var(--df-text-muted); font-size: .72rem; align-self: center; }
+.item-empty { margin: 0; color: var(--df-text-muted); font-size: .78rem; }
+.item-view-all { width: fit-content; padding: 3px 0; border: 0; background: transparent; color: var(--df-accent-strong, var(--df-accent)); font-size: .75rem; cursor: pointer; }
+.item-view-all:hover { text-decoration: underline; }
 .level-up-notice{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0 4px;padding:7px 9px;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:var(--df-hover)}
 .level-up-notice span{color:var(--df-warning);font-size:12px;line-height:1.3}
 .level-up-notice button{padding:2px 10px;font-size:12px;white-space:nowrap}
-.character-center-trigger{display:flex;align-items:center;justify-content:center;width:100%;min-height:38px;margin:10px 0 4px;padding:7px 10px;border:1px solid var(--df-accent,#c79444);border-radius:var(--df-radius-sm);background:rgb(199 148 68 / 12%);color:var(--df-text);font-weight:700;cursor:pointer}
-.character-center-trigger:hover{background:rgb(199 148 68 / 22%)}
+.character-center-trigger{display:flex;align-items:center;justify-content:center;width:100%;min-height:38px;margin:10px 0 4px;padding:7px 10px;border:1px solid var(--df-accent);border-radius:var(--df-radius-sm);background:color-mix(in srgb,var(--df-accent) 12%,transparent);color:var(--df-text);font-weight:700;cursor:pointer}
+.character-center-trigger:hover{background:color-mix(in srgb,var(--df-accent) 22%,transparent)}
 .skill-detail-list {
   flex-direction: column;
   align-items: stretch;
@@ -291,5 +443,12 @@ function submitLevelUp(attrs: Record<string, number>) {
 .skill-detail-meta {
   flex-basis: 100%;
   white-space: pre-line;
+}
+@media (max-width: 560px) {
+  .character { padding: 10px; }
+  .character-vitals { grid-template-columns: 1fr; }
+  .hp, .stat-row { grid-column: 1; }
+  .hpbar { grid-column: 1; }
+  .character-attributes, .character-specials { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>

@@ -46,7 +46,8 @@ async def api_rule_create(request: web.Request) -> web.Response:
     if denied is not None:
         return denied
     body = await request.json()
-    return web.json_response(_get_api(request).save_custom_rule(body))
+    result = _get_api(request).save_custom_rule(body)
+    return web.json_response(result, status=200 if result.get("ok") else 422)
 
 
 async def api_rule_detail(request: web.Request) -> web.Response:
@@ -174,14 +175,16 @@ async def api_rule_update(request: web.Request) -> web.Response:
     if denied is not None:
         return denied
     body = await request.json()
-    return web.json_response(_get_api(request).update_custom_rule(request.match_info["rule_id"], body))
+    result = _get_api(request).update_custom_rule(request.match_info["rule_id"], body)
+    return web.json_response(result, status=200 if result.get("ok") else 422)
 
 
 async def api_rule_delete(request: web.Request) -> web.Response:
     denied = _require_confirmed_request(request)
     if denied is not None:
         return denied
-    return web.json_response(_get_api(request).delete_custom_rule(request.match_info["rule_id"]))
+    result = _get_api(request).delete_custom_rule(request.match_info["rule_id"])
+    return web.json_response(result, status=200 if result.get("ok") else 422)
 
 
 def register_rules(app: web.Application) -> None:

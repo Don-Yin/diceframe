@@ -27,7 +27,8 @@ from typing import Any
 
 from src.engine import progression
 from src.engine.language import DEFAULT_LANGUAGE
-from src.engine.modules import lorebook_runtime, narrative_notes
+from src.engine import module_hooks
+
 from src.engine.world_legality import actor_location_fact_key
 from src.engine.world_state import project_visible_state
 from src.knowledge.visibility import entry_visible_to_viewer
@@ -216,7 +217,7 @@ def lore_query_anchors(
 ) -> dict[str, Any]:
     """本轮锚点：scene / canonical location / 在场 NPC。"""
 
-    scene = str(narrative_notes.scene(instance) or "").strip()
+    scene = str(module_hooks.narrative_view(instance)["scene"] or "").strip()
     return {
         "scene": scene,
         "location": lore_query_location(
@@ -391,7 +392,9 @@ class LoreRetriever:
         if self._content_projection is not None:
             entries = self._content_projection.for_world_authoring(str(world_id))
         else:
-            entries = self._store.list_entries(str(world_id))
+            from src.content_modules.projection import entries_for_world
+
+            entries = entries_for_world(self._store, str(world_id))
         if self._load_world_template is not None:
             from src.content.worlds import localize_lorebook_entries
 
@@ -636,7 +639,7 @@ class LoreRetriever:
 
     @staticmethod
     def _timed_state(instance: Any, *, mutate_timers: bool) -> dict[str, dict] | None:
-        state = lorebook_runtime.timers(instance)
+        state = module_hooks.read_value(instance, module_hooks.LOREBOOK_TIMERS)
         if not isinstance(state, dict):
             return None
         return state if mutate_timers else copy.deepcopy(state)

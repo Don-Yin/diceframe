@@ -6,6 +6,7 @@ COPY frontend-v2/package.json frontend-v2/package-lock.json ./
 RUN npm ci
 
 COPY frontend-v2/ ./
+COPY src/localization/ /build/src/localization/
 RUN npm run build
 
 

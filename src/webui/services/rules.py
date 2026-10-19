@@ -12,6 +12,7 @@ from typing import Any
 
 from src.rules.rule_system import SUPPORTED_DICE_SYSTEMS, RuleSystem
 from src.rules.loader import RuleBundleLoader
+from src.rules.definition_validation import validate_special_stats
 from src.engine.currency import (
     CurrencySystemError,
     declares_currency_schema,
@@ -168,6 +169,12 @@ def list_rules(
                 dependencies,
                 runtime_template,
             )
+            item["scene_image"] = runtime_template.get("scene_image")
+            item["scene_images"] = (
+                runtime_template.get("scene_images")
+                if isinstance(runtime_template.get("scene_images"), list)
+                else []
+            )
         except (OSError, ValueError, TypeError) as exc:
             raise ValueError(f"规则 {rule_id} 的内容或运行时无效：{exc}") from exc
     seen = {str(rule.get("rule_id") or "") for rule in rules}
@@ -308,6 +315,11 @@ def update_custom_rule(
         return {"ok": False, "error": "规则名称不能为空"}
     if not isinstance(template.get("attributes", []), list):
         return {"ok": False, "error": "attributes 必须是数组"}
+    if diagnostics := validate_special_stats(template):
+        return {
+            "ok": False, "code": "INVALID_RULE_TEMPLATE", "diagnostics": diagnostics,
+            "error": "; ".join(f"{item['path']}: {item['message']}" for item in diagnostics),
+        }
     dice_system = str(template.get("dice_system") or "d20").lower()
     if dice_system not in SUPPORTED_DICE_SYSTEMS:
         supported = ", ".join(sorted(SUPPORTED_DICE_SYSTEMS))
@@ -442,6 +454,11 @@ def _plugin_rule_items(
                 "custom": False,
                 "source_rule_id": template.get("source_rule_id", ""),
                 "scene_image": template.get("scene_image"),
+                "scene_images": (
+                    template.get("scene_images")
+                    if isinstance(template.get("scene_images"), list)
+                    else []
+                ),
                 "plugin_id": item.plugin_id,
                 "plugin_name": item.plugin_name,
                 "readonly": True,

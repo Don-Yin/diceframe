@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from src.engine.modules import narration_preferences
+
 import pytest
 
-from src.engine.modules import legacy_combat, table_settings
+from src.engine.modules import legacy_combat
 from tests.test_legacy_combat_module import bind_dnd_combat
 from src.commands.check_planner import plan_round_checks
 from src.commands.madness_tracker import MadnessTracker
@@ -211,7 +213,7 @@ def test_generic_prompt_honors_explicit_immersive_perspective(tmp_path, monkeypa
     monkeypatch.setattr(composer_module, "_GM_PROMPT_CACHE", {})
 
     inst = _make_multi_instance()
-    table_settings.replace_narrative_perspective(inst, "immersive")
+    narration_preferences.replace_narrative_perspective(inst, "immersive")
     prompt = PromptComposer(prompts, rules).compose_gm_prompt(inst)
 
     assert "沉浸式第二人称" in prompt

@@ -105,6 +105,7 @@ def _write_world(
     *,
     starter_lorebook: list[dict] | None = None,
     default_rule: str = "freeform_fantasy",
+    adventure_id: str = "",
 ) -> None:
     worlds_dir.mkdir(parents=True, exist_ok=True)
     data = {
@@ -116,6 +117,8 @@ def _write_world(
         "default_rule": default_rule,
         "starter_lorebook": starter_lorebook or [],
     }
+    if adventure_id:
+        data["starter_adventure_id"] = adventure_id
     (worlds_dir / f"{world_id}.json").write_text(
         json.dumps(data, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -186,6 +189,7 @@ def web_api(tmp_path):
         handler=handler,
         llm_client=fake_llm,
         worlds_dir=worlds_dir,
+        adventures_dir=data_dir / 'adventures',
     )
     try:
         yield api, lorebook, registry, fake_llm, worlds_dir
@@ -661,6 +665,36 @@ async def test_create_game_rejects_empty_player_list(web_api):
     assert "至少创建或选择" in result["error"]
     assert registry.list_all() == []
     assert fake_llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_gal_creation_contract_is_enforced_server_side(web_api):
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    (api._rules_dir / "gal_narrative.json").write_text(
+        json.dumps({
+            "rule_id": "gal_narrative",
+            "rule_name": "GAL",
+            "dice_system": "none",
+            "mechanics": "narrative_only",
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    player = {"character_name": "叙事者", "attributes": {"str": 10}}
+
+    multiplayer = await api.create_game(
+        "template_world", "GAL 多人", rule_id="gal_narrative", play_mode="gal",
+        solo=False, players=[player],
+    )
+    assert multiplayer["ok"] is False
+    assert multiplayer["error_code"] == "GAL_REQUIRES_SOLO"
+
+    wrong_rule = await api.create_game(
+        "template_world", "GAL 数值规则", rule_id="freeform_fantasy", play_mode="gal",
+        solo=True, players=[player],
+    )
+    assert wrong_rule["ok"] is False
+    assert wrong_rule["error_code"] == "GAL_REQUIRES_NARRATIVE_RULE"
+    assert registry.list_all() == []
 
 
 @pytest.mark.asyncio

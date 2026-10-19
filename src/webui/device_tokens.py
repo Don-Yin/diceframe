@@ -101,6 +101,11 @@ class DeviceTokenStore:
                 return device
         return None
 
+    def has(self, device_id: str) -> bool:
+        """Whether ``device_id`` is still paired (cheap: no digest work)."""
+        target = str(device_id or "")
+        return bool(target) and any(device["id"] == target for device in self._devices)
+
     # ---- 变更 ----
 
     def issue(self, label: str = "", install_id: str = "") -> tuple[str, dict]:

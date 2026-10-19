@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +33,7 @@ if str(ROOT) not in sys.path:
 from src.plugin_host.host import PluginHost  # noqa: E402
 from src.rulesets.builtin import (  # noqa: E402
     build_default_ruleset_registry,
-    default_adventure_runtime_requirement,
+    default_module_runtime_requirement,
 )
 
 
@@ -43,7 +44,7 @@ def _validation_dependencies() -> Any:
 
     return ModuleValidationDependencies(
         ruleset_registry=build_default_ruleset_registry(),
-        default_runtime_requirement=default_adventure_runtime_requirement,
+        default_runtime_requirement=default_module_runtime_requirement,
     )
 
 
@@ -87,9 +88,12 @@ def validate_module(plugin_dir: Path) -> dict[str, Any]:
 
     # 1) PluginHost manifest 校验（profile 组合 / 权限 / contributes /
     #    adventure_packages / ruleset_catalogs 声明）。
-    host = PluginHost(plugins_dir=plugin_dir.parent, data_dir=plugin_dir.parent / "_validation-data")
     try:
-        _, runtime = host._load_runtime(plugin_dir)
+        # Host construction initializes marketplace state. Validation must not
+        # create runtime data beside an author's sources, even on rejection.
+        with tempfile.TemporaryDirectory(prefix="diceframe-content-validation-") as scratch:
+            host = PluginHost(plugins_dir=plugin_dir.parent, data_dir=Path(scratch))
+            _, runtime = host._load_runtime(plugin_dir)
     except Exception as exc:  # noqa: BLE001 - 校验器必须收集而非抛出
         report["ok"] = False
         errors.append(f"manifest validation failed: {exc}")

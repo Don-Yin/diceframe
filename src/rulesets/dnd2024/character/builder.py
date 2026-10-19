@@ -23,6 +23,12 @@ from .primitives import (
 from .validation import CharacterValidationMixin
 
 
+class ProfessionalCharacterBlueprintRequired(ValueError):
+    """A professional submission cannot be safely rebuilt from legacy fields."""
+
+    error_code = "PROFESSIONAL_CHARACTER_BLUEPRINT_REQUIRED"
+
+
 @dataclass(slots=True)
 class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin):
     bundle: LoadedRulesetBundle
@@ -305,7 +311,9 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
 
         canonical = character.get("ruleset_character")
         if not isinstance(canonical, dict):
-            raise ValueError("professional character submission is missing ruleset_character")
+            raise ProfessionalCharacterBlueprintRequired(
+                "professional character submission is missing ruleset_character",
+            )
         binding = canonical.get("rule_binding")
         if not isinstance(binding, dict):
             raise ValueError("professional character submission is missing rule_binding")

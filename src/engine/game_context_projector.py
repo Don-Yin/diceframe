@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -11,7 +13,8 @@ from src.engine.game_state_contracts import (
     PlayerContextView,
 )
 from src.engine.language import normalize_language
-from src.engine.modules import legacy_combat, narrative_notes, round_presentation, table_settings
+from src.engine import module_hooks
+
 
 if TYPE_CHECKING:
     from src.engine.game_instance import GameInstance
@@ -73,26 +76,26 @@ class GameContextProjector:
         state: GameContextView = {
             "world_name": instance.world_name,
             "round_number": progression_state.round_value(instance),
-            "scene": narrative_notes.scene(instance),
-            "game_time": narrative_notes.game_time(instance),
-            "difficulty": table_settings.difficulty(instance),
+            "scene": module_hooks.narrative_view(instance)["scene"],
+            "game_time": module_hooks.narrative_view(instance)["game_time"],
+            "difficulty": game_config.difficulty(instance),
             "language": normalize_language(instance.language),
             "players": players_view,
             "away_players": away_names,
             "npcs": instance.npcs,
-            "combat_state": legacy_combat.combat_state(instance),
-            "initiative_order": legacy_combat.initiative_order(instance),
-            "initiative_current": legacy_combat.initiative_current(instance),
-            "quick_actions": round_presentation.quick_actions(instance),
+            "combat_state": module_hooks.combat_view(instance)["combat_state"],
+            "initiative_order": module_hooks.combat_view(instance)["initiative_order"],
+            "initiative_current": module_hooks.combat_view(instance)["initiative_current"],
+            "quick_actions": module_hooks.read(instance, module_hooks.QUICK_ACTIONS),
         }
         if away_names:
             state["attendance_note"] = (
                 "暂离角色默认跟随队伍，不主动做重大决定，不承担关键风险；"
                 "除非玩家回来或 GM 明确点名。"
             )
-        if legacy_combat.combat_state(instance) == "active":
+        if module_hooks.combat_view(instance)["combat_state"] == "active":
             state["combat_active"] = True
-        if table_settings.solo_mode(instance):
+        if game_config.solo_mode(instance):
             state["solo_mode"] = True
         if instance.puzzle_manager and hasattr(instance.puzzle_manager, "to_active_dict"):
             puzzles = instance.puzzle_manager.to_active_dict()

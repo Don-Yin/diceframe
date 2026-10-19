@@ -18,6 +18,8 @@ export type AppNavItemId =
   | 'overview'
   | 'play'
   | 'characters'
+  | 'creator'
+  | 'library'
   | 'worlds'
   | 'adventures'
   | 'modules'
@@ -46,9 +48,13 @@ export type AppNavGroup = {
 
 // Route names are canonical identity. Locale only resolves labelKey for display.
 export const appNavItems = [
+  // The archive is the app's overview surface. Keep the primary label stable
+  // with the product terminology instead of the older "My games" wording.
   { id: 'overview', labelKey: 'navOverview', icon: HomeOutline },
   { id: 'play', labelKey: 'navPlay', icon: GameControllerOutline },
   { id: 'characters', labelKey: 'navCharacters', icon: PersonOutline },
+  { id: 'creator', labelKey: 'navCreator', icon: MapOutline },
+  { id: 'library', labelKey: 'navContentLibrary', icon: BookOutline },
   { id: 'worlds', labelKey: 'navWorlds', icon: EarthOutline },
   { id: 'adventures', labelKey: 'navAdventures', icon: MapOutline },
   { id: 'modules', labelKey: 'navModules', icon: BookOutline },
@@ -65,8 +71,8 @@ export const appNavGroups = [
     id: 'content',
     labelKey: 'navContent',
     icon: BookOutline,
-    defaultItemId: 'lorebook',
-    itemIds: ['lorebook', 'worlds', 'adventures', 'modules', 'rules'],
+    defaultItemId: 'library',
+    itemIds: ['library', 'lorebook', 'modules', 'rules'],
   },
   {
     id: 'management',
@@ -92,5 +98,29 @@ export function navGroupItems(group: AppNavGroup): AppNavItem[] {
 }
 
 export function navGroupForRoute(routeName: string): AppNavGroupId | null {
+  if (routeName === 'worlds' || routeName === 'adventures' || routeName === 'creator' || routeName === 'module-detail') return 'content'
   return appNavGroups.find(group => group.itemIds.some(itemId => itemId === routeName))?.id ?? null
+}
+
+const navRouteAliases: Partial<Record<AppNavItemId, readonly string[]>> = {
+  library: ['adventures', 'creator'],
+  modules: ['module-detail'],
+  lorebook: ['worlds'],
+}
+
+export function isNavItemActive(itemId: AppNavItemId, routeName: string): boolean {
+  return itemId === routeName || Boolean(navRouteAliases[itemId]?.includes(routeName))
+}
+
+/** Keep play navigation bound to its explicit game/player identity context. */
+export function playContextQuery(query: Record<string, unknown>, fallbackGame = ''): Record<string, string> | null {
+  const first = (value: unknown): string => Array.isArray(value) ? String(value[0] || '') : String(value || '')
+  const game = first(query.game) || fallbackGame
+  if (!game) return null
+  const result: Record<string, string> = { game }
+  for (const key of ['user', 'share'] as const) {
+    const value = first(query[key])
+    if (value) result[key] = value
+  }
+  return result
 }

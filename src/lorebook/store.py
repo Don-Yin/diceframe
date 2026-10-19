@@ -22,6 +22,7 @@ from src.lorebook.activation import (
 )
 from src.lorebook.models import Lorebook, LorebookBinding, LorebookEntry, LorebookEmbedding, World
 from src.lorebook.models import database as _models_database
+from src.lorebook.operations import LorebookOperationsMixin
 from src.migrations.lorebook import migrate as migrate_lorebook
 
 logger = logging.getLogger("trpg")
@@ -127,23 +128,27 @@ class LorebookIdentityConflict(ValueError):
     code = "LOREBOOK_IDENTITY_CONFLICT"
 
 
-class LorebookStore:
+class LorebookStore(LorebookOperationsMixin):
     """世界书 SQLite 存储管理器。
 
-    V1 使用单连接 + threading.Lock，读多写少的场景足够。
+    单连接由可重入锁保护；显式事务持锁覆盖整个事务，避免跨线程共享未提交状态。
     """
 
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
         self._conn: sqlite3.Connection | None = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._tx_depth = 0
 
     def _commit_locked(self) -> None:
         """Commit per-method, unless an explicit canonical transaction owns it."""
 
         if self._tx_depth == 0:
-            self._conn.commit()
+            try:
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -156,22 +161,23 @@ class LorebookStore:
         rewrite — per-method commits stay the default everywhere else.
         """
 
-        if self._tx_depth:
-            self._tx_depth += 1
+        with self._lock:
+            if self._tx_depth:
+                self._tx_depth += 1
+                try:
+                    yield
+                finally:
+                    self._tx_depth -= 1
+                return
+            self._tx_depth = 1
             try:
                 yield
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
             finally:
-                self._tx_depth -= 1
-            return
-        self._tx_depth = 1
-        try:
-            yield
-        except Exception:
-            self._conn.rollback()
-            raise
-        finally:
-            self._tx_depth = 0
-        self._conn.commit()
+                self._tx_depth = 0
 
     def open(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -229,6 +235,30 @@ class LorebookStore:
             World.update(
                 language=language, updated_at=SQL("datetime('now')"),
             ).where(World.id == world_id).execute()
+            self._commit_locked()
+
+    def update_world_metadata(
+        self,
+        world_id: str,
+        *,
+        name: str,
+        description: str,
+        language: str,
+    ) -> None:
+        """Update editable world metadata and keep its primary book in sync."""
+        with self._lock:
+            World.update(
+                name=name,
+                description=description,
+                language=language,
+                updated_at=SQL("datetime('now')"),
+            ).where(World.id == world_id).execute()
+            Lorebook.update(
+                name=name,
+                description=description,
+                language=language,
+                updated_at=SQL("datetime('now')"),
+            ).where(Lorebook.id == self.primary_world_book_id(world_id)).execute()
             self._commit_locked()
 
     def list_worlds(self) -> list[dict]:
@@ -649,11 +679,18 @@ class LorebookStore:
         return str(row[0]) if row and row[0] else None
 
     def _bound_world_projection_for_book_locked(self, book_id: str) -> str | None:
-        """Return the world scope of a primary Binding (caller holds the lock)."""
+        """Project an existing primary world only (caller holds the lock).
+
+        Historical books may retain a binding after its world is unavailable.
+        The Book remains the canonical owner; a nullable compatibility column
+        must not reference a missing world or manufacture another owner.
+        """
 
         row = self._conn.execute(
-            "SELECT scope_id FROM lorebook_bindings "
-            "WHERE book_id = ? AND role = 'primary' AND scope_kind = 'world' "
+            "SELECT binding.scope_id FROM lorebook_bindings AS binding "
+            "JOIN worlds AS world ON world.id = binding.scope_id "
+            "WHERE binding.book_id = ? AND binding.role = 'primary' "
+            "AND binding.scope_kind = 'world' "
             "LIMIT 1",
             (str(book_id or ""),),
         ).fetchone()

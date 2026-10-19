@@ -9,9 +9,9 @@ export const accessToken = () => {
   return readFileSync(resolve(dataDir, 'access_token.txt'), 'utf8').trim()
 }
 
-async function announcementHash(request: APIRequestContext): Promise<string> {
+async function announcementHash(request: APIRequestContext, locale: string): Promise<string> {
   try {
-    const response = await request.get('/api/announcements?lang=zh-CN')
+    const response = await request.get(`/api/announcements?lang=${locale}`)
     if (!response.ok()) return ''
     const payload = await response.json() as { hash?: unknown }
     return typeof payload.hash === 'string' ? payload.hash : ''
@@ -20,34 +20,48 @@ async function announcementHash(request: APIRequestContext): Promise<string> {
   }
 }
 
+async function announcementHashes(request: APIRequestContext) {
+  // Non-Chinese locales use English announcements; seed both read states so
+  // locale-specific tests cannot be interrupted by the announcement modal.
+  const [zh, en] = await Promise.all([
+    announcementHash(request, 'zh-CN'),
+    announcementHash(request, 'en'),
+  ])
+  return { zh, en }
+}
+
 export async function prepareAuthenticatedPage(
   page: Page,
   request: APIRequestContext,
   options?: { light?: boolean },
 ) {
-  const hash = await announcementHash(request)
-  await page.addInitScript(({ token, hash, light }) => {
+  const hashes = await announcementHashes(request)
+  await page.addInitScript(({ token, hashes, light }) => {
     localStorage.setItem('trpg_access_token', token)
-    localStorage.setItem('diceframe_locale', 'zh-CN')
-    if (hash) localStorage.setItem('diceframe_announcement_read_hash:zh', hash)
+    if (!localStorage.getItem('diceframe_locale')) localStorage.setItem('diceframe_locale', 'zh-CN')
+    for (const [language, hash] of Object.entries(hashes)) {
+      if (hash) localStorage.setItem(`diceframe_announcement_read_hash:${language}`, hash)
+    }
     if (light) {
       localStorage.setItem('diceframe_mode_v2', 'light')
       localStorage.setItem('diceframe_skin_v2', 'midnight')
       localStorage.removeItem('diceframe_plugin_theme_v2')
     }
-  }, { token: accessToken(), hash, light: Boolean(options?.light) })
+  }, { token: accessToken(), hashes, light: Boolean(options?.light) })
 }
 
 export async function prepareAuthenticatedContext(
   context: BrowserContext,
   request: APIRequestContext,
 ) {
-  const hash = await announcementHash(request)
-  await context.addInitScript(({ token, hash }) => {
+  const hashes = await announcementHashes(request)
+  await context.addInitScript(({ token, hashes }) => {
     localStorage.setItem('trpg_access_token', token)
-    localStorage.setItem('diceframe_locale', 'zh-CN')
-    if (hash) localStorage.setItem('diceframe_announcement_read_hash:zh', hash)
-  }, { token: accessToken(), hash })
+    if (!localStorage.getItem('diceframe_locale')) localStorage.setItem('diceframe_locale', 'zh-CN')
+    for (const [language, hash] of Object.entries(hashes)) {
+      if (hash) localStorage.setItem(`diceframe_announcement_read_hash:${language}`, hash)
+    }
+  }, { token: accessToken(), hashes })
 }
 
 /**

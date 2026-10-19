@@ -38,8 +38,9 @@ const advancementLoaders: Record<string, ComponentLoader> = {
   'core:dnd2024': () => import('./dnd2024/progression/Dnd2024AdvancementPanel.vue'),
 }
 const advancementComponents = new Map<string, Component>()
-const characterCenterLoaders: Record<string, ComponentLoader> = {
-  'core:dnd2024': () => import('./ProfessionalCharacterCenter.vue'),
+// UI shortcuts follow each registered adapter; server rest validation remains authoritative.
+const characterCenterLoaders: Record<string, { load: ComponentLoader; rest: boolean }> = {
+  'core:dnd2024': { load: () => import('./ProfessionalCharacterCenter.vue'), rest: true },
 }
 const characterCenterComponents = new Map<string, Component>()
 
@@ -96,11 +97,15 @@ export function resolveRulesetAdvancementExtension(
 }
 
 export function resolveRulesetCharacterCenter(runtimeId: string): Component | null {
-  const loader = characterCenterLoaders[runtimeId]
+  const loader = characterCenterLoaders[runtimeId]?.load
   if (!loader) return null
   const cached = characterCenterComponents.get(runtimeId)
   if (cached) return cached
   const component = defineAsyncComponent(loader)
   characterCenterComponents.set(runtimeId, component)
   return component
+}
+
+export function hasRulesetRestCenter(runtimeId: string): boolean {
+  return characterCenterLoaders[runtimeId]?.rest === true
 }

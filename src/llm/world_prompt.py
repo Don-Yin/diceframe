@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from src.engine.language import localized_text
-from src.engine.modules import world_reports
+from src.engine import module_hooks
 from src.engine.world.read import project_visible_state
 
 _HEADING = {
@@ -251,7 +251,7 @@ def format_world_state_block(
 def format_world_legality_block(instance: Any) -> str:
     """Render this round's proven world contradictions (empty when none)."""
 
-    notes = list(world_reports.last_world_legality(instance) or [])
+    notes = list(module_hooks.read(instance, module_hooks.WORLD_LEGALITY))
     if not notes:
         return ""
     language = getattr(instance, "language", "zh-CN")
@@ -278,7 +278,7 @@ def format_world_legality_block(instance: Any) -> str:
 def format_world_events_block(instance: Any) -> str:
     """Render the scheduled events settled by this round's time advance."""
 
-    events = list(world_reports.last_world_events(instance) or [])
+    events = list(module_hooks.read(instance, module_hooks.WORLD_EVENTS))
     if not events:
         return ""
     language = getattr(instance, "language", "zh-CN")

@@ -6,7 +6,7 @@ import logging
 import random
 
 from src.engine.game_instance import GameInstance
-from src.engine.modules import progression_state
+from src.rulesets.sanity import apply_sanity_loss
 
 logger = logging.getLogger("trpg")
 
@@ -14,34 +14,10 @@ logger = logging.getLogger("trpg")
 class MadnessTracker:
     """根据理智损失应用和推进疯狂状态。"""
 
-    def apply_madness(self, instance: GameInstance, uid: str, character_sheet: dict, loss: int) -> None:
+    def apply_madness(self, instance: GameInstance, uid: str, character_sheet: dict, loss: int,
+                      *, rng: random.Random | None = None) -> None:
         """根据理智值损失量判断疯狂状态。"""
-        sanity = character_sheet.get("sanity", 99)
-        if sanity <= 0 and not character_sheet.get("deceased"):
-            character_sheet["deceased"] = True
-            character_sheet["death_cause"] = "永久疯狂"
-            character_sheet["death_round"] = progression_state.round_value(instance)
-            name = instance.players[uid].get("character_name", uid)
-            logger.info("%s 因永久疯狂而不可操作 (round=%d)", name, progression_state.round_value(instance))
-            return
-        if loss >= 5:
-            name = instance.players[uid].get("character_name", uid)
-            if loss >= 10:
-                character_sheet["madness"] = {
-                    "type": "long_term",
-                    "remaining_rounds": random.randint(1, 10),
-                    "symptom": "持续行为异常",
-                }
-                logger.info("%s 进入长期疯狂 (round=%d, rounds=%d)",
-                            name, progression_state.round_value(instance), character_sheet["madness"]["remaining_rounds"])
-            else:
-                character_sheet["madness"] = {
-                    "type": "temporary",
-                    "remaining_rounds": random.randint(1, 3),
-                    "symptom": "临时行为异常",
-                }
-                logger.info("%s 进入临时疯狂 (round=%d, rounds=%d)",
-                            name, progression_state.round_value(instance), character_sheet["madness"]["remaining_rounds"])
+        apply_sanity_loss(instance, uid, character_sheet, loss, rng=rng)
 
     def tick_madness(self, instance: GameInstance) -> None:
         """每轮结束时减少疯狂状态回合数。"""

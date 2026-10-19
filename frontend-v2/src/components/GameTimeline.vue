@@ -2,18 +2,20 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { NIcon } from 'naive-ui'
 import { CheckmarkCircleOutline, WarningOutline, InformationCircleOutline, ReaderOutline } from '@vicons/ionicons5'
-import type { CheckResult, LogEntry, ManualRollTimelineEntry, PublicAction, Player, StoryRecap, CheckRevealRecord } from '@/api/types'
+import type { CheckResult, LogEntry, ManualRollTimelineEntry, PublicAction, Player, StoryRecap, CheckRevealRecord, StorySequence } from '@/api/types'
 import type { DiceTag } from '@/utils/play'
 import { parseAction, playerColor } from '@/utils/play'
 import { api } from '@/api/client'
-import { parseGMText, type LoreKeywords } from '@/utils/renderer'
+import { parseGMText, splitNarrationParagraphs, type LoreKeywords } from '@/utils/renderer'
 import { useLocale } from '@/composables/useLocale'
 import PortraitImage from '@/components/PortraitImage.vue'
 import CheckRevealCard from '@/components/play/CheckRevealCard.vue'
 import SceneImageBlock from '@/components/play/SceneImageBlock.vue'
 import { initializeTts, speakingKey, ttsSupported, ttsToggle } from '@/utils/tts'
+import StorySequenceView from '@/features/play/story/StorySequence.vue'
+import { isStorySequence } from '@/features/play/story/story'
 
-const props = defineProps<{ log: LogEntry[]; live: PublicAction[]; players: Player[]; round: number; lore?: LoreKeywords; gameKey?: string; ruleId?: string; processing?: boolean; isGm?: boolean; liveNarration?: string; pendingChecks?: CheckResult[]; revealChecks?: CheckResult[]; currentUserId?: string; luckBusyId?: string; manualRolls?: ManualRollTimelineEntry[]; checkReveals?: Record<string, CheckRevealRecord>; diceRevealMode?: string }>()
+const props = defineProps<{ log: LogEntry[]; live: PublicAction[]; players: Player[]; round: number; lore?: LoreKeywords; gameKey?: string; ruleId?: string; processing?: boolean; isGm?: boolean; liveNarration?: string; liveStory?: StorySequence | null; pendingChecks?: CheckResult[]; revealChecks?: CheckResult[]; currentUserId?: string; luckBusyId?: string; revealBusyIds?: string[]; manualRolls?: ManualRollTimelineEntry[]; checkReveals?: Record<string, CheckRevealRecord>; diceRevealMode?: string; decisionReadonly?: boolean }>()
 const emit = defineEmits<{ refresh: []; luck: [check: CheckResult, spend: boolean]; reveal: [check: CheckResult] }>()
 const clickRevealOn = computed(() => props.diceRevealMode === 'click')
 function revealOf(check: CheckResult): CheckRevealRecord | null {
@@ -82,6 +84,7 @@ function recapRange(recap: StoryRecap): string {
     : t('storyRecapRange', { from, to })
 }
 function liveAct(a: PublicAction): Act { return toAct(a) }
+function storyText(story: StorySequence | null): string { return story?.segments.map(segment => segment.text).join(' ') || '' }
 function canDecideLuck(check: CheckResult): boolean {
   return !!props.isGm || (!!props.currentUserId && check.actor_uid === props.currentUserId)
 }
@@ -122,12 +125,13 @@ function manualRollResultText(result: ManualRollTimelineEntry['results'][string]
 const rounds = computed(() => visibleLog.value.map((entry, index) => {
   const sw = entry.swipes || []
   const cur = Number(entry.current_swipe) || 0
-  return { entry, round: Number(entry.round || props.log.length - visibleLog.value.length + index), gm: entry.gm_response ? parseGMText(String(entry.gm_response), props.lore) : null, swipes: sw, swipeCur: cur, swipeCount: sw.length }
+  return { entry, round: Number(entry.round || props.log.length - visibleLog.value.length + index), gm: entry.gm_response ? parseGMText(String(entry.gm_response), props.lore) : null, story: isStorySequence(entry.story) ? entry.story : null, swipes: sw, swipeCur: cur, swipeCount: sw.length }
 }))
 const standaloneManualRolls = computed(() => {
   const roundsInLog = new Set(rounds.value.map(item => item.round))
   return (props.manualRolls || []).filter(item => !roundsInLog.has(Number(item.round_number || 0)))
 })
+const liveParagraphs = computed(() => splitNarrationParagraphs(props.liveNarration || ''))
 const recapSignature = computed(() => props.log.flatMap(entry => recaps(entry).map(recap => recap.id || recap.text)).join('|'))
 
 async function showEarlier() {
@@ -171,19 +175,27 @@ function updateScrollState() {
   awayFromBottom.value = !near
   if (near) hasNew.value = false
 }
-function latest() {
+function latest(behavior: ScrollBehavior = 'smooth') {
   const el = box.value
   if (!el) return
-  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  if (behavior === 'auto') el.scrollTop = el.scrollHeight
+  else el.scrollTo({ top: el.scrollHeight, behavior })
   hasNew.value = false
   awayFromBottom.value = false
 }
 function onScroll() { updateScrollState() }
-watch(() => [props.log.length, JSON.stringify(props.live), props.processing, props.liveNarration, recapSignature.value], async () => {
+watch(() => props.gameKey, () => {
+  visibleRoundCount.value = INITIAL_VISIBLE_ROUNDS
+  initialized.value = false
+  hasNew.value = false
+  awayFromBottom.value = false
+  void initializeTts()
+}, { immediate: true })
+watch(() => [props.gameKey, props.log.length, JSON.stringify(props.live), props.processing, props.liveNarration, recapSignature.value], async () => {
   const wasNearBottom = isNearBottom()
   await nextTick()
   if (!initialized.value) {
-    latest()
+    latest('auto')
     initialized.value = true
   } else if (wasNearBottom) {
     latest()
@@ -191,13 +203,6 @@ watch(() => [props.log.length, JSON.stringify(props.live), props.processing, pro
     hasNew.value = true
     updateScrollState()
   }
-})
-watch(() => props.gameKey, () => {
-  visibleRoundCount.value = INITIAL_VISIBLE_ROUNDS
-  initialized.value = false
-  hasNew.value = false
-  awayFromBottom.value = false
-  void initializeTts()
 }, { immediate: true })
 
 // --- 本地朗读（文字转语音） ---
@@ -251,13 +256,14 @@ watch(() => rounds.value, async (latest) => {
           v-for="check in checks(item.entry)"
           :key="check.check_id || `${check.actor_uid}-${check.roll}`"
           :check="check"
+          :busy="revealBusyIds?.includes(String(check.check_id || ''))"
           :click-mode="clickRevealOn"
           :reveal="revealOf(check)"
           :can-reveal="canReveal(check)"
           :revealer-name="revealOf(check) ? name(revealOf(check)!.by) : ''"
           @reveal="check => emit('reveal', check)"
         />
-        <div v-if="item.gm" class="message gm message-with-avatar">
+        <div v-if="item.gm || item.story" class="message gm message-with-avatar">
           <span class="narrator-avatar" aria-hidden="true">GM</span>
           <div class="message-copy">
           <strong>{{ t('gmRound', { round: item.round }) }}<button
@@ -266,17 +272,20 @@ watch(() => rounds.value, async (latest) => {
             class="tts-button"
             :class="{ active: speakingKey === 'gm:' + item.round }"
             :title="speakingKey === 'gm:' + item.round ? t('ttsStop') : t('ttsSpeakGm')"
-            @click="ttsToggle(item.gm.paragraphs.join(' '), 'gm:' + item.round, { lang: ttsVoiceLang, gameKey, role: 'gm' })"
+            @click="ttsToggle(item.story ? storyText(item.story) : (item.gm?.paragraphs.join(' ') || ''), 'gm:' + item.round, { lang: ttsVoiceLang, gameKey, role: 'gm' })"
           >{{ speakingKey === 'gm:' + item.round ? '⏸' : '🔊' }}</button></strong>
-          <p v-for="(p, i) in item.gm.paragraphs" :key="'p' + i" class="chat-gm" v-html="p"></p>
+          <StorySequenceView v-if="item.story" :story="item.story" :lore="lore" :rule-id="ruleId" :game-key="gameKey" :round="item.round" :tts-language="ttsVoiceLang" />
+          <template v-else-if="item.gm">
+            <p v-for="(p, i) in item.gm?.paragraphs" :key="'p' + i" class="chat-gm" v-html="p"></p>
+          </template>
           <SceneImageBlock
             v-if="sceneImageAsset(item.entry)"
             :asset-id="sceneImageAsset(item.entry)"
             :game-key="gameKey"
             :alt="item.entry.scene_image?.prompt || ''"
           />
-          <div v-if="item.gm.states.length" class="state-card-list">
-            <div v-for="(s, i) in item.gm.states" :key="'s' + i" class="state-card" :class="s.cls">
+          <div v-if="item.gm?.states.length" class="state-card-list">
+            <div v-for="(s, i) in item.gm?.states" :key="'s' + i" class="state-card" :class="s.cls">
               <span class="state-card-title">
                 <NIcon v-if="s.cls === 'good'" :component="CheckmarkCircleOutline" size="14" />
                 <NIcon v-else-if="s.cls === 'warn'" :component="WarningOutline" size="14" />
@@ -286,8 +295,8 @@ watch(() => rounds.value, async (latest) => {
               <div class="state-card-body" v-html="s.body"></div>
             </div>
           </div>
-          <div v-if="item.gm.tags.length" class="tag-line">
-            <span v-for="(t, i) in item.gm.tags" :key="'t' + i" class="tag-badge" :class="t.cls">{{ t.text }}</span>
+          <div v-if="item.gm?.tags.length" class="tag-line">
+            <span v-for="(t, i) in item.gm?.tags" :key="'t' + i" class="tag-badge" :class="t.cls">{{ t.text }}</span>
           </div>
           <div v-if="item.swipeCount > 1 && isGm" class="swipe-bar">
             <div class="swipe-group">
@@ -346,10 +355,15 @@ watch(() => rounds.value, async (latest) => {
       <CheckRevealCard
         v-for="check in activeChecks"
         :key="`pending-${check.check_id}`"
+        :game-key="gameKey"
+        :actor-id="currentUserId"
+        :is-gm="isGm"
+        :readonly="decisionReadonly"
+        @refresh="emit('refresh')"
         :check="check"
         animate
         :can-decide-luck="check.luck_decision === 'pending' && canDecideLuck(check)"
-        :busy="!!luckBusyId"
+        :busy="!!luckBusyId || revealBusyIds?.includes(String(check.check_id || ''))"
         :click-mode="clickRevealOn"
         :reveal="revealOf(check)"
         :can-reveal="canReveal(check)"
@@ -361,7 +375,8 @@ watch(() => rounds.value, async (latest) => {
         <span class="narrator-avatar" aria-hidden="true">GM</span>
         <div class="message-copy">
           <strong>{{ t('thinkingMessage') }}<span v-if="!liveNarration" class="thinking-dots"><i></i><i></i><i></i></span></strong>
-          <p v-if="liveNarration" class="chat-gm live-narration">{{ liveNarration }}</p>
+          <StorySequenceView v-if="liveStory" :story="liveStory" :lore="lore" :rule-id="ruleId" :game-key="gameKey" :round="round" :tts-language="ttsVoiceLang" />
+          <p v-else v-for="(paragraph, index) in liveParagraphs" :key="index" class="chat-gm live-narration">{{ paragraph }}</p>
         </div>
       </div>
       <div v-if="!log.length && !live.length && !processing" class="timeline-empty"><strong>{{ t('adventureNotStarted') }}</strong><span>{{ t('firstActionHint') }}</span></div>
@@ -372,7 +387,7 @@ watch(() => rounds.value, async (latest) => {
       :class="{ unread: hasNew }"
       type="button"
       :aria-label="t('scrollLatest')"
-      @click="latest"
+      @click="latest()"
     >{{ hasNew ? t('newMessages') : t('backToBottom') }} ↓</button>
   </div>
 </template>

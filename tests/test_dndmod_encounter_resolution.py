@@ -25,6 +25,7 @@ CORE_GOBLIN = {
 MODULE_VAMPIRE = {
     "profile_id": "ash_vampire", "name": "Ash Vampire", "source_ref": "module:castle-module",
     "hp": 82, "armor_class": 16, "speed": 30,
+    "creature_type": "undead",
     "abilities": {"str": 16, "dex": 18, "con": 16, "int": 12, "wis": 14, "cha": 18},
     "attacks": [{"id": "bite", "name": "Bite", "damage": "2d8+4", "attack_bonus": 7}],
 }
@@ -67,6 +68,7 @@ def test_resolve_supports_core_module_and_adventure_sources() -> None:
     ]
     vampire = instances[1]
     assert vampire["hp"] == 82 and vampire["armor_class"] == 16
+    assert vampire["creature_type"] == "undead"
     assert vampire["attacks"][0]["damage"] == "2d8+4"
 
 

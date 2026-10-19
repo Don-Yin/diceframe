@@ -30,3 +30,23 @@ A fresh database walks v1 through v9; `PRAGMA user_version` ends at 9.
 Legacy timer state is converted at load/save boundaries from `{status, remaining}` to independent
 `sticky_remaining` and `cooldown_remaining` counters. Ambiguous delayed state is not guessed;
 the entry's delay setting controls future eligibility.
+
+## Automatic legacy world-identity upgrade
+
+The application performs the world-identity upgrade automatically at the front of a cold start,
+before the stores and registries become live. It supports legacy Lorebook SQLite v4 and canonical
+v5–v12 world/book/binding layouts, plus save files whose `instance_schema_version` is in the
+current local writer's recognized range. It scans the data templates, all `saves/state*.json`
+files and other known JSON references. It does not scan or rewrite arbitrary prose.
+
+The replacement world ID is a stable ASCII hash of the old identity. This keeps two worlds with
+the same display title separate. Known world/book references are rebound; display titles, entry
+IDs, `game_key`, `memory_namespace` and chat/log text stay as they are. Newly generated AI worlds
+also use ASCII IDs, reserve length for the `world:` primary-book prefix and prefix generated entry
+IDs with the world identity.
+
+Users do not need to edit saves by hand or disable Lorebook validation. The SQLite receipt and
+durable migration journal allow an interrupted startup to roll forward. If a file was changed by
+the user, a target identity already exists, or the database/save schema is invalid or from the
+future, startup fails closed without overwriting the source data. This is the current local
+implementation boundary; it does not promise support for every historical or future format.

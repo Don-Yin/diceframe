@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
-import { NTabPane, NTabs } from 'naive-ui'
+import { NButton, NTabPane, NTabs } from 'naive-ui'
 import DOMPurify from 'dompurify'
 import {
   ChatbubblesOutline, ColorPaletteOutline, ConstructOutline, CubeOutline,
@@ -20,6 +20,7 @@ import { usePluginTools } from './usePluginTools'
 import { usePluginExport } from './usePluginExport'
 import { usePluginTypes } from './usePluginTypes'
 import { usePluginUninstallCleanup } from './usePluginUninstallCleanup'
+import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
 import MirrorsTab from './tabs/MirrorsTab.vue'
 import ContentTab from './tabs/ContentTab.vue'
 import ToolsTab from './tabs/ToolsTab.vue'
@@ -36,6 +37,7 @@ const {
   pluginThemes, pluginThemeId, loadPluginThemes, applyPluginTheme, clearPluginTheme,
 } = useTheme()
 const busy = ref('')
+const surfaceError = ref('')
 // 插件类型筛选（已装 + 商店共用同一筛选值）：筛选条由后端类型表驱动
 const typeFilter = ref('')
 // 市场范围：插件市场 / 内容市场（内容市场只展示 content-pack）
@@ -104,8 +106,13 @@ const {
 } = usePluginContent(busy)
 
 async function refreshPluginSurfaces() {
-  await load()
-  await Promise.all([loadMarketplace(), loadPluginThemes(), loadContentResources()])
+  surfaceError.value = ''
+  try {
+    await load()
+    await Promise.all([loadMarketplace(), loadPluginThemes(), loadContentResources()])
+  } catch (error: unknown) {
+    surfaceError.value = error instanceof Error ? error.message : String(error)
+  }
 }
 
 const { onUninstalled } = usePluginUninstallCleanup()
@@ -196,13 +203,17 @@ onMounted(async () => {
 
 <template>
   <section class="plugin-workspace">
-    <header class="view-title archive-hero">
-      <div>
-        <span class="section-kicker">{{ t('pluginsKicker') }}</span>
-        <h1>{{ t('settingsSectionPlugins') }}</h1>
-        <p class="muted">{{ t('pluginWorkspaceSubtitle') }}</p>
-      </div>
-    </header>
+    <ContentPageHeader class="archive-hero" kicker="EXTENSIONS" :title="t('settingsSectionPlugins')" :description="t('pluginWorkspaceSubtitle')">
+      <template #actions>
+        <div class="plugin-header-actions">
+          <NButton size="small" :loading="busy !== ''" @click="refreshPluginSurfaces">{{ t('refresh') }}</NButton>
+        </div>
+      </template>
+    </ContentPageHeader>
+    <div v-if="surfaceError" class="error-banner plugin-surface-error" role="alert">
+      <span>{{ surfaceError }}</span>
+      <button type="button" class="ghost" @click="refreshPluginSurfaces">{{ t('retry') }}</button>
+    </div>
   <NTabs type="line" animated class="plugin-surface-tabs">
     <NTabPane name="installed" :tab="t('pluginsInstalledTab')">
       <InstalledTab
@@ -396,3 +407,19 @@ onMounted(async () => {
     :export-pack="exportPack"
   />
 </template>
+
+<style scoped>
+.plugin-header-actions { display: flex; align-items: center; gap: 8px; }
+.plugin-surface-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; }
+
+.plugin-surface-tabs :deep(.n-tabs-nav) { min-height: 44px; }
+.plugin-surface-tabs :deep(.n-tabs-tab) {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+
+@media (max-width: 560px) {
+  .plugin-surface-tabs :deep(.n-tabs-nav-scroll-content) { min-width: max-content; }
+}
+</style>

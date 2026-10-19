@@ -27,6 +27,7 @@ from src.engine.world.contracts import validate_source_ref
 DAMAGE_DICE_RE = re.compile(r"^[1-9]\d*d(?:4|6|8|10|12|20)(?:\+[1-9]\d*)?$")
 
 ABILITY_SCORES = ("str", "dex", "con", "int", "wis", "cha")
+CREATURE_TYPES = frozenset({"aberration", "beast", "celestial", "construct", "dragon", "elemental", "fey", "fiend", "giant", "humanoid", "monstrosity", "ooze", "plant", "undead"})
 _ABILITY_BOUNDS = (1, 30)
 
 CATALOG_KINDS = ("monster", "npc_statblock", "item", "encounter_profile")
@@ -105,7 +106,11 @@ def _validate_attacks(attacks: Any, label: str) -> list[dict[str, Any]]:
 
 
 def _monster_mechanics(record: dict[str, Any], label: str) -> dict[str, Any]:
+    creature_type = record.get("creature_type")
+    if "creature_type" in record and (not isinstance(creature_type, str) or creature_type not in CREATURE_TYPES):
+        raise CatalogContractError(f"{label} creature_type must be a canonical creature type")
     return {
+        **({"creature_type": creature_type} if creature_type else {}),
         "hp": _bounded_int(record.get("hp"), f"{label} hp", 1, 10000),
         "armor_class": _bounded_int(record.get("armor_class"), f"{label} armor_class", 1, 40),
         "speed": _bounded_int(record.get("speed", 30), f"{label} speed", 0, 200),
@@ -121,7 +126,7 @@ def validate_monster_profile(record: Any) -> dict[str, Any]:
         raise CatalogContractError("monster profile must be an object")
     allowed = {
         "profile_id", "name", "source_ref", "hp", "armor_class", "speed",
-        "abilities", "attacks", "description",
+        "abilities", "attacks", "description", "creature_type",
     }
     extra = sorted(set(record) - allowed)
     if extra:
@@ -150,7 +155,7 @@ def validate_npc_statblock(record: Any) -> dict[str, Any]:
         raise CatalogContractError("npc statblock must be an object")
     allowed = {
         "statblock_id", "name", "source_ref", "hp", "armor_class", "speed",
-        "abilities", "attacks", "description",
+        "abilities", "attacks", "description", "creature_type",
     }
     extra = sorted(set(record) - allowed)
     if extra:

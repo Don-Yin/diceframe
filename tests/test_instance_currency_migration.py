@@ -17,11 +17,8 @@ def _round_start_snapshot(payload: dict) -> dict:
 
 
 def _reward_policy(payload: dict) -> dict:
-    """economy_reward_policy at its current home (top level before R7-g)."""
-    settings = (payload.get("modules") or {}).get("table_settings")
-    if isinstance(settings, dict) and "economy_reward_policy" in settings:
-        return settings["economy_reward_policy"]
-    return payload["economy_reward_policy"]
+    """Reward policy after the complete migration chain."""
+    return payload["modules"]["economy"]["reward_policy"]
 
 
 def _coc_payload() -> dict:

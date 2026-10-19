@@ -5,18 +5,19 @@
 """
 
 from __future__ import annotations
+from src.engine.modules import progression_state
 
 from typing import Any
 
 from src.engine.checks import (
     build_check_request,
     default_check_attribute,
-    detect_advantage_mode,
     resolve_check_request,
     roll_check_request,
 )
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text
+from src.engine.modules.check_modes import apply_grant
 from src.rules.rule_system import RuleSystem
 
 
@@ -163,8 +164,7 @@ class DiceResolver:
             attribute = "dex" if "dex" in rule.attribute_keys else (
                 rule.attribute_keys[0] if rule.attribute_keys else "int"
             )
-        mode, note = detect_advantage_mode(text.replace(" ", "").casefold(), action, rule)
-        return {
+        request = {
             "check_id": "",
             "required": True,
             "actor_uid": uid,
@@ -173,10 +173,13 @@ class DiceResolver:
             "label": "检定",
             "skill": str(action.get("selected_skill") or ""),
             "attribute": attribute,
-            "advantage_mode": mode,
-            "advantage_note": note or None,
+            "advantage_mode": "",
+            "advantage_note": None,
             "planner_source": "legacy",
         }
+        if rule.advantage_mechanic.get("type") in {"coc_bonus_penalty", "d20_keep_high_low"}:
+            apply_grant(instance, request, f"round:{progression_state.round_value(instance)}")
+        return request
 
     @staticmethod
     def _guess_attribute_key(actions_text: str, rule: RuleSystem) -> str:

@@ -6,6 +6,7 @@ import base64
 import binascii
 import hashlib
 import io
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,12 +24,44 @@ BUILTIN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 # may change without invalidating saves or content packs.
 BUILTIN_SCENE_IMAGE_PATHS: dict[str, str] = {
     "dnd5e": "ui/campaign-mountain-city.jpg",
+    "mountain_city": "ui/campaign-mountain-city.jpg",
+    "ashen_throne": "ui/dnd-ashen-throne.png",
+    "moonlit_ruins": "ui/campaign-moonlit-ruins.jpg",
+    "dark_fantasy": "ui/dark-fantasy-atmosphere.jpg",
     "freeform_fantasy": "ui/rules/rule-freeform-fantasy.webp",
     "freeform_coc": "ui/rules/rule-freeform-coc.webp",
+    "freeform_coc_harbor": "ui/rules/rule-freeform-coc-harbor.webp",
+    "freeform_coc_town": "ui/rules/rule-freeform-coc-town.webp",
     "freeform_cyberpunk": "ui/rules/rule-freeform-cyberpunk.webp",
+    "freeform_cyberpunk_alley": "ui/rules/rule-freeform-cyberpunk-alley.webp",
+    "freeform_cyberpunk_rooftops": "ui/rules/rule-freeform-cyberpunk-rooftops.webp",
     "freeform_wuxia": "ui/rules/rule-freeform-wuxia.webp",
+    "freeform_wuxia_mountains": "ui/rules/rule-freeform-wuxia-mountains.webp",
+    "freeform_wuxia_riverside": "ui/rules/rule-freeform-wuxia-riverside.webp",
     "tavern_free": "ui/rules/rule-tavern-free.webp",
 }
+
+# Stable IDs let us add/remove art without changing save references. A keyed
+# selection is derived from the save key, so each new save gets a varied cover
+# while a legacy save remains stable when no key is supplied.
+BUILTIN_SCENE_IMAGE_VARIANTS: dict[str, tuple[str, ...]] = {
+    "dnd5e": ("dnd5e", "ashen_throne", "moonlit_ruins"),
+    "dnd2024_srd": ("dnd5e", "ashen_throne", "moonlit_ruins"),
+    "freeform_fantasy": ("freeform_fantasy", "mountain_city", "dark_fantasy"),
+    "freeform_coc": ("freeform_coc", "freeform_coc_harbor", "freeform_coc_town"),
+    "freeform_cyberpunk": (
+        "freeform_cyberpunk",
+        "freeform_cyberpunk_alley",
+        "freeform_cyberpunk_rooftops",
+    ),
+    "freeform_wuxia": ("freeform_wuxia", "freeform_wuxia_mountains", "freeform_wuxia_riverside"),
+    "tavern_free": ("tavern_free", "moonlit_ruins", "mountain_city"),
+}
+
+# A world or ruleset may provide ``scene_images`` as a pool of references.
+# Keep this separate from ``scene_image``: the latter is the existing explicit
+# single-image contract, while the pool is opt-in and remains backwards
+# compatible with older templates and saves.
 
 
 @dataclass(frozen=True)
@@ -47,7 +80,7 @@ def builtin_scene_image_ref(rule_id: str = "") -> dict[str, str]:
     return {"kind": "builtin", "id": image_id}
 
 
-def save_scene_image_upload(dependencies: SceneImageDependencies, file_data: str, file_name: str = "") -> dict[str, Any]:
+def save_scene_image_upload(dependencies: SceneImageDependencies | None, file_data: str, file_name: str = "") -> dict[str, Any]:
     if not file_data:
         return {"ok": False, "error": "未提供冒险头图文件"}
     if len(file_data) > (MAX_SCENE_IMAGE_UPLOAD_BYTES * 4 // 3) + 32:
@@ -62,7 +95,9 @@ def save_scene_image_upload(dependencies: SceneImageDependencies, file_data: str
         payload = _normalized_scene_image(raw)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
-    reference = _store_payload(dependencies, payload)
+    reference = _store_payload(dependencies, payload) if dependencies is not None else {
+        "kind": "upload", "asset_id": hashlib.sha256(payload).hexdigest(),
+    }
     return {"ok": True, "scene_image": reference, "file_name": Path(file_name).name}
 
 
@@ -118,30 +153,109 @@ def validate_scene_image_ref(dependencies: SceneImageDependencies, reference: An
     raise ValueError("不支持的冒险头图引用类型")
 
 
-def resolve_default_scene_image(dependencies: SceneImageDependencies, world_id: str = "", rule_id: str = "") -> dict[str, str]:
+def _template_scene_image_candidates(
+    dependencies: SceneImageDependencies,
+    template: dict[str, Any] | None,
+) -> list[dict[str, str]]:
+    if not isinstance(template, dict):
+        return []
+    # ``scene_image`` stays the legacy primary and may be omitted from a
+    # hand-authored ``scene_images`` list.  Always prepend it, then de-dupe,
+    # so old and new content contracts describe the same ordered pool.
+    raw_values: list[Any] = []
+    if isinstance(template.get("scene_image"), dict):
+        raw_values.append(template["scene_image"])
+    raw_options = template.get("scene_images")
+    if isinstance(raw_options, list):
+        raw_values.extend(raw_options)
+    candidates: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            normalized = validate_scene_image_ref(dependencies, raw)
+        except ValueError:
+            continue
+        identity = json.dumps(normalized, sort_keys=True, ensure_ascii=False)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        candidates.append(normalized)
+    return candidates
+
+
+def _select_scene_image(candidates: list[dict[str, str]], selection_key: str = "") -> dict[str, str] | None:
+    if not candidates:
+        return None
+    if not selection_key:
+        # Keep reads of legacy saves stable. Creation passes a unique key below,
+        # so newly-created saves still receive a different pool member.
+        return dict(candidates[0])
+    digest = hashlib.sha256(selection_key.encode("utf-8", errors="replace")).digest()
+    index = int.from_bytes(digest[:8], "big") % len(candidates)
+    return dict(candidates[index])
+
+
+def builtin_scene_image_candidates(rule_id: str = "") -> list[dict[str, str]]:
+    ids = BUILTIN_SCENE_IMAGE_VARIANTS.get(str(rule_id or "").strip())
+    if not ids:
+        normalized = builtin_scene_image_ref(rule_id)
+        return [normalized]
+    return [builtin_scene_image_ref(image_id) for image_id in ids]
+
+
+def default_scene_image_candidates(
+    dependencies: SceneImageDependencies,
+    world_id: str = "",
+    rule_id: str = "",
+) -> list[dict[str, str]]:
+    """Return the validated pool used for a new save's default cover."""
+
     world = dependencies.load_world_template(str(world_id or "")) if world_id else None
     if isinstance(world, dict):
-        reference = world.get("scene_image")
-        if isinstance(reference, dict):
-            try:
-                return validate_scene_image_ref(dependencies, reference)
-            except ValueError:
-                pass
+        candidates = _template_scene_image_candidates(dependencies, world)
+        if candidates:
+            return candidates
         rule_id = str(rule_id or world.get("default_rule") or "")
 
     rule_result = dependencies.get_rule_template(str(rule_id or "")) if rule_id else {}
     rule = rule_result.get("rule") if isinstance(rule_result, dict) else None
     if isinstance(rule, dict):
-        reference = rule.get("scene_image")
-        if isinstance(reference, dict):
-            try:
-                return validate_scene_image_ref(dependencies, reference)
-            except ValueError:
-                pass
+        candidates = _template_scene_image_candidates(dependencies, rule)
+        if candidates:
+            # Built-in rules historically declared one ``scene_image``. Treat
+            # that legacy declaration as the primary member of the built-in
+            # pool; custom/plugin references remain explicit single choices.
+            if (
+                not isinstance(rule.get("scene_images"), list)
+                and candidates[0].get("kind") == "builtin"
+                and candidates[0].get("id") in BUILTIN_SCENE_IMAGE_VARIANTS.get(
+                    str(rule_id or ""), ()
+                )
+                and (str(rule_id or "") in BUILTIN_SCENE_IMAGE_VARIANTS
+                     or str(rule.get("source_rule_id") or "") in BUILTIN_SCENE_IMAGE_VARIANTS)
+            ):
+                return builtin_scene_image_candidates(
+                    str(rule_id or "") or str(rule.get("source_rule_id") or "")
+                )
+            return candidates
         source_rule_id = str(rule.get("source_rule_id") or "")
-        if source_rule_id in BUILTIN_SCENE_IMAGE_PATHS:
-            return builtin_scene_image_ref(source_rule_id)
-    return builtin_scene_image_ref(rule_id)
+        if source_rule_id in BUILTIN_SCENE_IMAGE_VARIANTS:
+            return builtin_scene_image_candidates(source_rule_id)
+    return builtin_scene_image_candidates(rule_id)
+
+
+def resolve_default_scene_image(
+    dependencies: SceneImageDependencies,
+    world_id: str = "",
+    rule_id: str = "",
+    selection_key: str = "",
+) -> dict[str, str]:
+    return _select_scene_image(
+        default_scene_image_candidates(dependencies, world_id, rule_id),
+        selection_key,
+    ) or builtin_scene_image_ref(rule_id)
 
 
 def materialize_scene_image(dependencies: SceneImageDependencies, reference: Any) -> dict[str, str]:
@@ -232,6 +346,10 @@ class SceneImageService:
     def save_upload(self, file_data: str, file_name: str = "") -> dict[str, Any]:
         return save_scene_image_upload(self._dependencies, file_data, file_name)
 
+    def preview_upload(self, file_data: str, file_name: str = "") -> dict[str, Any]:
+        """Validate and predict a native upload without writing storage."""
+        return save_scene_image_upload(None, file_data, file_name)
+
     def file(self, asset_id: str) -> Path | None:
         return scene_image_file(self._dependencies, asset_id)
 
@@ -239,9 +357,19 @@ class SceneImageService:
         return validate_scene_image_ref(self._dependencies, reference)
 
     def resolve_default(
-        self, world_id: str = "", rule_id: str = "",
+        self, world_id: str = "", rule_id: str = "", selection_key: str = "",
     ) -> dict[str, str]:
-        return resolve_default_scene_image(self._dependencies, world_id, rule_id)
+        return resolve_default_scene_image(self._dependencies, world_id, rule_id, selection_key)
+
+    def default_candidates(
+        self, world_id: str = "", rule_id: str = "",
+    ) -> list[dict[str, str]]:
+        return default_scene_image_candidates(self._dependencies, world_id, rule_id)
+
+    def choose_default(
+        self, world_id: str = "", rule_id: str = "", selection_key: str = "",
+    ) -> dict[str, str]:
+        return self.resolve_default(world_id, rule_id, selection_key)
 
     def materialize(self, reference: Any) -> dict[str, str]:
         return materialize_scene_image(self._dependencies, reference)

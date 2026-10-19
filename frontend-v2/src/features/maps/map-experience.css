@@ -1,0 +1,21 @@
+.map-page {
+  min-height: 100%;
+  padding: clamp(18px, 3vw, 42px);
+  color: var(--df-text);
+  background: radial-gradient(circle at 50% -10%, color-mix(in srgb, var(--df-canvas-glow) 70%, transparent), transparent 42%), var(--df-canvas);
+}
+.map-page-header { display: flex; align-items: end; justify-content: space-between; gap: 20px; max-width: 1320px; margin: 0 auto 18px; }
+.map-page-kicker { color: var(--df-text-muted); font-size: 11px; letter-spacing: .15em; }
+.map-page h1 { display: flex; align-items: center; gap: 9px; margin: 6px 0 4px; font: 500 clamp(26px, 4vw, 44px)/1.05 var(--df-font-title); color: var(--df-accent-strong); }
+.map-page-header p { margin: 0; color: var(--df-text-muted); font-size: 12px; }
+.map-page-actions { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; justify-content: end; }
+.map-game-picker { display: grid; gap: 4px; color: var(--df-text-muted); font-size: 11px; }
+.map-game-picker select { min-width: 190px; }
+.map-back-link { color: var(--df-interactive-strong); font-size: 13px; }
+.map-page-error, .map-page-state { max-width: 1320px; margin: 20px auto; padding: 18px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
+.map-page-error { color: var(--df-danger, var(--df-warning)); }
+.map-page-error button { margin-left: 8px; }
+.map-page .map-workspace-overlay { position: static; inset: auto; display: block; padding: 0; background: transparent; }
+.map-page .map-workspace-shell { width: 100%; max-width: 1320px; height: min(760px, calc(100dvh - 190px)); min-height: 520px; margin: 0 auto; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg, 14px); box-shadow: var(--df-shadow-strong); }
+.map-page .map-workspace-close { display: none; }
+@media (max-width: 700px) { .map-page-header { align-items: start; flex-direction: column; } .map-page-actions { width: 100%; justify-content: start; } .map-game-picker { flex: 1 1 100%; } .map-game-picker select { width: 100%; } .map-page .map-workspace-shell { height: calc(100dvh - 210px); min-height: 460px; } }

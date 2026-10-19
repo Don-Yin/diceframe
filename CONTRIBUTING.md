@@ -2,6 +2,12 @@
 
 感谢你为 DiceFrame 提交问题、文档、测试、代码或内容贡献。
 
+## Languages / 语言维护
+
+English and Simplified Chinese are the core UI and documentation languages. Japanese, German and Russian are community-maintained; new features do not require complete community translation. A new language needs a volunteer maintainer and verified English fallback. Missing/stale community keys fall back to English, and discontinued catalogs can be paused without removing saved language IDs. Read the [translation policy](docs/en/translations.md).
+
+官方维护英语和简体中文；其他语言由社区志愿者维护，不将长期翻译义务转交给项目负责人。新增功能不要求补齐所有社区译文。维护者同意后才登记，不自动给过去的贡献者分配责任。见[翻译维护](docs/zh/translations.md)。
+
 ## 从哪里开始
 
 - 使用前先查阅 [README](README.md) 和 [用户手册](https://github.com/diceframe/diceframe-content/blob/main/docs/zh/guide.md)。
@@ -84,6 +90,7 @@ npx npm@10 install --package-lock-only
 
 ```bash
 cd frontend-v2
+npm run locales:check
 npm run typecheck
 npm run lint
 npm test -- --maxWorkers=1

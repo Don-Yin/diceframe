@@ -52,45 +52,60 @@ test('hub controls whether the overview shows the direct-connect entry', async (
   const peerButton = page.getByRole('button', { name: '联机冒险' })
   await expect(peerButton).toBeVisible()
   const overviewActions = page.locator('.overview-actions')
-  const importButton = overviewActions.getByRole('button', { name: '导入存档' })
   const createButton = overviewActions.getByRole('button', { name: '创建新冒险' })
-  const [peerBox, importBox, createBox] = await Promise.all([
+  const importButton = page.locator('.library-heading-actions').getByRole('button', { name: '导入存档', exact: true })
+  const [peerBox, createBox, importBox] = await Promise.all([
     peerButton.boundingBox(),
-    importButton.boundingBox(),
     createButton.boundingBox(),
+    importButton.boundingBox(),
   ])
   expect(peerBox).not.toBeNull()
   expect(importBox).not.toBeNull()
   expect(createBox).not.toBeNull()
-  expect(peerBox!.x).toBeLessThan(importBox!.x)
-  expect(importBox!.x).toBeLessThan(createBox!.x)
-  expect(Math.abs(peerBox!.y - importBox!.y)).toBeLessThanOrEqual(1)
-  expect(Math.abs(importBox!.y - createBox!.y)).toBeLessThanOrEqual(1)
+  // Import and save management intentionally live beside "选择存档" in the
+  // library toolbar; the hero row remains focused on navigation actions.
+  await expect(importButton).toBeVisible()
+  await expect(page.locator('.overview-actions').getByRole('button', { name: '导入存档', exact: true })).toHaveCount(0)
 
   const sortField = page.locator('.save-sort-field')
-  const selectAll = page.getByRole('button', { name: '全选' })
-  const invert = page.getByRole('button', { name: '反选' })
-  const clear = page.getByRole('button', { name: '取消选择' })
-  const exportAll = page.getByRole('button', { name: '批量导出' })
+  const libraryActions = page.locator('.library-heading-actions')
+  const selectAll = libraryActions.getByRole('button', { name: '全选' })
+  const invert = libraryActions.getByRole('button', { name: '反选' })
+  const clear = libraryActions.getByRole('button', { name: '取消选择' })
+  const exportAll = libraryActions.getByRole('button', { name: '批量导出' })
   await expect(sortField).toBeVisible()
+  await expect(page.getByTestId('overview-select-saves')).toBeVisible()
+  await expect(selectAll).toHaveCount(0)
+  await expect(invert).toHaveCount(0)
+  await expect(clear).toHaveCount(0)
+  await expect(exportAll).toHaveCount(0)
+  await page.getByTestId('overview-select-saves').click()
+  await expect(selectAll).toBeVisible()
+  await expect(invert).toBeVisible()
+  await expect(clear).toBeDisabled()
+  await expect(exportAll).toHaveCount(0)
   if ((page.viewportSize()?.width || 1000) <= 800) {
-    const [sortBox, allBox, invertBox, clearBox, exportBox] = await Promise.all([
+    const [sortBox, allBox, invertBox, clearBox] = await Promise.all([
       sortField.boundingBox(),
       selectAll.boundingBox(),
       invert.boundingBox(),
       clear.boundingBox(),
-      exportAll.boundingBox(),
     ])
     expect(sortBox).not.toBeNull()
     expect(allBox).not.toBeNull()
     expect(invertBox).not.toBeNull()
     expect(clearBox).not.toBeNull()
-    expect(exportBox).not.toBeNull()
     expect(sortBox!.width).toBeGreaterThan(allBox!.width + invertBox!.width)
-    expect(Math.abs(allBox!.y - invertBox!.y)).toBeLessThanOrEqual(1)
-    expect(Math.abs(clearBox!.y - exportBox!.y)).toBeLessThanOrEqual(1)
     expect(Math.abs(allBox!.height - clearBox!.height)).toBeLessThanOrEqual(1)
+    const viewportWidth = page.viewportSize()?.width || 390
+    for (const box of [sortBox, allBox, invertBox, clearBox]) {
+      expect(box!.x).toBeGreaterThanOrEqual(0)
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewportWidth + 1)
+    }
   }
+
+  await page.getByTestId('overview-exit-selection').click()
+  await expect(selectAll).toHaveCount(0)
 
   await peerButton.click()
   await expect(page.getByText('实验性功能').first()).toBeVisible()

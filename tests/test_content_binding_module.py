@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from legacy_save_fixtures import legacy_table_payload
+
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -123,6 +125,7 @@ def test_migration_leaves_world_ref_empty_without_a_valid_world_id(world_id) -> 
 
 def test_migrated_save_loads_and_round_trips() -> None:
     saved = GameInstance(game_key=("t", "cb", "bot"), world_id="ashen").to_dict()
+    saved = legacy_table_payload(saved)
     saved["instance_schema_version"] = 34
     saved["modules"].pop("content_binding", None)
     migrated = migrate_game_state_payload(saved)

@@ -41,6 +41,8 @@ def test_copy_tree_keeps_core_ai_modules(monkeypatch, tmp_path):
 
 def test_prepare_package_tree_excludes_non_server_projects(monkeypatch, tmp_path):
     root = tmp_path / "root"
+    root.mkdir()
+    (root / "THIRD_PARTY_NOTICES.md").write_text("notice", encoding="utf-8")
     (root / "docs").mkdir(parents=True)
     (root / "docs" / "USER_GUIDE_CN.md").write_text("guide", encoding="utf-8")
     (root / "mobile").mkdir(parents=True)
@@ -53,5 +55,6 @@ def test_prepare_package_tree_excludes_non_server_projects(monkeypatch, tmp_path
 
     build_release.prepare_package_tree(package)
 
+    assert (package / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8") == "notice"
     assert not (package / "docs").exists()
     assert not (package / "mobile").exists()

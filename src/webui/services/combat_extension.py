@@ -654,9 +654,7 @@ def scheduler_advance(
         )
     # Capture only after all scheduler calculations succeed. The snapshot is
     # still pre-mutation, while a rejected advance leaves no bookkeeping write.
-    capture = getattr(instance, "capture_combat_extension_snapshot", None)
-    if callable(capture):
-        capture()
+    combat_extension_state.capture_combat_extension_snapshot(instance)
     combat_extension_state.replace_current(instance, payload)
     events = [*events, *result.events]
     return {
@@ -1053,9 +1051,7 @@ def resolve_combat_action(
     )
 
     # Commit only after every fallible calculation has completed.
-    capture = getattr(instance, "capture_combat_extension_snapshot", None)
-    if callable(capture):
-        capture(entity_fields)
+    combat_extension_state.capture_combat_extension_snapshot(instance, entity_fields)
     combat_extension_state.replace_current(instance, payload)
     for entity_id, record in staged_records.items():
         if entity_id.startswith("player:"):

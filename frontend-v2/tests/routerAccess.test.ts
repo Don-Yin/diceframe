@@ -30,6 +30,15 @@ describe('owner route access', () => {
     )).resolves.toBe(true)
   })
 
+  it('keeps the creator workshop owner-only', async () => {
+    const target = route('creator', '/creator')
+    expect(isPublicRoute(target)).toBe(false)
+    await expect(requireOwnerAccess(target, vi.fn().mockResolvedValue('login-required')))
+      .resolves.toEqual({ name: 'login', query: { redirect: '/#/creator' } })
+    await expect(requireOwnerAccess(target, vi.fn().mockResolvedValue('allowed')))
+      .resolves.toBe(true)
+  })
+
   it('keeps login, legal documents, join, peer, and player share routes public without probing owner access', async () => {
     const probe = vi.fn()
     const routes = [
@@ -51,5 +60,14 @@ describe('owner route access', () => {
 
   it('does not mistake the owner play page for a public player link', () => {
     expect(isPublicRoute(route('play', '/play?game=demo', { game: 'demo' }))).toBe(false)
+  })
+
+  it('protects the library and source management even when a share query is supplied', async () => {
+    for (const name of ['library', 'modules', 'module-detail']) {
+      const target = route(name, `/${name}?share=1`, { share: '1' })
+      expect(isPublicRoute(target)).toBe(false)
+      await expect(requireOwnerAccess(target, vi.fn().mockResolvedValue('login-required')))
+        .resolves.toMatchObject({ name: 'login' })
+    }
   })
 })

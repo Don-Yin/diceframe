@@ -1,0 +1,133 @@
+import { mount, flushPromises } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const mock = vi.hoisted(() => ({ api: vi.fn() }))
+vi.mock('@/api/client', () => ({ api: mock.api, apiBlob: vi.fn(), errorMessage: (e: Error) => e.message }))
+vi.mock('@/composables/useLocale', async () => { const { ref } = await import('vue'); return { useLocale: () => ({ locale: ref('zh-CN') }) } })
+import RunStoryPanel from '@/features/play/run-story/RunStoryPanel.vue'
+import RunFinalePanel from '@/features/play/run-story/RunFinalePanel.vue'
+
+const playing = { ok: true, run_id: 'run1', story: {}, finale: { status: 'playing' }, available_npcs: [], growth: { supported: false, pending: [] }, blockers: [] }
+
+describe('run story workbench', () => {
+  beforeEach(() => { mock.api.mockReset(); mock.api.mockResolvedValue(playing) })
+  it('prepares a reusable plan draft with the current revision and requires separate publication', async () => {
+    mock.api.mockResolvedValue({ ...playing, story: { revision: 7, plan: { theme: 'A story', scenes: [] } } })
+    const wrapper = mount(RunStoryPanel, { props: { gameKey: 'web|story|bot', revision: 1 }, global: { stubs: { ScriptImportDialog: { props: ['initialPreview'], template: '<div data-testid="story-draft-review" />' } } } })
+    await flushPromises()
+    await wrapper.get('[data-testid="story-adventure-id"]').setValue('reusable_story')
+    const preview = { ok: true, draft: { directory_id: 'reusable_story' }, blockers: [], warnings: [], plan_digest: 'digest' }
+    mock.api.mockResolvedValue(preview)
+    await wrapper.get('[data-testid="story-adventure-prepare"]').trigger('click')
+    await flushPromises()
+    expect(mock.api.mock.calls.at(-1)?.[0]).toBe('/games/web%7Cstory%7Cbot/run-story/adventure-draft')
+    expect(JSON.parse(mock.api.mock.calls.at(-1)?.[1].body)).toEqual({ run_id: 'run1', revision: 7, directory_id: 'reusable_story' })
+    expect(wrapper.find('[data-testid="story-draft-review"]').exists()).toBe(true)
+    expect(mock.api.mock.calls.some(call => call[0].includes('/commit'))).toBe(false)
+    await wrapper.setProps({ gameKey: 'web|another|bot' })
+    expect(wrapper.find('[data-testid="story-draft-review"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it('keeps a plan draft editable and requires explicit adoption', async () => {
+    const wrapper = mount(RunStoryPanel, { props: { gameKey: 'web|story|bot', revision: 1 } })
+    await flushPromises()
+    await wrapper.get('[data-testid="edit-plan"]').trigger('click')
+    expect(wrapper.findAll('textarea').length).toBeGreaterThan(0)
+    expect(mock.api.mock.calls.filter(c => c[1]?.method === 'POST')).toHaveLength(0)
+    expect(wrapper.text()).toContain('token')
+  })
+  it('requires reviewed materials and final confirmation to settle', async () => {
+    mock.api.mockResolvedValue({ ...playing, finale: { status: 'preparing', id: 'job1', epilogue: '', recap: '' } })
+    const wrapper = mount(RunFinalePanel, { props: { gameKey: 'web|story|bot', revision: 1, isGm: true } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="commit-finale"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('取消')
+    expect(wrapper.find('[data-testid="review-finale"]').attributes('disabled')).toBeDefined()
+  })
+  it('renders only public archive controls for players', async () => {
+    mock.api.mockResolvedValue({ ...playing, finale: { status: 'ended', epilogue: 'The end', recap: 'Whole run' } })
+    const wrapper = mount(RunFinalePanel, { props: { gameKey: 'web|story|bot', revision: 1, isGm: false } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('The end')
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="commit-finale"]').exists()).toBe(false)
+  })
+  it('does not offer a lifecycle mutation before the run identity is loaded', async () => {
+    mock.api.mockReturnValue(new Promise(() => undefined))
+    const wrapper = mount(RunFinalePanel, { props: { gameKey: 'web|story|bot', revision: 1, isGm: true } })
+    expect(wrapper.text()).not.toContain('准备结束本次冒险')
+    expect(wrapper.text()).toContain('正在读取')
+  })
+  it('clears review and refreshes materials when another GM window saves a revision', async () => {
+    const prepared = { ...playing, finale: { status: 'preparing', id: 'job1', revision: 0, epilogue: 'Old ending', recap: 'Old recap' } }
+    mock.api.mockResolvedValue(prepared)
+    const wrapper = mount(RunFinalePanel, { props: { gameKey: 'web|story|bot', revision: 1, isGm: true } })
+    await flushPromises()
+    mock.api.mockResolvedValue({ ...prepared, finale: { ...prepared.finale, revision: 1 } })
+    await wrapper.get('[data-testid="review-finale"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="commit-finale"]').exists()).toBe(true)
+    mock.api.mockResolvedValue({ ...prepared, finale: { ...prepared.finale, revision: 2, epilogue: 'Other GM ending' } })
+    await wrapper.setProps({ revision: 2 })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="commit-finale"]').exists()).toBe(false)
+    expect(wrapper.get('textarea').element.value).toBe('Other GM ending')
+  })
+  it('discards the old carry destination and actor selection when opening another archive', async () => {
+    mock.api.mockResolvedValue({ ...playing, finale: { status: 'ended', id: 'old-job', characters: { alice: {} } }, carry_deliveries: [{ id: 'old', status: 'delivered', game_key: 'web|old-next|bot' }] })
+    const wrapper = mount(RunFinalePanel, { props: { gameKey: 'web|old|bot', revision: 1, isGm: true } })
+    await flushPromises()
+    expect(wrapper.get('a').attributes('href')).toContain('old-next')
+    mock.api.mockResolvedValue({ ...playing, finale: { status: 'ended', id: 'new-job', characters: { bob: {} } }, carry_deliveries: [] })
+    await wrapper.setProps({ gameKey: 'web|new|bot' })
+    await flushPromises()
+    expect(wrapper.find('a').exists()).toBe(false)
+    expect(wrapper.get<HTMLInputElement>('input[type="checkbox"]').element.checked).toBe(true)
+  })
+  it('refreshes frozen and ended surfaces when lifecycle changes without advancing the round', async () => {
+    const props = { gameKey: 'web|story|bot', revision: '2:playing' }
+    const story = mount(RunStoryPanel, { props })
+    const finale = mount(RunFinalePanel, { props: { ...props, isGm: false } })
+    await flushPromises()
+    expect(story.find('[data-testid="edit-plan"]').exists()).toBe(true)
+    mock.api.mockResolvedValue({ ...playing, finale: { status: 'preparing', id: 'job1', revision: 0 } })
+    await story.setProps({ revision: '2:job1:preparing:0' })
+    await finale.setProps({ revision: '2:job1:preparing:0' })
+    await flushPromises()
+    expect(story.find('[data-testid="edit-plan"]').exists()).toBe(false)
+    expect(finale.text()).toContain('GM 正在准备')
+    mock.api.mockResolvedValue({ ...playing, finale: { status: 'ended', id: 'job1', revision: 1, epilogue: 'Final ending', recap: 'All rounds' } })
+    await finale.setProps({ revision: '2:job1:ended:1' })
+    await flushPromises()
+    expect(finale.text()).toContain('Final ending')
+  })
+  it('reloads the current plan after a workspace revision changes within the same round', async () => {
+    const wrapper = mount(RunStoryPanel, { props: { gameKey: 'web|story|bot', revision: '2:workspace1' } })
+    await flushPromises()
+    mock.api.mockResolvedValue({ ...playing, story: { revision: 1, current_id: 'station', plan: { scenes: [{ id: 'station', title: 'Station', objective: 'Meet the guide' }] } } })
+    await wrapper.setProps({ revision: '2:workspace2' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Meet the guide')
+  })
+  it('keeps the frozen status visible while the public archive request is pending', () => {
+    mock.api.mockReturnValue(new Promise(() => undefined))
+    const wrapper = mount(RunFinalePanel, { props: { gameKey: 'web|story|bot', revision: 2, isGm: false, lifecycleStatus: 'preparing' } })
+    expect(wrapper.text()).toContain('GM 正在准备')
+  })
+  it('cannot overwrite a saved review with a delayed pre-save read', async () => {
+    const prepared = { ...playing, finale: { status: 'preparing', id: 'job1', revision: 0, epilogue: 'Ending', recap: 'Recap' } }
+    mock.api.mockResolvedValue(prepared)
+    const wrapper = mount(RunFinalePanel, { props: { gameKey: 'web|story|bot', revision: 1, isGm: true } })
+    await flushPromises()
+    let finishRead!: (value: typeof prepared) => void
+    mock.api.mockReturnValueOnce(new Promise(resolve => { finishRead = resolve }))
+    await wrapper.setProps({ revision: 2 })
+    mock.api.mockResolvedValue({ ...prepared, finale: { ...prepared.finale, revision: 1 } })
+    await wrapper.get('[data-testid="review-finale"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="commit-finale"]').exists()).toBe(true)
+    finishRead(prepared)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="commit-finale"]').exists()).toBe(true)
+  })
+})

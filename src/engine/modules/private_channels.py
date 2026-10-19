@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.engine.contracts import TableTalkExchange
+from src.engine import module_hooks
 from src.engine.module_state import ModuleStateSpec, get_module_state, register_module_state
 
 MODULE_NAME = "private_channels"
@@ -54,5 +55,20 @@ def remove_table_talk_exchange(instance: Any, exchange_id: str) -> None:
     entries[:] = [item for item in entries if item.get("id") != exchange_id]
 
 
+def reset(instance: Any) -> None:
+    private_log(instance).clear()
+    table_talk(instance).clear()
+
+
+def read_state(instance: Any, kind: str) -> Any:
+    if kind == module_hooks.PRIVATE_LOG:
+        return private_log(instance)
+    if kind == module_hooks.TABLE_TALK:
+        return table_talk(instance)
+    return None
+
+
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)
 register_module_state(SPEC)
+module_hooks.register(module_hooks.INSTANCE_RESET, MODULE_NAME, reset)
+module_hooks.register(module_hooks.STATE_READ, MODULE_NAME, read_state)

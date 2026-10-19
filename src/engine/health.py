@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from uuid import uuid4
-from src.engine import progression
-from src.engine.modules import health as health_state
+from src.engine import module_hooks, progression
 
 _MAX_HEALTH_EVENTS = 100
 _SEVERITIES = {"info", "warning", "error", "critical"}
@@ -45,20 +44,21 @@ def record_health_event(
         "resolved": False,
         "ignored": False,
     }
-    events = health_state.health_events(instance)
-    events.append(event)
-    if len(events) > _MAX_HEALTH_EVENTS:
-        del events[:len(events) - _MAX_HEALTH_EVENTS]
+    events = [*module_hooks.read(instance, module_hooks.HEALTH_EVENTS), event]
+    module_hooks.record(
+        instance, module_hooks.HEALTH_EVENTS, events[-_MAX_HEALTH_EVENTS:],
+    )
 
-    status = health_state.health_status(instance)
+    status = dict(module_hooks.read_value(instance, module_hooks.HEALTH_STATUS) or {})
     status[component] = severity if severity != "info" else "ok"
     status["last_event_at"] = event["time"]
+    module_hooks.record(instance, module_hooks.HEALTH_STATUS, status)
     return event
 
 
 def mark_health_event(instance, event_id: str, *, resolved: bool = False, ignored: bool = False) -> bool:
     """Mark a health event as resolved or ignored."""
-    for event in health_state.health_events(instance):
+    for event in module_hooks.read(instance, module_hooks.HEALTH_EVENTS):
         if event.get("id") == event_id:
             if resolved:
                 event["resolved"] = True
@@ -72,7 +72,7 @@ def mark_health_event(instance, event_id: str, *, resolved: bool = False, ignore
 
 def health_payload(instance, include_resolved: bool = False) -> dict:
     """Build the API payload for a GameInstance health view."""
-    events = list(health_state.health_events(instance))
+    events = list(module_hooks.read(instance, module_hooks.HEALTH_EVENTS))
     if not include_resolved:
         events = [
             e for e in events
@@ -80,7 +80,7 @@ def health_payload(instance, include_resolved: bool = False) -> dict:
         ]
     return {
         "ok": True,
-        "status": health_state.health_status(instance),
+        "status": module_hooks.read_value(instance, module_hooks.HEALTH_STATUS) or {},
         "events": events[-_MAX_HEALTH_EVENTS:],
         "total": len(events),
     }

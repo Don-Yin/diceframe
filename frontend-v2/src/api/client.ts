@@ -1,4 +1,5 @@
 import { i18n } from '@/i18n'
+import { notifyAccessTokenChange } from '@/api/authSession'
 import { activePeerGameClient } from '@/peer/game/bridge'
 import {
   accessTokenStorageKey,
@@ -32,6 +33,18 @@ export async function retryOnRateLimit<T>(request: () => Promise<T>, maxWaitSeco
 
 export function isNotFoundError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404
+}
+
+/**
+ * The GM closed this game's player entrance. The server reports it as
+ * PLAYER_ACCESS_CLOSED; a P2P host's bridge rejects with the bare code
+ * `player_access_closed`.
+ */
+export function isPlayerAccessClosedError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return error.code === 'PLAYER_ACCESS_CLOSED' || error.code === 'player_access_closed'
+  }
+  return error instanceof Error && error.message === 'player_access_closed'
 }
 
 export function errorCodeOf(data: unknown): string | undefined {
@@ -250,7 +263,10 @@ export async function validateAccessToken(value: string): Promise<void> {
   if (!response.ok) throw new ApiError(i18n.global.t('incorrectPassword'), response.status)
 }
 
-export function setAccessToken(value: string) { localStorage.setItem(accessTokenStorageKey(), value) }
+export function setAccessToken(value: string) {
+  notifyAccessTokenChange()
+  localStorage.setItem(accessTokenStorageKey(), value)
+}
 export function hasAccessToken(): boolean { return !!localStorage.getItem(accessTokenStorageKey()) }
 
 export type OwnerAccessStatus = 'allowed' | 'login-required' | 'unavailable'

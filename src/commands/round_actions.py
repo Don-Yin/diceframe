@@ -10,8 +10,9 @@ from src.engine import progression
 from src.engine.checks import build_check_request, roll_check_request
 from src.engine.character_utils import is_conscious
 from src.engine.game_instance import GameInstance
-from src.engine.modules import round_presentation
+from src.engine import module_hooks
 from src.engine.language import localized_text
+from src.content_modules.projection import entries_for_world
 
 logger = logging.getLogger("trpg")
 
@@ -57,7 +58,7 @@ def collect_gm_directives_text(instance: GameInstance) -> tuple[str, list[str]]:
     """返回本轮可用的 GM 私密指令文本及其 ID，供成功结算后消费。"""
     current_round = progression.current_round(instance)
     entries = [
-        entry for entry in round_presentation.gm_directives(instance)
+        entry for entry in module_hooks.read(instance, module_hooks.GM_DIRECTIVES)
         if int(entry.get("target_round", current_round) or current_round) <= current_round
     ]
     if not entries:
@@ -142,6 +143,16 @@ def format_check_results_constraint(instance: GameInstance, checks: list[dict]) 
                 "Anforderung: Dieses vom Server ermittelte Ergebnis bleibt unverändert."
             ),
         }))
+        push = check.get("push")
+        if isinstance(push, dict) and push.get("status") == "resolved":
+            import json
+
+            # An explicit domain record, not executable narrative instructions.
+            blocks.append("[Accepted Push decision] " + json.dumps({
+                "check_id": check.get("check_id"), "original_roll": push.get("original", {}).get("roll"),
+                "new_roll": check.get("roll"), "new_approach": push.get("reason"),
+                "failed": push.get("failed"), "failure_consequence": push.get("consequence"),
+            }, ensure_ascii=False) + "\nApply the accepted consequence only if Push failed. Do not re-roll or spend Luck. No automatic damage multiplier.")
     return "\n\n" + "\n\n".join(blocks)
 
 
@@ -163,7 +174,7 @@ def initialize_puzzles_from_lorebook(
             instance, viewer_kind="gm",
         )
     else:
-        entries = lorebook_store.list_entries(instance.world_id)
+        entries = entries_for_world(lorebook_store, instance.world_id)
     all_entries = localize_lorebook_entries(entries, world_data)
     for entry in all_entries:
         if entry.get("type") != "puzzle":

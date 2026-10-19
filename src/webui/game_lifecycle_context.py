@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
 
 from src.rules.rule_system import RuleSystem
+from src.engine.player_control import is_ai_controlled
 
 logger = logging.getLogger("trpg")
 GameKey = tuple[str, ...]
@@ -67,6 +68,13 @@ class GameLifecycleDependencies:
     # FIX-04 §6.5：v2 冒险的创建事务步骤（进度初始化 + 世界种子原子物化）。
     # 在创建事务内调用；v1 / 未绑定冒险时是 no-op。
     initialize_adventure_run: Callable[[Any], dict[str, Any]] | None = None
+    # 创建提交后唤醒纯 AI 对局；生命周期层只负责触发，回合推进仍由 turns
+    # 的唯一 progression 边界实现。None 表示该运行时没有配置这条能力。
+    resume_after_creation: Callable[[Any], Awaitable[dict[str, Any]]] | None = None
+    # Optional pool used when a newly-created custom world should keep the
+    # ruleset's varied default covers for future saves.
+    list_default_scene_images: Callable[[str, str], list[dict[str, str]]] | None = None
+    get_game_defaults: Callable[[], dict[str, Any]] = lambda: {}
 
 
 class CreationPhase(str, Enum):
@@ -159,3 +167,32 @@ async def _start_created_game(
 
     del runtime
     return await dependencies.handler.start_game(instance)
+
+
+async def resume_created_ai_table(
+    dependencies: GameLifecycleDependencies, instance: Any,
+) -> dict[str, Any] | None:
+    """Start progression for a committed table with only AI-controlled seats.
+
+    Creation normally leaves the first round waiting for player input.  That is
+    correct for a human table, but an all-AI table has no caller that can open
+    the gate later.  Keep this trigger at the lifecycle boundary and delegate
+    the actual fill/advance work to the same turn service used by control
+    changes, so there is still only one authoritative progression path.
+    """
+
+    resume = dependencies.resume_after_creation
+    if resume is None or instance.active_human_players:
+        return None
+    if not any(
+        is_ai_controlled(instance, uid)
+        for uid in instance.active_alive_players
+    ):
+        return None
+    try:
+        return await resume(instance)
+    except Exception:
+        # The save is already committed.  A model/provider failure must not
+        # turn a successful creation into a false failure or roll it back.
+        logger.exception("纯 AI 对局创建后的自动推进失败: %s", instance.game_key)
+        return None

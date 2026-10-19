@@ -56,7 +56,7 @@ def test_migration_moves_entire_ledger_verbatim_and_is_idempotent():
     assert source == original
     assert migrated["instance_schema_version"] == CURRENT_INSTANCE_SCHEMA_VERSION
     assert "economy" not in migrated
-    assert migrated["modules"]["economy"] == {"schema_version": 1, "state": original["economy"]}
+    assert migrated["modules"]["economy"] == {"schema_version": 1, "state": original["economy"], "reward_policy": {}}
     assert migrated["modules"]["other"] == original["modules"]["other"]
     assert migrate_game_state_payload(migrated) == migrated
     step = _migrate_v18_to_v19(deepcopy(source))
@@ -71,7 +71,7 @@ def test_missing_or_corrupt_legacy_ledger_has_safe_defaults(legacy, modules):
     if legacy is not None:
         payload["economy"] = legacy
     migrated = migrate_game_state_payload(payload)
-    assert migrated["modules"]["economy"] == {"schema_version": 1, "state": {}}
+    assert migrated["modules"]["economy"] == {"schema_version": 1, "state": {}, "reward_policy": {}}
     instance = GameInstance.from_dict(migrated)
     assert economy_state.state(instance) == economy_state.fresh_economy_state(instance.run_id)
     assert instance.run_id
@@ -87,7 +87,8 @@ def test_migration_existing_slot_wins_over_legacy_ledger(slot):
         "economy": _ledger(),
         "modules": {"economy": deepcopy(slot)},
     })
-    assert migrated["modules"]["economy"] == slot
+    expected = {**slot, "reward_policy": {}} if slot["schema_version"] == 1 else slot
+    assert migrated["modules"]["economy"] == expected
     assert "economy" not in migrated
 
 

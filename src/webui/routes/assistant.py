@@ -62,3 +62,5 @@ async def api_assistant_chat(request: web.Request) -> web.StreamResponse:
 
 def register_assistant(app: web.Application) -> None:
     app.router.add_post("/api/assistant/chat", api_assistant_chat)
+    from src.webui.routes.assistant_agent import register_agent
+    register_agent(app)

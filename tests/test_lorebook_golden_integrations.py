@@ -258,7 +258,7 @@ def test_golden_b_timed_state_survives_save_restart_reload(tmp_path):
                 f"save/restart 丢了 {field}"
             )
         seen.append(dict(saved))
-        reloaded.update_lorebook_timed_state()
+        lorebook_runtime.tick(reloaded)
         instance = reloaded
 
     # 进入每一轮 tick 之前的状态：sticky 2 → 1 → 0(并 arm cooldown 1)。
@@ -406,8 +406,8 @@ def test_golden_b_round_tick_drives_delay(tmp_path):
     payload = instance.to_dict()
     restored = GameInstance.from_dict(payload)
     assert lorebook_runtime.timers(restored)["e1"]["delay_remaining"] == 2
-    restored.update_lorebook_timed_state()
+    lorebook_runtime.tick(restored)
     assert lorebook_runtime.timers(restored)["e1"]["delay_remaining"] == 1
-    restored.update_lorebook_timed_state()
+    lorebook_runtime.tick(restored)
     # delay 归零后条目整体过期，计时状态被清掉而不是留一个 0 的僵尸项。
     assert "e1" not in lorebook_runtime.timers(restored)

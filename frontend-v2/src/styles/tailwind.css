@@ -1,0 +1,47 @@
+/*
+ * DiceFrame's new component layer.
+ *
+ * Tailwind is deliberately mapped to the existing --df-* contract. The old
+ * page sheets remain available while each rewritten surface moves to the
+ * component layer; no second palette or radius scale is allowed here.
+ */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+
+@custom-variant dark (&:is([data-mode="dark"] *));
+
+@theme inline {
+  --font-sans: var(--df-font-body);
+  --font-display: var(--df-font-title);
+  --font-mono: var(--df-font-mono);
+  --color-background: var(--df-canvas);
+  --color-foreground: var(--df-text);
+  --color-card: var(--df-surface-1);
+  --color-card-foreground: var(--df-text);
+  --color-popover: var(--df-surface-raised);
+  --color-popover-foreground: var(--df-text);
+  --color-primary: var(--df-interactive);
+  --color-primary-foreground: var(--df-on-accent);
+  --color-secondary: var(--df-surface-2);
+  --color-secondary-foreground: var(--df-text-secondary);
+  --color-muted: var(--df-surface-3);
+  --color-muted-foreground: var(--df-text-muted);
+  --color-accent: var(--df-accent);
+  --color-accent-foreground: var(--df-on-accent);
+  --color-destructive: var(--df-danger);
+  --color-destructive-foreground: var(--df-text);
+  --color-border: var(--df-border-soft);
+  --color-input: var(--df-border-soft);
+  --color-ring: var(--df-focus);
+  --color-success: var(--df-success);
+  --color-warning: var(--df-warning);
+  --color-info: var(--df-info);
+  --radius-sm: var(--df-radius-sm);
+  --radius-md: var(--df-radius-md);
+  --radius-lg: var(--df-radius-lg);
+}
+
+@layer components {
+  [data-df-ui="button"] { font-family: var(--df-font-body); }
+}

@@ -29,7 +29,6 @@ describe('MultiplayerPanel party rest status', () => {
             ],
           },
         },
-        isGm: false,
         currentUserId: 'hero-2',
       },
     })
@@ -51,7 +50,6 @@ describe('MultiplayerPanel party rest status', () => {
       props: {
         players: [{ user_id: 'hero-1', character_name: '阿刁' }],
         detail: { game_key: 'web|room|bot', solo_mode: false },
-        isGm: false,
         currentUserId: 'hero-1',
       },
     })
@@ -76,7 +74,6 @@ describe('MultiplayerPanel AI takeover feedback', () => {
           solo_mode: false,
           multiplayer: { submitted_actions: [{ user_id: 'hero-1', text: '我先走' }] },
         },
-        isGm: true,
         currentUserId: 'hero-1',
         hostingUid,
       },
@@ -98,5 +95,36 @@ describe('MultiplayerPanel AI takeover feedback', () => {
     const wrapper = mountWith('')
 
     expect(wrapper.text()).not.toContain('AI 正在接管…')
+  })
+})
+
+describe('MultiplayerPanel unclaimed-seat guidance', () => {
+  it('explains how a player gets the GM-issued claim link', () => {
+    i18n.global.locale.value = 'zh-CN'
+    const wrapper = mount(MultiplayerPanel, {
+      global: { plugins: [i18n] },
+      props: {
+        players: [{ user_id: 'hero-1', character_name: '阿刁', control: { mode: 'unclaimed' } }],
+        detail: { game_key: 'web|room|bot', solo_mode: false },
+        currentUserId: 'hero-1',
+      },
+    })
+
+    const hint = wrapper.get('.multiplayer-unclaimed-help')
+    expect(hint.text()).toContain('想使用已有角色')
+    expect(hint.text()).toContain('操作链接')
+    expect(hint.text()).toContain('通用邀请链接用于创建新角色')
+  })
+
+  it('does not show claim guidance for a human-controlled seat', () => {
+    const wrapper = mount(MultiplayerPanel, {
+      global: { plugins: [i18n] },
+      props: {
+        players: [{ user_id: 'hero-1', character_name: '阿刁', control: { mode: 'human' } }],
+        detail: { game_key: 'web|room|bot', solo_mode: false },
+        currentUserId: 'hero-1',
+      },
+    })
+    expect(wrapper.find('.multiplayer-unclaimed-help').exists()).toBe(false)
   })
 })

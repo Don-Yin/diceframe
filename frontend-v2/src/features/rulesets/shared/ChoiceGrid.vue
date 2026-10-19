@@ -34,20 +34,16 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 <style scoped>
 .ruleset-choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
 .ruleset-choice-grid.compact { grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); }
-.ruleset-choice-card { display: grid; gap: 8px; min-height: 84px; padding: 13px; border: 1px solid #394659; border-radius: 13px; background: #121a25; color: #e8edf5; text-align: left; cursor: pointer; }
-.ruleset-choice-card:hover { border-color: #8d713f; transform: translateY(-1px); }
-.ruleset-choice-card.selected { border-color: #d3a653; box-shadow: 0 0 0 2px rgb(211 166 83 / 18%); background: #211c17; }
-.ruleset-choice-card:focus-visible { outline: 3px solid #e2b35e; outline-offset: 2px; }
+.ruleset-choice-card { display: grid; gap: 8px; min-height: 84px; padding: 13px; border: 1px solid var(--df-border-soft); border-radius: 13px; background: var(--df-surface-1); color: var(--df-text); text-align: left; cursor: pointer; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease; }
+.ruleset-choice-card:hover { border-color: var(--df-interactive); background: color-mix(in srgb, var(--df-interactive) 7%, var(--df-surface-1)); transform: translateY(-1px); }
+.ruleset-choice-card.selected { border-color: var(--df-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--df-accent) 18%, transparent); background: color-mix(in srgb, var(--df-accent) 12%, var(--df-surface-2)); }
+.ruleset-choice-card:focus-visible { outline: 3px solid var(--df-interactive-strong); outline-offset: 2px; }
 .choice-title { display: flex; justify-content: space-between; gap: 8px; }
-.choice-title small { color: #9ba7ba; font-size: 10px; text-transform: uppercase; }
-.choice-summary { color: #aeb8c8; font-size: 12px; line-height: 1.55; }
-.choice-items { display: grid; gap: 2px; color: #d3dbe4; font-size: 12px; line-height: 1.4; }
+.choice-title small { color: var(--df-text-muted); font-size: 10px; text-transform: uppercase; }
+.choice-summary { color: var(--df-text-secondary); font-size: 12px; line-height: 1.55; }
+.choice-items { display: grid; gap: 2px; color: var(--df-text-secondary); font-size: 12px; line-height: 1.4; }
 .choice-items span { overflow-wrap: anywhere; }
-.choice-items b { color: #e0b766; font-weight: 600; }
-code { color: #8b97aa; font-size: 10px; overflow-wrap: anywhere; }
-:global(body.light .ruleset-choice-card) { border-color: #c3b7a4; background: #fff; color: #302b25; }
-:global(body.light .ruleset-choice-card.selected) { border-color: #a8752c; background: #fff4dc; }
-:global(body.light .ruleset-choice-card .choice-title small), :global(body.light .ruleset-choice-card .choice-summary), :global(body.light .ruleset-choice-card code) { color: #514b43; }
-:global(body.light .ruleset-choice-card .choice-items) { color: #403a33; }
+.choice-items b { color: var(--df-accent-strong); font-weight: 600; }
+code { color: var(--df-text-muted); font-size: 10px; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .ruleset-choice-card { transition: none; } .ruleset-choice-card:hover { transform: none; } }
 </style>

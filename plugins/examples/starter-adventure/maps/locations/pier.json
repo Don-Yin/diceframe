@@ -1,0 +1,13 @@
+{
+  "id": "pier",
+  "name": "Pier",
+  "world_id": "lantern_harbor",
+  "connected_to": [
+    "beacon"
+  ],
+  "content": "The keeper waits here.",
+  "keywords": [
+    "pier"
+  ],
+  "tier": "background"
+}

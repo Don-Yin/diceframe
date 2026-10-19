@@ -69,12 +69,13 @@ export interface UseProviderModelSettingsOptions {
 }
 
 export const MODEL_ROUTING_CONFIG_KEYS = [
+  'check_model_enabled', 'check_provider_ref', 'check_model',
   'llm_provider_ref', 'model',
   'fallback1_enabled', 'fallback1_provider_ref', 'fallback1_model',
   'fallback2_enabled', 'fallback2_provider_ref', 'fallback2_model',
   'embedding_enabled', 'embedding_provider_ref', 'embedding_model', 'embedding_max_input',
-  'tts_provider', 'tts_provider_ref', 'tts_model', 'tts_default_voice',
-  'asr_provider', 'asr_provider_ref', 'asr_model',
+  'tts_provider', 'tts_provider_ref', 'tts_model', 'tts_default_voice', 'tts_audio_format', 'tts_cache_mb',
+  'asr_provider', 'asr_provider_ref', 'asr_model', 'asr_timeout_seconds',
   'imagegen_enabled', 'imagegen_auto_scene', 'imagegen_manual_scene', 'imagegen_auto_storyboard', 'imagegen_auto_use_manual_prompt', 'imagegen_provider_ref', 'imagegen_model',
   'imagegen_square_size', 'imagegen_landscape_size', 'imagegen_quality',
   'imagegen_style_prefix', 'imagegen_timeout_seconds', 'imagegen_manual_rules', 'imagegen_manual_prompt', 'imagegen_auto_rules', 'imagegen_auto_prompt',
@@ -400,6 +401,7 @@ export function useProviderModelSettings(options: UseProviderModelSettingsOption
   }
 
   const catalogRoleLabelKeys: Record<CatalogModelRoleId, MessageKey> = {
+    check: 'modelRoleCheck',
     main: 'modelRoleMain',
     embedding: 'modelRoleEmbedding',
     imagegen: 'modelRoleImagegen',

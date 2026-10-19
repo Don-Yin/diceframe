@@ -146,3 +146,39 @@ async def test_ai_world_generation_exposes_split_draft_without_removing_legacy_f
     # Existing API clients still receive the summary shape and persisted v2
     # template until the later commit cutover lands.
     assert (tmp_path / f"{result['world_id']}.json").exists()
+
+
+class _UnicodeWorldLLM:
+    async def call(self, **_kwargs):
+        return SimpleNamespace(content=json.dumps({
+            "world_name": "旧版世界：测试",
+            "description": "A dreambound realm.",
+            "world_setting": "A dreambound realm.",
+            "starter_scene": "At the edge of the dream.",
+            "default_rule": "freeform_fantasy",
+            "starter_lorebook": [
+                {"id": "npc", "name": "Guide", "type": "npc", "content": "A guide", "visibility": "public"},
+            ],
+        }, ensure_ascii=False), total_tokens=0)
+
+
+@pytest.mark.asyncio
+async def test_ai_world_generation_uses_canonical_id_for_unicode_display_name(tmp_path: Path):
+    from src.generation.creator import generate_world
+
+    result = await generate_world(_UnicodeWorldLLM(), "a dreambound realm", worlds_dir=tmp_path)
+
+    assert result["ok"] is True
+    assert result["world_id"].startswith("ai_")
+    assert result["world_id"] == "ai_a_dreambound_realm"
+
+
+def test_generated_and_colliding_long_world_names_fit_world_and_lorebook_refs(tmp_path):
+    from src.content_modules.refs import parse_content_ref
+    from src.generation.creator import _generated_world_id, _unique_world_id
+    identity = _generated_world_id('A' * 300, '')
+    for _ in range(3):
+        selected = _unique_world_id(identity, tmp_path)
+        parse_content_ref({'source_kind': 'world', 'source_id': selected,
+                           'kind': 'lorebook', 'id': f'world:{selected}'}, default_source='')
+        (tmp_path / f'{selected}.json').write_text('{}', encoding='utf-8')

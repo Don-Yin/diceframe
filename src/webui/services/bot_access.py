@@ -6,7 +6,7 @@ import secrets
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
-from src.engine.modules import room_access
+from src.engine.modules import adventure_runtime_state, room_access
 
 
 GameKey = tuple[str, ...]
@@ -40,6 +40,9 @@ async def verify_bind_game(dependencies: BotAccessDependencies, game_key: str, b
     expected = str(room_access.bot_bind_token(inst) or "")
     if not expected or not secrets.compare_digest(expected, str(bind_token or "")):
         return {"ok": False, "error": "绑定凭证无效或已使用，请由 GM 在网页重新生成一次性绑定命令"}
+    surface = adventure_runtime_state.effective_bot_surface(inst)
+    if surface == adventure_runtime_state.BOT_SURFACE_NONE:
+        return {"ok": False, "error": "该玩法模式不支持群聊绑定"}
     result = {
         "ok": True,
         "game_key": game_key,
@@ -47,6 +50,7 @@ async def verify_bind_game(dependencies: BotAccessDependencies, game_key: str, b
         "world_name": inst.world_name,
         "language": str(getattr(inst, "language", "") or "zh-CN"),
         "player_access_open": bool(room_access.player_access_open(inst)),
+        "bot_surface": surface,
         "players": [
             {
                 "user_id": user_id,
@@ -63,6 +67,20 @@ async def verify_bind_game(dependencies: BotAccessDependencies, game_key: str, b
 def actor_allowed(dependencies: BotAccessDependencies, game_key: str, user_id: str) -> bool:
     inst = dependencies.registry.get(dependencies.parse_game_key(game_key))
     return bool(inst and user_id and user_id in inst.players)
+
+
+def surface_for_game(dependencies: BotAccessDependencies, game_key: str) -> str:
+    """Return the authoritative Bot capability for a bound game.
+
+    The access middleware calls this for every game-scoped Bot request.  Keep
+    unknown or malformed state fail-closed instead of treating it as the
+    historical full-access surface.
+    """
+
+    inst = dependencies.registry.get(dependencies.parse_game_key(game_key))
+    if not inst:
+        return adventure_runtime_state.BOT_SURFACE_NONE
+    return adventure_runtime_state.effective_bot_surface(inst)
 
 
 class BotAccessService:
@@ -83,3 +101,6 @@ class BotAccessService:
 
     def actor_allowed(self, game_key: str, user_id: str) -> bool:
         return actor_allowed(self._dependencies, game_key, user_id)
+
+    def surface_for_game(self, game_key: str) -> str:
+        return surface_for_game(self._dependencies, game_key)

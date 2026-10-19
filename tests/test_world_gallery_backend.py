@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,6 +28,9 @@ class FakeLoreStore:
     def update_world_language(self, world_id: str, language: str) -> None:
         self.worlds[world_id]["language"] = language
 
+    def update_world_metadata(self, world_id: str, *, name: str, description: str, language: str) -> None:
+        self.worlds[world_id].update(name=name, description=description, language=language)
+
     def get_entry(self, entry_id: str):
         return self.entries.get(entry_id)
 
@@ -43,11 +47,38 @@ class FakeLoreStore:
         self.worlds.pop(world_id, None)
 
 
+class FailOnceMetadataLoreStore(FakeLoreStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fail_next_metadata_update = False
+
+    def update_world_metadata(self, world_id: str, *, name: str, description: str, language: str) -> None:
+        if self.fail_next_metadata_update:
+            self.fail_next_metadata_update = False
+            self.worlds[world_id].update(name=name, description=description, language=language)
+            raise OSError("simulated metadata failure")
+        super().update_world_metadata(
+            world_id, name=name, description=description, language=language,
+        )
+
+
 def make_api(tmp_path, plugin_host=None):
     return worlds_service.WorldDependencies(
         lorebook=FakeLoreStore(),
         worlds_dir=tmp_path,
         plugin_host=plugin_host,
+        llm_client=None,
+        character_gen_max_tokens=2048,
+        invalidate_lorebook_index=None,
+        list_instances=lambda: [],
+    )
+
+
+def make_api_with_lorebook(tmp_path, lorebook) -> worlds_service.WorldDependencies:
+    return worlds_service.WorldDependencies(
+        lorebook=lorebook,
+        worlds_dir=tmp_path,
+        plugin_host=None,
         llm_client=None,
         character_gen_max_tokens=2048,
         invalidate_lorebook_index=None,
@@ -71,6 +102,31 @@ BUILTIN_TEMPLATE = {
 
 # ---- clone_world_from_template ----
 
+
+@pytest.mark.parametrize("setting,opening", [("独立完整背景", "独立开场"), ("", "")])
+def test_create_world_preserves_explicit_narrative_fields(tmp_path, setting, opening) -> None:
+    api = make_api(tmp_path)
+    result = worlds_service.create_world(
+        api, "新世界", "只是摘要", "en", world_setting=setting, starter_scene=opening,
+    )
+    assert result["ok"] is True
+    world_id = result["world_id"]
+    loaded = worlds_service.get_world_definition(api, world_id)["world"]
+    assert loaded["description"] == "只是摘要"
+    assert loaded["world_setting"] == setting
+    assert loaded["starter_scene"] == opening
+    assert loaded["language"] == "en"
+    assert api.lorebook.get_world(world_id)["description"] == "只是摘要"
+
+
+@pytest.mark.parametrize("field,value", [("world_setting", 1), ("world_setting", "x" * 16001), ("starter_scene", "x" * 8193)])
+def test_create_world_rejects_invalid_narrative_before_creating_any_data(tmp_path, field, value) -> None:
+    api = make_api(tmp_path)
+    result = worlds_service.create_world(api, "新世界", **{field: value})
+    assert result["ok"] is False
+    assert api.lorebook.list_worlds() == []
+    assert list(tmp_path.iterdir()) == []
+
 def test_create_world_materializes_an_editable_user_template(tmp_path) -> None:
     api = make_api(tmp_path)
 
@@ -83,10 +139,246 @@ def test_create_world_materializes_an_editable_user_template(tmp_path) -> None:
     assert data["custom"] is True
     assert data["world_name"] == "手动世界"
     assert data["world_setting"] == "群岛与雾"
+    assert data["starter_scene"] == "群岛与雾"
     assert data["starter_lorebook"] == []
 
     style = worlds_service.update_world_gm_style(api, world_id, {"tone": "诗意"})
     assert style["ok"] is True
+
+
+def test_update_world_metadata_keeps_entries_and_template_in_sync(tmp_path) -> None:
+    api = make_api(tmp_path)
+    created = worlds_service.create_world(api, "原世界", "旧背景", "zh-CN")
+    world_id = created["world_id"]
+    api.lorebook.add_entry({
+        "id": "entry-1",
+        "world_id": world_id,
+        "name": "旧地点",
+        "type": "location",
+        "keywords": ["harbor"],
+        "content": "保留的世界资料",
+    })
+
+    result = worlds_service.update_world(api, world_id, "新世界", "新背景", "en")
+
+    assert result == {
+        "ok": True,
+        "world_id": world_id,
+        "name": "新世界",
+        "description": "新背景",
+        "language": "en",
+    }
+    assert api.lorebook.get_world(world_id) == {
+        "id": world_id,
+        "name": "新世界",
+        "description": "新背景",
+        "language": "en",
+    }
+    data = json.loads((tmp_path / f"{world_id}.json").read_text(encoding="utf-8"))
+    assert data["world_name"] == "新世界"
+    assert data["description"] == "新背景"
+    assert data["world_setting"] == "旧背景"
+    assert data["language"] == "en"
+    assert api.lorebook.list_entries(world_id) == [{
+        "id": "entry-1",
+        "world_id": world_id,
+        "name": "旧地点",
+        "type": "location",
+        "keywords": ["harbor"],
+        "content": "保留的世界资料",
+    }]
+    assert data["world_id"] == world_id
+
+
+def test_update_world_metadata_preserves_full_setting_and_opening_when_omitted(tmp_path) -> None:
+    api = make_api(tmp_path)
+    created = worlds_service.create_world(api, "原世界", "短描述", "zh-CN")
+    world_id = created["world_id"]
+    path = tmp_path / f"{world_id}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["world_setting"] = "完整世界设定" * 20
+    data["starter_scene"] = "完整开场" * 20
+    data["scene_images"] = [{"kind": "builtin", "id": "keep-me"}]
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    result = worlds_service.update_world(api, world_id, "新世界", "新描述", "en")
+
+    assert result["ok"] is True
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["description"] == "新描述"
+    assert saved["world_setting"] == data["world_setting"]
+    assert saved["starter_scene"] == data["starter_scene"]
+    assert saved["scene_images"] == data["scene_images"]
+
+
+def test_update_world_rejects_read_only_builtin_template(tmp_path) -> None:
+    api = make_api(tmp_path)
+    write_template(tmp_path, "default_fantasy", BUILTIN_TEMPLATE)
+    api.lorebook.create_world("default_fantasy", "经典奇幻", "内置背景", "zh-CN")
+    before = (tmp_path / "default_fantasy.json").read_bytes()
+
+    result = worlds_service.update_world(api, "default_fantasy", "不应保存", "不应保存", "en")
+
+    assert result["ok"] is False
+    assert "不可修改" in result["error"]
+    assert (tmp_path / "default_fantasy.json").read_bytes() == before
+    assert api.lorebook.get_world("default_fantasy") == {
+        "id": "default_fantasy",
+        "name": "经典奇幻",
+        "description": "内置背景",
+        "language": "zh-CN",
+    }
+
+
+def test_world_definition_projection_is_bounded_and_owner_editable(tmp_path) -> None:
+    api = make_api(tmp_path)
+    created = worlds_service.create_world(api, "我的世界", "摘要", "zh-CN")
+    world_id = created["world_id"]
+    path = tmp_path / f"{world_id}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.update({
+        "world_setting": "完整设定",
+        "starter_scene": "开场场景",
+        "starter_lorebook": [{"id": "private", "content": "secret"}],
+        "private_entries": ["must not leak"],
+    })
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    result = worlds_service.get_world_definition(api, world_id, "en")
+
+    assert result["ok"] is True
+    assert result["world"] == {
+        "world_id": world_id,
+        "world_name": "我的世界",
+        "description": "摘要",
+        "world_setting": "完整设定",
+        "starter_scene": "开场场景",
+        "language": "zh-CN",
+        "source": "user",
+        "editable": True,
+    }
+
+
+def test_world_definition_builtin_locale_is_read_only(tmp_path) -> None:
+    api = make_api(tmp_path)
+    write_template(tmp_path, "default_fantasy", {
+        **BUILTIN_TEMPLATE,
+        "world_schema_version": 2,
+        "description": "中文摘要",
+        "world_setting": "中文设定",
+        "starter_scene": "中文开场",
+    })
+    (tmp_path / "locales" / "en").mkdir(parents=True)
+    (tmp_path / "locales" / "en" / "default_fantasy.json").write_text(
+        json.dumps({
+            "locale_schema_version": 1,
+            "locale": "en",
+            "target": {"kind": "world", "id": "default_fantasy"},
+            "fields": {
+                "description": "English summary",
+                "world_setting": "English setting",
+                "starter_scene": "English opening",
+            },
+            "starter_lorebook": {},
+        }), encoding="utf-8",
+    )
+
+    result = worlds_service.get_world_definition(api, "default_fantasy", "en")
+
+    assert result["ok"] is True
+    assert result["world"]["source"] == "builtin"
+    assert result["world"]["editable"] is False
+    assert result["world"]["world_setting"] == "English setting"
+    assert result["world"]["starter_scene"] == "English opening"
+
+
+def test_world_definition_plugin_is_read_only(tmp_path) -> None:
+    plugin_world = {
+        **BUILTIN_TEMPLATE,
+        "world_id": "hyouka_world",
+        "world_name": "Hyouka",
+        "world_setting": "Plugin setting",
+        "starter_scene": "Plugin opening",
+    }
+    api = make_api(tmp_path, _FakePluginHost({"hyouka_world": plugin_world}))
+
+    result = worlds_service.get_world_definition(api, "hyouka_world", "en")
+
+    assert result["ok"] is True
+    assert result["world"]["source"] == "plugin"
+    assert result["world"]["editable"] is False
+    assert result["world"]["world_setting"] == "Plugin setting"
+
+
+def test_update_world_narrative_fields_are_independent_and_bounded(tmp_path) -> None:
+    from src.engine.world_template import load_world_template
+
+    api = make_api(tmp_path)
+    created = worlds_service.create_world(api, "我的世界", "摘要", "zh-CN")
+    world_id = created["world_id"]
+    first = worlds_service.update_world(
+        api, world_id, "我的世界", "摘要", "zh-CN",
+        world_setting="长设定", starter_scene="开场",
+    )
+    assert first["ok"] is True
+
+    second = worlds_service.update_world(
+        api, world_id, "改名", "新摘要", "en", starter_scene="",
+    )
+    assert second["ok"] is True
+    data = json.loads((tmp_path / f"{world_id}.json").read_text(encoding="utf-8"))
+    assert data["world_setting"] == "长设定"
+    assert data["starter_scene"] == ""
+    # New games use the engine loader, so prove it consumes the authored
+    # background independently from the updated card introduction.
+    runtime_template = load_world_template(tmp_path, world_id, "en")
+    assert runtime_template["world_setting"] == "长设定"
+    assert runtime_template["description"] == "新摘要"
+    assert runtime_template["starter_scene"] == ""
+    assert worlds_service.update_world(
+        api, world_id, "改名", "新摘要", "en", world_setting=123,
+    )["ok"] is False
+    assert worlds_service.update_world(
+        api, world_id, "改名", "新摘要", "en", starter_scene="x" * 8193,
+    )["ok"] is False
+
+
+def test_update_world_rejects_invalid_input_before_legacy_materialization(tmp_path) -> None:
+    api = make_api(tmp_path)
+    world_id = "custom_book_legacy_1700000000"
+    api.lorebook.create_world(world_id, "Legacy", "Old", "zh-CN")
+
+    result = worlds_service.update_world(
+        api, world_id, "Legacy", "Old", "zh-CN", world_setting=123,
+    )
+
+    assert result["ok"] is False
+    assert not (tmp_path / f"{world_id}.json").exists()
+
+
+def test_update_world_rolls_back_template_and_metadata_on_persistence_failure(tmp_path) -> None:
+    lorebook = FailOnceMetadataLoreStore()
+    api = make_api_with_lorebook(tmp_path, lorebook)
+    created = worlds_service.create_world(api, "原世界", "原摘要", "zh-CN")
+    world_id = created["world_id"]
+    path = tmp_path / f"{world_id}.json"
+    original_data = json.loads(path.read_text(encoding="utf-8"))
+    original_data.update({
+        "world_setting": "完整原始设定",
+        "starter_scene": "完整原始开场",
+    })
+    path.write_text(json.dumps(original_data, ensure_ascii=False), encoding="utf-8")
+    original_world = json.loads(json.dumps(lorebook.get_world(world_id), ensure_ascii=False))
+    lorebook.fail_next_metadata_update = True
+
+    result = worlds_service.update_world(
+        api, world_id, "新世界", "新摘要", "en",
+        world_setting="新设定", starter_scene="新开场",
+    )
+
+    assert result["ok"] is False
+    assert json.loads(path.read_text(encoding="utf-8")) == original_data
+    assert lorebook.get_world(world_id) == original_world
 
 
 def test_clone_creates_user_world_and_seeds_entries(tmp_path) -> None:

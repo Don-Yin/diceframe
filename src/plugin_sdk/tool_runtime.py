@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
-from typing import Any, Callable, TextIO
+from typing import Any, Callable, Literal, TextIO
 
 from .contracts import JsonObject, ToolHandler
 
@@ -16,6 +16,7 @@ class _Tool:
     title: str
     description: str
     input_schema: JsonObject
+    agent_effect: Literal["read_only", "mutation", "destructive"] | None
     handler: ToolHandler
 
 
@@ -36,7 +37,14 @@ class ToolRuntime:
         title: str,
         description: str,
         input_schema: JsonObject | None = None,
+        agent_effect: Literal["read_only", "mutation", "destructive"] | None = None,
     ) -> Callable[[ToolHandler], ToolHandler]:
+        if agent_effect is not None and (
+            not isinstance(agent_effect, str)
+            or agent_effect not in {"read_only", "mutation", "destructive"}
+        ):
+            raise ValueError("agent_effect must be read_only, mutation, or destructive")
+
         def register(handler: ToolHandler) -> ToolHandler:
             if name in self._tools:
                 raise ValueError(f"工具名称重复：{name}")
@@ -45,6 +53,7 @@ class ToolRuntime:
                 title=title,
                 description=description,
                 input_schema=input_schema or {"type": "object", "properties": {}},
+                agent_effect=agent_effect,
                 handler=handler,
             )
             return handler
@@ -85,6 +94,7 @@ class ToolRuntime:
                         "title": tool.title,
                         "description": tool.description,
                         "input_schema": tool.input_schema,
+                        **({"agent_effect": tool.agent_effect} if tool.agent_effect is not None else {}),
                     }
                     for tool in self._tools.values()
                 ],

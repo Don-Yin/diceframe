@@ -111,6 +111,77 @@ describe('D&D 2024 combat panel', () => {
     mocks.plan.mockReset().mockResolvedValue({ ok: false, error: 'unavailable' })
   })
 
+  it('keeps known spells visible with the reason an unavailable spell cannot be cast', async () => {
+    mocks.locale = 'zh-CN'
+    const data = response('active') as any
+    data.gameplay.combat.actors[0].spells = [
+      { spell_ref: 'spell:divine_smite', name: '至圣斩', blocked_reason: 'requires_melee_hit' },
+      { spell_ref: 'spell:searing_smite', name: '炽焰斩', blocked_reason: 'not_automated' },
+    ]
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = wrapper.get('[data-testid=combat-spell-card]')
+    expect(card.text()).toContain('至圣斩')
+    expect(card.text()).toContain('近战武器或徒手攻击命中后可用')
+    expect(card.text()).toContain('尚未接入战斗自动结算')
+    expect(card.find('button').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('offers the free use and exact hit target while a melee-hit decision is pending', async () => {
+    mocks.locale = 'zh-CN'
+    const data = response('active') as any
+    const decision = { decision_id: 'hit:1', kind: 'melee_hit_spell', assigned_to: 'gm', options: ['decline'] }
+    data.gameplay.combat.pending_decisions = [decision]
+    const targets = data.gameplay.combat.actors
+    data.available_actions = [
+      { type: 'decision.resolve', expected_version: 1, decisions: [decision] },
+      { type: 'cast_spell', expected_version: 1, actor_id: 'player:gm', targets: [...targets, { ...targets[1], actor_id: 'enemy:other', name: 'Other' }], spells: [
+        { spell_ref: 'spell:divine_smite', name: '至圣斩', level: 1, mode: 'triggered_damage', casting_time: 'Bonus Action', available_slot_levels: [0, 1], trigger_target_id: 'enemy:goblin-1' },
+      ] },
+    ]
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    expect(wrapper.get('.decision-card').text()).toContain('不追加法术，结算攻击')
+    expect(wrapper.get('.decision-card').findAll('button')).toHaveLength(1)
+    const card = wrapper.get('[data-testid=combat-spell-card]')
+    expect(card.text()).toContain('职业免费次数')
+    expect(card.findAll('select').at(-1)?.findAll('option')).toHaveLength(1)
+    await card.get('button').trigger('click')
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit).toHaveBeenCalledOnce()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({ type: 'cast_spell', spell_ref: 'spell:divine_smite', actor_id: 'player:gm', target_id: 'enemy:goblin-1', slot_level: 0 })
+    expect(mocks.submit.mock.calls[0][1]).not.toHaveProperty('damage')
+    wrapper.unmount()
+  })
+
+  it('keeps hostile attack targets separate from allied spell targets', async () => {
+    const data = response('active') as any
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets: data.gameplay.combat.actors, spells: [{ spell_ref: 'spell:cure_wounds', name: 'Cure Wounds', level: 1, mode: 'healing', casting_time: 'Action', available_slot_levels: [1] }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const attackCard = wrapper.findAll('.action-card').find(card => card.find('h3').text().includes('Attack'))!
+    const spellCard = wrapper.get('[data-testid=combat-spell-card]')
+    expect((attackCard.findAll('select')[1]!.element as HTMLSelectElement).value).toBe('enemy:goblin-1')
+    expect((spellCard.findAll('select')[2]!.element as HTMLSelectElement).value).toBe('player:gm')
+    await attackCard.get('button').trigger('click')
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({ type: 'attack', target_id: 'enemy:goblin-1' })
+    await spellCard.get('button').trigger('click')
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[1][1]).toMatchObject({ type: 'cast_spell', target_id: 'player:gm' })
+    wrapper.unmount()
+  })
+
   it('uses the first legal slot for an exploration spell and rejects an empty slot list', async () => {
     mocks.fetch.mockResolvedValueOnce(explorationResponse())
     const wrapper = mount(Dnd2024CombatPanel, {

@@ -10,6 +10,7 @@ import GeneratedImageThumbnail from '@/components/common/GeneratedImageThumbnail
 const props = defineProps<{
   equipment: CharacterItem[]
   inventory: CharacterItem[]
+  damageDiceEnabled?: boolean
 }>()
 const emit = defineEmits<{ 'update:equipment': [v: CharacterItem[]]; 'update:inventory': [v: CharacterItem[]] }>()
 
@@ -86,14 +87,16 @@ async function generateItemImage(collection: 'equipment' | 'inventory', index: n
           <option v-for="o in typeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
         </select>
         <input type="number" v-model.number="it.damage" :placeholder="t('damage')" class="item-num">
+        <input v-if="damageDiceEnabled" v-model="it.damage_dice" :placeholder="'1d8'" :aria-label="t('damageDiceHint')" class="item-dice" :title="t('damageDiceHint')">
         <select v-model="it.slot" class="item-sel">
           <option v-for="o in slotOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
         </select>
         <GeneratedImageThumbnail v-if="generatedAssetId(it)" :asset-id="generatedAssetId(it)" :alt="it.name" :size="38" />
         <button type="button" class="item-generate" :disabled="!!generatingKey" @click="generateItemImage('equipment', i, it)">{{ generatingKey === `equipment:${i}` ? '…' : t('generateImage') }}</button>
         <button type="button" class="item-del" @click="setEquipment(equipment.filter((_, x) => x !== i))">×</button>
+        <small v-if="damageDiceEnabled" class="item-dice-hint">{{ t('damageDiceHint') }}</small>
       </div>
-      <button type="button" class="add-item" @click="setEquipment([...equipment, { name: '', type: 'weapon', damage: 0, slot: 'main_hand', quality: 'common' }])">+ {{ t('addItem') }}</button>
+      <button type="button" class="add-item" @click="setEquipment([...equipment, { name: '', type: 'weapon', damage: 0, ...(damageDiceEnabled ? { damage_dice: '' } : {}), slot: 'main_hand', quality: 'common' }])">+ {{ t('addItem') }}</button>
     </div>
     <div class="item-section">
       <label>{{ t('inventory') }}</label>
@@ -112,12 +115,15 @@ async function generateItemImage(collection: 'equipment' | 'inventory', index: n
 
 <style scoped>
 .item-section{margin:8px 0}
-.item-row{display:flex;gap:6px;align-items:center;margin:4px 0}
-.item-name{flex:1;min-width:0}
-.item-num{width:64px}
-.item-eff{flex:1;min-width:0}
-.item-sel{width:96px}
+.item-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;min-width:0}
+.item-name{flex:1 1 120px;min-width:0}
+.item-num{width:64px;min-width:0;max-width:100%}
+.item-dice{width:104px;min-width:0;max-width:100%}
+.item-dice-hint{flex:0 0 100%;max-width:100%;color:var(--df-text-muted);font-size:11px;overflow-wrap:anywhere}
+.item-eff{flex:1 1 120px;min-width:0}
+.item-sel{width:96px;min-width:0;max-width:100%}
 .item-del{padding:2px 8px;border-radius:6px;border:1px solid rgba(128,128,128,.3);background:transparent;color:inherit;cursor:pointer}
 .item-generate{padding:3px 8px;white-space:nowrap;border-radius:6px;border:1px solid rgba(128,128,128,.3);background:transparent;color:inherit;cursor:pointer}
 .add-item{margin-top:4px;padding:4px 12px;border-radius:6px;border:1px dashed rgba(128,128,128,.4);background:transparent;color:inherit;cursor:pointer;font-size:13px}
+@media(max-width:600px){.item-name{flex-basis:100%}}
 </style>

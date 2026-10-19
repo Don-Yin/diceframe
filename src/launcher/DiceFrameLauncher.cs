@@ -232,6 +232,11 @@ internal static class DiceFrameLauncher
         string version = JsonString(signal, "expected_version");
         string candidateDir = JsonString(signal, "candidate_dir");
         string launcherPath = JsonString(signal, "launcher_path");
+        string operation = JsonString(signal, "operation");
+        if (!string.Equals(operation, "rollback", StringComparison.OrdinalIgnoreCase))
+        {
+            operation = "update";
+        }
         int probationSeconds = JsonInt(signal, "probation_seconds", ProbationDefaultSeconds);
         probationSeconds = Math.Max(
             ProbationMinSeconds,
@@ -246,7 +251,7 @@ internal static class DiceFrameLauncher
         );
         if (validationError != null)
         {
-            WriteUpdateState(updaterDir, "failed", version, validationError);
+            WriteUpdateState(updaterDir, "failed", version, validationError, operation);
             TryDelete(restartSignal);
             return previousDir;
         }
@@ -311,7 +316,7 @@ internal static class DiceFrameLauncher
             );
             PromoteLauncher(installRoot, launcherPath);
             PruneOldVersions(installRoot, candidateDir, previousDir);
-            WriteUpdateState(updaterDir, "done", version, "");
+            WriteUpdateState(updaterDir, "done", version, "", operation);
             TryDelete(restartSignal);
             Console.WriteLine("Update to " + version + " succeeded.");
             return candidateDir;
@@ -329,12 +334,13 @@ internal static class DiceFrameLauncher
                     updaterDir,
                     "failed",
                     version,
-                    failure + "；回滚版本也未能恢复服务"
+                    failure + "；回滚版本也未能恢复服务",
+                    operation
                 );
             }
             else
             {
-                WriteUpdateState(updaterDir, "rolled-back", version, failure);
+                WriteUpdateState(updaterDir, "rolled-back", version, failure, operation);
                 Console.WriteLine("Rollback succeeded.");
             }
         }
@@ -345,7 +351,8 @@ internal static class DiceFrameLauncher
                 updaterDir,
                 "failed",
                 version,
-                failure + "；回滚启动失败：" + ex.Message
+                failure + "；回滚启动失败：" + ex.Message,
+                operation
             );
         }
         TryDelete(restartSignal);
@@ -923,12 +930,14 @@ internal static class DiceFrameLauncher
         string updaterDir,
         string state,
         string version,
-        string error
+        string error,
+        string operation = "update"
     )
     {
         string json = "{\n"
             + "  \"state\": \"" + JsonEscape(state) + "\",\n"
             + "  \"version\": \"" + JsonEscape(version) + "\",\n"
+            + "  \"operation\": \"" + JsonEscape(operation) + "\",\n"
             + "  \"error\": \"" + JsonEscape(error) + "\",\n"
             + "  \"restart_needed\": false,\n"
             + "  \"completed_at\": "

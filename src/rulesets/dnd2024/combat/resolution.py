@@ -23,6 +23,7 @@ from .primitives import (
     enemy_actor as _enemy_actor,
     player_actor as _player_actor,
 )
+from .triggered_spells import HIT_SPELL_DECISION
 
 
 class CombatResolutionMixin:
@@ -69,6 +70,7 @@ class CombatResolutionMixin:
                 "abilities": deepcopy(raw.get("abilities") or {}),
                 "saving_throws": deepcopy(raw.get("saving_throws") or {}),
                 "attacks": deepcopy(raw["attacks"]), "conditions": {},
+                "creature_type": str(raw.get("creature_type") or ""),
             }
             enemies[enemy_id] = enemy
             initiatives.append({
@@ -151,7 +153,10 @@ class CombatResolutionMixin:
             damage_type = str(weapon.get("damage_type") or "bludgeoning")
             distance = self._distance(combat, actor_id, target_id)
             range_disadvantage = distance > int(weapon.get("range", 5) or 5)
-        advantage, disadvantage = self._attack_modes(actor, target, range_disadvantage)
+        from .check_modes import attack_mode
+
+        check_mode = attack_mode(self, instance, actor, target, range_disadvantage, use_grant=spend_attack_action)
+        advantage, disadvantage = check_mode["mode"] == "advantage", check_mode["mode"] == "disadvantage"
         first = int(rng.randint(1, 20))
         second = int(rng.randint(1, 20)) if advantage or disadvantage else None
         natural = max(first, second) if advantage and second else min(first, second) if disadvantage and second else first
@@ -167,6 +172,7 @@ class CombatResolutionMixin:
         )
         events.append({
             "type": "check.resolved", "kind": "attack", "actor_id": actor_id,
+            "advantage_mode": check_mode["mode"], "advantage_sources": check_mode["sources"],
             "target_id": target_id, "rolls": [value for value in (first, second) if value],
             "natural": natural, "modifier": attack_bonus, "bless_bonus": bless_bonus,
             "total": total, "target": target_ac, "success": hit, "critical": critical,
@@ -187,14 +193,19 @@ class CombatResolutionMixin:
             )
             damage, rolls = roll_damage_node(damage_node, rng)
             damage = max(0, damage)
-            events.append({
+            damage_event = {
                 "type": "resource.changed", "resource": "hp", "target_id": target_id,
                 "delta": -damage, "amount": damage, "damage_type": damage_type,
                 "critical": critical, "rolls": rolls,
-            })
-            events.extend(self._concentration_events(target, damage, rng))
-            if self._last_hostile_defeated(combat, target, damage):
-                events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
+            }
+            offer = self._hit_spell_offer(instance, combat, actor, weapon, target_id, damage_event, intent)
+            if offer:
+                events.append({"type": "dnd2024.decision.pending", **offer})
+            else:
+                events.append(damage_event)
+                events.extend(self._concentration_events(target, damage, rng))
+                if self._last_hostile_defeated(combat, target, damage):
+                    events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         events.extend(self._consume_attack_conditions(actor_id, target_id, actor, target))
         return events
     def _spell_events(
@@ -207,23 +218,14 @@ class CombatResolutionMixin:
         if spell is None:  # pragma: no cover - validation guards this
             raise CombatIntentError("spell is missing")
         effect = self.catalog.spell_effects[spell_ref.removeprefix("spell:")]
+        if effect["mode"] == "triggered_damage":
+            return self._triggered_spell_events(instance, combat, intent, rng)
         slot_level = int(intent.get("slot_level", spell["level"]) or 0)
         target_ids = intent.get("target_ids")
         if not isinstance(target_ids, list):
             target_ids = [intent.get("target_id")]
         target_ids = [str(item) for item in target_ids if item]
-        action_cost = (
-            "bonus_action" if str(spell["casting_time"]).startswith("Bonus Action") else "action"
-        )
-        events: list[dict[str, Any]] = [{
-            "type": "dnd2024.action.spent", "actor_id": actor_id,
-            "resource": action_cost, "amount": 1,
-        }]
-        if spell["level"] > 0:
-            events.append({
-                "type": "dnd2024.spell.slot_spent", "actor_id": actor_id,
-                "slot_level": slot_level, "amount": 1,
-            })
+        events: list[dict[str, Any]] = self._spell_cost_events(actor, spell, slot_level)
         if effect.get("concentration"):
             if actor.get("concentration"):
                 events.append({
@@ -244,13 +246,20 @@ class CombatResolutionMixin:
             mode = str(effect["mode"])
             succeeded = False
             if mode == "spell_attack":
-                roll = int(rng.randint(1, 20))
+                from .check_modes import attack_mode
+
+                check_mode = attack_mode(self, instance, actor, target, False)
+                rolls = [int(rng.randint(1, 20))]
+                if check_mode["mode"]:
+                    rolls.append(int(rng.randint(1, 20)))
+                roll = max(rolls) if check_mode["mode"] == "advantage" else min(rolls)
                 bonus = int(actor["spell_attack_bonus"])
                 total = roll + bonus
                 succeeded = roll != 1 and (roll == 20 or total >= target["armor_class"])
                 events.append({
                     "type": "check.resolved", "kind": "spell_attack", "actor_id": actor_id,
-                    "target_id": target_id, "rolls": [roll], "natural": roll,
+                    "target_id": target_id, "rolls": rolls, "natural": roll,
+                    "advantage_mode": check_mode["mode"], "advantage_sources": check_mode["sources"],
                     "modifier": bonus, "total": total, "target": target["armor_class"],
                     "success": succeeded, "critical": roll == 20,
                 })
@@ -271,6 +280,7 @@ class CombatResolutionMixin:
                     events.extend(self._concentration_events(target, damage, rng))
                     if self._last_hostile_defeated(combat, target, damage):
                         defeated_targets.add(target_id)
+                events.extend(self._consume_attack_conditions(actor_id, target_id, actor, target))
             elif mode == "saving_throw":
                 save_ability = str(effect["save"])
                 roll = int(rng.randint(1, 20))
@@ -372,6 +382,7 @@ class CombatResolutionMixin:
             target for target in self._hostile_targets(instance, combat, actor_id)
             if self._distance(combat, actor_id, target["actor_id"]) <= 5
             and self._distance_after_move(combat, actor_id, target["actor_id"], distance) > 5
+            and int(combat.get("reactions", {}).get(target["actor_id"], 0)) > 0
         ]
         actor = self._actor_view(instance, combat, actor_id)
         disengaged = bool(economy.get("disengaged")) or "disengaged" in actor["conditions"]
@@ -583,6 +594,8 @@ class CombatResolutionMixin:
             item for item in combat.get("pending_decisions", [])
             if item.get("decision_id") == intent["decision_id"]
         )
+        if decision.get("kind") == HIT_SPELL_DECISION:
+            return self._finish_hit_spell(instance, combat, decision, rng)
         movement = decision["movement"]
         events: list[dict[str, Any]] = [{
             "type": "dnd2024.decision.cleared", "decision_id": decision["decision_id"],

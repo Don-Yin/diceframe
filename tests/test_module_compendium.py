@@ -19,7 +19,7 @@ from src.webui.api import WebAPI
 from src.webui.services import modules as modules_service
 
 
-def _make_module(plugin_dir: Path, *, module_id: str, profile: str | None, plugin_type: str = "content-pack", declared: list[str] | None = None) -> None:
+def _make_module(plugin_dir: Path, *, module_id: str, profile: str | None, plugin_type: str = "content-pack", declared: list[str] | None = None, contributes: dict | None = None) -> None:
     plugin_dir.mkdir(parents=True, exist_ok=True)
     manifest: dict = {
         "schema_version": 1,
@@ -27,9 +27,10 @@ def _make_module(plugin_dir: Path, *, module_id: str, profile: str | None, plugi
         "name": module_id.replace("-", " ").title(),
         "version": "1.0.0",
         "plugin_type": plugin_type,
-        "entrypoint": ["python", "-c", "pass"],
-        "contributes": {},
+        "contributes": contributes or {},
     }
+    if plugin_type != "content-pack" or profile is None:
+        manifest["entrypoint"] = ["python", "-c", "pass"]
     if profile is not None:
         manifest["content_profile"] = profile
         manifest["content_delivery_mode"] = "catalog"
@@ -42,7 +43,10 @@ def _make_module(plugin_dir: Path, *, module_id: str, profile: str | None, plugi
 
 
 def _make_module_with_adventure(plugin_dir: Path, module_id: str) -> None:
-    _make_module(plugin_dir, module_id=module_id, profile="adventure-module", declared=["adventures/castle"])
+    _make_module(plugin_dir, module_id=module_id, profile="adventure-module", declared=["adventures/castle"], contributes={"npcs": ["content/npc/*.json"]})
+    npc = plugin_dir / "content" / "npc"
+    npc.mkdir(parents=True)
+    (npc / "guide.json").write_text(json.dumps({"id": "guide", "name": "Guide", "description": "A guide"}), encoding="utf-8")
     package = plugin_dir / "adventures" / "castle"
     shutil.copytree(Path("templates/adventures/lanterns_of_greymoor"), package)
     manifest_path = package / "manifest.json"
@@ -109,6 +113,67 @@ def test_module_detail_groups_content_and_adventures(env) -> None:
     module = result["module"]
     assert [item["adventure_id"] for item in module["adventures"]] == ["plugin:castle-quest"]
     assert "content_counts" in module
+
+
+def test_disabled_module_summary_and_detail_use_declared_inventory(env) -> None:
+    api, registry = env
+    api._plugins.plugins["castle-module"].status = "disabled"
+    api._sync_plugin_adventure_sources()
+    deps = _Deps(api._plugins, registry)
+
+    summary = next(row for row in modules_service.list_modules(deps)["modules"] if row["id"] == "castle-module")
+    detail = modules_service.module_detail(deps, "castle-module")["module"]
+
+    assert summary["adventure_count"] == 1
+    assert summary["content_counts"] == {"npc": 1}
+    assert summary["inventory_status"] == "disabled"
+    assert detail["adventure_count"] == 1
+    assert detail["content_counts"] == {"npc": 1}
+    assert detail["inventory_status"] == "disabled"
+    assert len(detail["content"]["npc"]) == 1
+    assert len(detail["adventures"]) == 1
+
+
+def test_unreadable_declared_inventory_is_unknown_not_zero(env, tmp_path: Path) -> None:
+    api, registry = env
+    runtime = api._plugins.plugins["castle-module"]
+    runtime.adventure_packages_root = tmp_path / "missing-adventures"
+    runtime.adventure_package_directories = ("missing",)
+    deps = _Deps(api._plugins, registry)
+
+    summary = next(row for row in modules_service.list_modules(deps)["modules"] if row["id"] == "castle-module")
+    detail = modules_service.module_detail(deps, "castle-module")["module"]
+
+    assert summary["adventure_count"] is None
+    assert summary["inventory_status"] == "unknown"
+    assert detail["adventure_count"] is None
+    assert detail["inventory_status"] == "unknown"
+
+
+def test_malformed_declared_adventure_is_unknown_not_zero(env) -> None:
+    api, registry = env
+    runtime = api._plugins.plugins["castle-module"]
+    manifest = runtime.adventure_packages_root / "castle" / "manifest.json"
+    manifest.write_text("{ malformed", encoding="utf-8")
+    deps = _Deps(api._plugins, registry)
+
+    summary = next(row for row in modules_service.list_modules(deps)["modules"] if row["id"] == "castle-module")
+
+    assert summary["adventure_count"] is None
+    assert summary["inventory_status"] == "unknown"
+
+
+def test_missing_declared_adventure_manifest_is_unknown_not_zero(env) -> None:
+    api, registry = env
+    runtime = api._plugins.plugins["castle-module"]
+    manifest = runtime.adventure_packages_root / "castle" / "manifest.json"
+    manifest.unlink()
+    deps = _Deps(api._plugins, registry)
+
+    summary = next(row for row in modules_service.list_modules(deps)["modules"] if row["id"] == "castle-module")
+
+    assert summary["adventure_count"] is None
+    assert summary["inventory_status"] == "unknown"
 
 
 def test_module_detail_unknown_id_fails_closed(env) -> None:

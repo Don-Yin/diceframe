@@ -18,6 +18,8 @@ where it was.  What these tests lock down:
 
 from __future__ import annotations
 
+from legacy_save_fixtures import legacy_table_payload
+
 import asyncio
 
 import pytest
@@ -357,6 +359,7 @@ def test_migration_is_idempotent_and_never_overwrites_a_valid_record() -> None:
     set_control(instance, "p1", "ai")
     set_control(instance, "p2", "unclaimed")
     payload = instance.to_dict()
+    payload = legacy_table_payload(payload)
     payload["instance_schema_version"] = 13
 
     migrated = migrate_game_state_payload(payload)

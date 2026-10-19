@@ -37,6 +37,14 @@ def test_monster_profile_round_trips_valid_shape() -> None:
     assert validated["source_ref"] == "module:castle-module"
 
 
+def test_optional_creature_type_uses_canonical_identity() -> None:
+    assert "creature_type" not in validate_monster_profile(_monster())
+    assert validate_monster_profile(_monster(creature_type="undead"))["creature_type"] == "undead"
+    for kind in ("不死生物", "Undead", {"id": "undead"}):
+        with pytest.raises(CatalogContractError, match="creature_type"):
+            validate_monster_profile(_monster(creature_type=kind))
+
+
 def test_monster_mechanics_match_combat_bounds() -> None:
     with pytest.raises(CatalogContractError, match="hp"):
         validate_monster_profile(_monster(hp=10001))

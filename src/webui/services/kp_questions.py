@@ -136,7 +136,13 @@ async def ask(
         # The LLM call stays outside the lock. Only the small append/save step is
         # serialized, so table talk cannot block or enter the turn pipeline.
         try:
-            async with instance._process_lock:
+            async with instance.authoritative_write() as entered, instance._process_lock:
+                if not entered:
+                    return _result({
+                        "ok": False,
+                        "code": "RUN_READ_ONLY",
+                        "error": "本局已结团或正在准备结团，问答未写入 / This run is read-only",
+                    }, 409)
                 instance.append_table_talk(exchange)
                 try:
                     await dependencies.registry.save(instance)

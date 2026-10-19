@@ -50,7 +50,8 @@
     ],
     "paladin": [
       {"id": "lay_on_hands", "minimum_level": 1, "maximum_track": "lay_on_hands", "short": "none", "long": "all", "source_ref": "srd-5.2.1:p53:lay-on-hands"},
-      {"id": "channel_divinity", "minimum_level": 3, "maximum_track": "channel_divinity", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p55:channel-divinity"}
+      {"id": "channel_divinity", "minimum_level": 3, "maximum_track": "channel_divinity", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p55:channel-divinity"},
+      {"id": "paladins_smite", "minimum_level": 2, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p54:paladins-smite"}
     ],
     "ranger": [
       {"id": "favored_enemy", "minimum_level": 1, "maximum_track": "favored_enemy", "short": "none", "long": "all", "source_ref": "srd-5.2.1:p58:favored-enemy"}

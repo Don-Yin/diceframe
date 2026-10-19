@@ -181,6 +181,58 @@ async def test_fresh_play_stream_sends_baseline_without_refresh(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('reconnect', [False, True])
+async def test_preparing_run_invalidates_a_stale_http_snapshot_without_exposing_materials(monkeypatch, reconnect):
+    from src.engine.modules import run_finale
+    inst = _instance()
+    inst.action_queue.clear()
+    cursor = _current_cursor(inst) if reconnect else ''
+    before = _play_public_signature(inst, 'p1')
+    run_finale.prepare(inst)
+    assert _play_public_signature(inst, 'p1') != before
+    request = _FakeRequest(inst, cursor)
+    _patch_stream(monkeypatch, inst)
+
+    response = await sse_routes.sse_play(request)
+
+    assert _payloads(response) == [{'type': 'refresh' if reconnect else 'run_story_changed'}]
+    assert not request.pool.connections
+
+
+@pytest.mark.asyncio
+async def test_reconnect_catches_a_same_round_plan_change_for_gm_only(monkeypatch):
+    from src.engine.modules import run_story
+    from tests.test_run_story import plan
+    inst = _instance()
+    inst.gm_uid = 'p1'
+    inst.npcs['guide'] = {'name': 'Guide'}
+    cursor = _current_cursor(inst)
+    player_before = _play_public_signature(inst, 'other-player')
+    run_story.adopt(inst, plan(), expected_run=inst.run_id, expected_revision=0, source='gm')
+    assert _play_public_signature(inst, 'other-player') == player_before
+    request = _FakeRequest(inst, cursor)
+    _patch_stream(monkeypatch, inst)
+    response = await sse_routes.sse_play(request)
+    assert _payloads(response) == [{'type': 'refresh'}]
+
+
+@pytest.mark.asyncio
+async def test_fresh_gm_stream_invalidates_plan_snapshot_gap(monkeypatch):
+    from src.engine.modules import run_story
+    from tests.test_run_story import plan
+    inst = _instance()
+    inst.gm_uid = 'p1'
+    inst.npcs['guide'] = {'name': 'Guide'}
+    run_story.adopt(inst, plan(), expected_run=inst.run_id, expected_revision=0, source='gm')
+    before = inst.to_dict()
+    request = _FakeRequest(inst)
+    _patch_stream(monkeypatch, inst)
+    response = await sse_routes.sse_play(request)
+    assert _payloads(response) == [{'type': 'run_story_changed'}]
+    assert inst.to_dict() == before
+
+
+@pytest.mark.asyncio
 async def test_reconnect_without_new_state_sends_no_refresh(monkeypatch):
     inst = _instance()
     request = _FakeRequest(inst, _current_cursor(inst))

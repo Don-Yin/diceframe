@@ -1,3 +1,5 @@
+
+from src.engine.modules import game_config, narration_preferences
 import json
 
 import pytest
@@ -12,7 +14,7 @@ from src.webui.services import (
     game_queries,
 )
 from src.webui.services._common import _GAME_KEY_SEP
-from src.engine.modules import private_channels, ruleset_runtime, table_settings
+from src.engine.modules import private_channels, ruleset_runtime
 
 
 class DummyAPI:
@@ -102,7 +104,7 @@ async def test_set_solo_mode_marks_pending_round_ready(tmp_path):
     )
 
     assert result["ok"]
-    assert table_settings.solo_mode(inst) is True
+    assert game_config.solo_mode(inst) is True
     assert inst.ready_players == {"gm", "p1"}
 
 
@@ -123,7 +125,7 @@ async def test_narrative_perspective_is_ruleset_neutral_and_persisted(tmp_path):
 
     assert result == {"ok": True, "narrative_perspective": "third_person"}
     persisted = GameInstance.from_dict(json.loads(registry._save_path(key).read_text(encoding="utf-8")))
-    assert table_settings.narrative_perspective(persisted) == "third_person"
+    assert narration_preferences.narrative_perspective(persisted) == "third_person"
 
     generic_key = ("web", "generic-game", "bot")
     generic = GameInstance(game_key=generic_key, rule_id="freeform_fantasy")
@@ -132,7 +134,7 @@ async def test_narrative_perspective_is_ruleset_neutral_and_persisted(tmp_path):
         _GAME_KEY_SEP.join(generic_key), "immersive",
     )
     assert generic_result == {"ok": True, "narrative_perspective": "immersive"}
-    assert table_settings.narrative_perspective(generic) == "immersive"
+    assert narration_preferences.narrative_perspective(generic) == "immersive"
 
 
 @pytest.mark.asyncio

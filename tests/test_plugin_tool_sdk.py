@@ -3,6 +3,8 @@ from __future__ import annotations
 import io
 import json
 
+import pytest
+
 from src.plugin_sdk import ToolRuntime
 
 
@@ -30,3 +32,33 @@ def test_tool_runtime_initializes_and_dispatches_calls():
 
     assert responses[0]["result"]["tools"][0]["name"] == "sum"
     assert responses[1]["result"] == {"value": 5, "game_key": "demo"}
+
+
+@pytest.mark.parametrize("effect", ["read_only", "mutation", "destructive"])
+def test_tool_runtime_initializes_with_declared_agent_effect(effect):
+    runtime = ToolRuntime(stdin=io.StringIO(), stdout=io.StringIO())
+
+    @runtime.tool(name="inspect", title="Inspect", description="", agent_effect=effect)
+    def inspect(arguments, context):
+        return {}
+
+    result = runtime._dispatch("initialize", {"protocol_version": 1})
+    assert result["tools"][0]["agent_effect"] == effect
+
+
+@pytest.mark.parametrize("effect", ["unknown", "READ_ONLY", 1, [], {}])
+def test_tool_runtime_rejects_invalid_agent_effect(effect):
+    runtime = ToolRuntime(stdin=io.StringIO(), stdout=io.StringIO())
+    with pytest.raises(ValueError, match="agent_effect"):
+        runtime.tool(name="bad", title="Bad", description="", agent_effect=effect)
+
+
+def test_tool_runtime_omits_agent_effect_for_legacy_registration():
+    runtime = ToolRuntime(stdin=io.StringIO(), stdout=io.StringIO())
+
+    @runtime.tool(name="legacy", title="Legacy", description="")
+    def legacy(arguments, context):
+        return {}
+
+    descriptor = runtime._dispatch("initialize", {"protocol_version": 1})["tools"][0]
+    assert "agent_effect" not in descriptor

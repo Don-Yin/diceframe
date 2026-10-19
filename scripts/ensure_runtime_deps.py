@@ -19,6 +19,7 @@ RUNTIME_IMPORTS = {
     "aiohttp": "aiohttp",
     "Pillow": "PIL",
     "peewee": "peewee",
+    "pydantic-ai-slim": "pydantic_ai",
 }
 
 

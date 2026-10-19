@@ -97,7 +97,7 @@ def test_timed_state_is_migrated_at_game_save_load_boundary():
     assert payload["modules"]["lorebook_runtime"]["timers"]["entry"]["cooldown_remaining"] == 2
     restored = GameInstance.from_dict(payload)
     assert lorebook_runtime.timers(restored)["entry"]["cooldown_remaining"] == 2
-    restored.update_lorebook_timed_state()
+    lorebook_runtime.tick(restored)
     assert lorebook_runtime.timers(restored)["entry"]["cooldown_remaining"] == 1
 
 

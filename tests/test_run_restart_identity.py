@@ -12,6 +12,8 @@ Regression coverage for:
 
 from __future__ import annotations
 
+from src.engine.modules import check_presentation, game_config
+
 import asyncio
 import json
 import shutil
@@ -20,7 +22,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.engine.modules import content_binding, table_settings
+from src.engine.modules import content_binding
 from src.webui.services import adventure_runtime
 from src.engine.world_state import world_facts
 from src.llm.client import LLMResponse
@@ -71,6 +73,42 @@ async def test_new_run_keeps_identity_and_reinitializes_v2_progress(golden, tran
     runtime = (payload.get("modules") or {}).get("adventure_runtime") or {}
     assert runtime.get("play_mode", payload.get("play_mode")) == "adventure"
     assert runtime.get("progress", payload.get("adventure_progress"))["active_nodes"] == ["gate"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transition", ["restart_game", "reset_game"])
+async def test_new_run_keeps_table_preferences(golden, transition) -> None:
+    created = await _created_golden(golden)
+    game_key = created["game_key"]
+    before = golden.instance(game_key)
+    before.configure_session(dice_reveal_mode="auto", luck_timeout_seconds=0)
+    assert check_presentation.dice_reveal_mode(before) == "auto"
+
+    await getattr(golden.api, transition)(game_key)
+    after = golden.instance(game_key)
+
+    assert after is not before
+    assert check_presentation.dice_reveal_mode(after) == "auto"
+    assert check_presentation.luck_timeout_seconds(after) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owner", ["game_config", "economy"])
+async def test_new_run_preflights_kernel_slots_before_creating_candidate(golden, monkeypatch, owner):
+    from unittest.mock import AsyncMock
+    from src.engine.module_state import ModuleStateError
+
+    created = await _created_golden(golden)
+    source = golden.instance(created["game_key"])
+    source.modules[owner] = {"schema_version": 99, "opaque": [1]}
+    before = source.to_dict()
+    lifecycle = golden.api._handler._lifecycle
+    create = AsyncMock()
+    monkeypatch.setattr(lifecycle, "create_game", create)
+    with pytest.raises(ModuleStateError):
+        await lifecycle._new_run_candidate(source, preserve_players=True)
+    create.assert_not_awaited()
+    assert source.to_dict() == before
 
 
 @pytest.mark.asyncio
@@ -182,7 +220,7 @@ async def test_seed_created_v2_adventure_initializes_progress_and_play_mode(gold
     await _complete_node(golden, created, "gate")
 
     seeded = await golden.api.create_from_seed(
-        table_settings.seed_code(source), players=_dnd_characters(1), gm_uid="seed_gm",
+        game_config.seed_code(source), players=_dnd_characters(1), gm_uid="seed_gm",
         language="zh-CN",
     )
 

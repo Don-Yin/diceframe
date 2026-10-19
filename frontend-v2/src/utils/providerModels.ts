@@ -49,7 +49,7 @@ export interface CatalogSavedProvider {
   model_capabilities?: Record<string, ModelCapability>
 }
 
-export type CatalogModelRoleId = 'main' | 'embedding' | 'imagegen' | 'asr'
+export type CatalogModelRoleId = 'main' | 'check' | 'embedding' | 'imagegen' | 'asr'
 
 export interface CatalogModelRole {
   id: CatalogModelRoleId
@@ -65,6 +65,7 @@ export interface CatalogModelRole {
  * 一套专用按钮或保存逻辑。 */
 export const CATALOG_MODEL_ROLES: readonly CatalogModelRole[] = [
   { id: 'main', capability: 'chat', providerKey: 'llm_provider_ref', modelKey: 'model' },
+  { id: 'check', capability: 'chat', providerKey: 'check_provider_ref', modelKey: 'check_model', activation: { check_model_enabled: true } },
   {
     id: 'embedding',
     capability: 'embedding',

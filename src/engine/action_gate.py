@@ -68,6 +68,9 @@ def check_human_control(instance: Any, req: GateRequest) -> str:
 
 
 def check_structured_intent(instance: Any, req: GateRequest) -> str:
+    from src.engine import progression
+    if not progression.accepts_narrative(instance):
+        return STRUCTURED_INTENT_REQUIRED
     requirement = req.requires_structured_intent
     required = requirement() if callable(requirement) else requirement
     return STRUCTURED_INTENT_REQUIRED if required else ""

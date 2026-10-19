@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -23,6 +25,7 @@ from src.compat.characters import MAX_SKILL_EFFECT_CHARS
 from src.content.worlds import localize_lorebook_entries
 from src.engine.language import localized_text
 from src.engine.health import record_health_event
+from src.engine.dice_rng import parse_dice_formula
 from src.engine.economy import (
     MAX_ECONOMY_AMOUNT,
     complete_effect_group,
@@ -39,13 +42,15 @@ from src.engine.memory_outbox import (
     queue_memory_delivery,
 )
 from src.engine.game_instance import GameInstance
-from src.engine.modules import progression_state, room_access, ruleset_runtime, seat_activity, table_settings
+from src.engine import module_hooks
+from src.engine.modules import progression_state, room_access, ruleset_runtime
 from src.engine.player_control import claim_seat, is_human_controlled
-from src.content_modules.projection import ContentProjectionService
+from src.content_modules.projection import ContentProjectionService, entries_for_world
 from src.commands.economy_effects import pending_decision_notice
 from src.commands.state_items import grant_classified_item
 from src.rulesets.contracts import GameDetailProjectionRuntime, PlayerJoinRuntime
 from src.webui.character_contracts import MAX_BIO_CHARS
+from src.webui.services._common import professional_character_validation_error
 from src.webui.character_sheet_authority import (
     EDITABLE_SHEET_FIELDS,
     adopt_requires_gm_failure,
@@ -58,6 +63,31 @@ if TYPE_CHECKING:
     from src.rulesets.registry import RulesetRuntimeRegistry
 
 logger = logging.getLogger("trpg")
+
+
+def _validate_damage_dice(equipment: Any) -> str | None:
+    """Validate an optional damage formula without changing rule mechanics.
+
+    ``damage`` remains the fixed fallback.  ``damage_dice`` uses the shared
+    generic parser (NdM with an optional +/-K modifier); the field is merely
+    preserved on the generic character sheet and is consumed only by rules
+    that already declare dice damage.
+    """
+    if not isinstance(equipment, list):
+        return None
+    for item in equipment:
+        if not isinstance(item, dict):
+            continue
+        raw_formula = item.get("damage_dice")
+        if raw_formula is None or (isinstance(raw_formula, str) and not raw_formula.strip()):
+            continue
+        if not isinstance(raw_formula, str):
+            return f"装备 {item.get('name', '?')} 的伤害骰公式无效: 必须是文本"
+        try:
+            parse_dice_formula(raw_formula)
+        except ValueError as exc:
+            return f"装备 {item.get('name', '?')} 的伤害骰公式无效: {exc}"
+    return None
 
 
 _TRAILING_SENTENCE_PUNCTUATION = "。．.！!？?；;，,、"
@@ -111,7 +141,7 @@ def _record_economy_outcome_in_round(
     if (
         str(outcome.get("visibility") or "private") != "party"
         and not is_purchase
-        and not bool(table_settings.solo_mode(instance))
+        and not bool(game_config.solo_mode(instance))
     ):
         recipients = {
             str(outcome.get("payer_uid") or ""),
@@ -498,7 +528,7 @@ def list_characters(
         return {"players": [], "npcs": [], "rule_attrs": []}
     players = [
         # ``has_acted``: after its first action a seat's card / deletion is GM-only.
-        {"user_id": uid, **p, "has_acted": seat_activity.has_acted(inst, uid)}
+        {"user_id": uid, **p, "has_acted": module_hooks.seat_has_acted(inst, uid)}
         for uid, p in inst.players.items()
     ]
     rule_attrs = _get_rule_attrs_for_game(dependencies, inst)
@@ -518,7 +548,7 @@ def list_characters(
                     inst, viewer_kind="gm", entry_type="npc",
                 )
             else:
-                entries = dependencies.assets.lorebook.list_entries(inst.world_id, "npc")
+                entries = entries_for_world(dependencies.assets.lorebook, inst.world_id, "npc")
             world_data = dependencies.assets.load_world_template(
                 inst.world_id,
                 str(getattr(inst, "language", "") or ""),
@@ -712,7 +742,7 @@ async def adopt_library_card(
             not gm_authority
             and user_id in instance.players
             and not _is_rules_aware_game(dependencies, instance)
-            and seat_activity.has_acted(instance, user_id)
+            and module_hooks.seat_has_acted(instance, user_id)
         )
         if dependencies.games.get_instance(instance.game_key) is not instance:
             return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
@@ -779,6 +809,9 @@ async def _update_character_authority(
     if "background" in updates and len(str(updates.get("background", ""))) > MAX_BIO_CHARS:
         return {"ok": False, "error": f"角色背景过长（上限 {MAX_BIO_CHARS} 字）"}
     rule = dependencies.rules.load_rule_for_game(inst)
+    damage_dice_error = _validate_damage_dice(updates.get("equipment"))
+    if damage_dice_error:
+        return {"ok": False, "error": damage_dice_error}
     if "portrait" in updates:
         try:
             portrait = _validated_portrait(
@@ -877,6 +910,14 @@ def _validated_portrait(
     dependencies: CharacterAssetDependencies,
     portrait: Any,
 ) -> dict[str, str] | None:
+    return validate_character_portrait(dependencies, portrait)
+
+
+def validate_character_portrait(
+    dependencies: CharacterAssetDependencies,
+    portrait: Any,
+) -> dict[str, str] | None:
+    """Validate and normalize a character portrait at the asset boundary."""
     # Existing saves use an empty object as "no explicit portrait". Treat it
     # exactly like null so editing unrelated profile fields remains possible.
     if portrait is None or portrait == {}:
@@ -1241,7 +1282,7 @@ async def delete_character(
         player_side_after_acting = (
             not gm_authority
             and user_id in inst.players
-            and seat_activity.has_acted(inst, user_id)
+            and module_hooks.seat_has_acted(inst, user_id)
         )
         current = dependencies.games.get_instance(inst.game_key)
         if current is not inst:
@@ -1404,10 +1445,11 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
                     rule, character, getattr(inst, "language", ""),
                 )
             except ValueError as exc:
+                error_code, error = professional_character_validation_error(exc)
                 return {
                     "ok": False,
-                    "error_code": "INVALID_PROFESSIONAL_CHARACTER",
-                    "error": str(exc),
+                    "error_code": error_code,
+                    "error": error,
                 }
             canonical = character.get("ruleset_character")
             binding = canonical.get("rule_binding") if isinstance(canonical, dict) else None
@@ -1460,6 +1502,9 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
     default_class = rule.classes[0]["name"] if (rule and rule.classes) else "冒险者"
     if len(str(character.get("background", ""))) > MAX_BIO_CHARS:
         return {"ok": False, "error": f"角色背景过长（上限 {MAX_BIO_CHARS} 字）"}
+    damage_dice_error = _validate_damage_dice(character.get("equipment"))
+    if damage_dice_error:
+        return {"ok": False, "error": damage_dice_error}
     starter_equip, starter_inv = build_starter_items(rule, character.get("class") or default_class)
     cs = {
         "race": character.get("race", "人类"),

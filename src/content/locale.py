@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.localization.policy import display_language
+
 _LINGUISTIC = frozenset({"aliases", "keywords", "skill_candidates", "prompt", "prompt_prose"})
 _DISPLAY = frozenset({"name", "title", "description", "label", "hint", "flavor"})
 _ALLOWED = _LINGUISTIC | _DISPLAY
@@ -18,7 +20,11 @@ def _base_locale(locale: str) -> str:
 
 
 def resolve_locale(locales: dict[str, dict[str, Any]], locale: str, default_locale: str = "zh-CN") -> dict[str, Any]:
-    candidates = [str(locale), _base_locale(locale), str(default_locale), _base_locale(default_locale)]
+    requested = display_language(_base_locale(locale))
+    candidates = [str(locale), requested] if requested == _base_locale(locale) else [requested]
+    if not requested.startswith("zh"):
+        candidates.append("en")
+    candidates.extend([str(default_locale), _base_locale(default_locale)])
     for candidate in candidates:
         value = locales.get(candidate)
         if isinstance(value, dict):

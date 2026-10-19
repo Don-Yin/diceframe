@@ -6,6 +6,7 @@ import logging
 import random
 from pathlib import Path
 from typing import Any
+from collections.abc import Callable
 
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
@@ -47,6 +48,10 @@ class GameFactory:
         self.registry = registry
         self.lorebook_store = lorebook_store
         self.worlds_dir = worlds_dir
+        self._defaults_provider: Callable[[], dict] = lambda: {}
+
+    def set_defaults_provider(self, provider: Callable[[], dict]) -> None:
+        self._defaults_provider = provider
 
     async def create_game(
         self, game_key: tuple, world_id: str, world_name: str,
@@ -55,6 +60,7 @@ class GameFactory:
         language: str = DEFAULT_LANGUAGE,
         fresh_instance: bool = False,
     ) -> GameInstance:
+        is_new = fresh_instance or self.registry.get(game_key) is None
         instance = GameInstance(game_key=game_key) if fresh_instance else self.registry.get_or_create(game_key)
         world_data = self.load_world_template(world_id, language)
         if world_data:
@@ -71,6 +77,10 @@ class GameFactory:
                 difficulty=difficulty,
                 language=normalize_language(language),
             )
+            if is_new:
+                from src.engine.game_preferences import apply
+                from src.game_preferences import validate_preferences
+                apply(instance, validate_preferences(self._defaults_provider()))
 
         if world_data:
             # Persist the canonical starter lore. Localized display text is

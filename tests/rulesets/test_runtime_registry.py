@@ -87,9 +87,10 @@ def test_missing_runtime_binding_resolves_to_legacy() -> None:
             "combat_resource_pools": False,
             "combat_scheduler": "",
             "narrative_turns": False,
-            "adventure_formats": (),
+            "adventure_formats": ("diceframe:adventure-graph-v2",),
         },
     }
+    assert metadata["capabilities"]["authoritative_intents"] is False
 
 
 def test_explicit_binding_uses_only_runtime_id_and_version() -> None:

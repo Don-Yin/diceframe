@@ -14,19 +14,30 @@ from src.webui.services._common import is_game_gm
 logger = logging.getLogger("trpg")
 
 
+class _NarrationBroadcaster:
+    """Plain narration callback with the optional public story capability."""
+
+    def __init__(self, pool, game_key: str):
+        self.pool = pool
+        self.game_key = game_key
+
+    async def __call__(self, text: str) -> None:
+        await self.pool.broadcast(self.game_key, {"type": "narration_delta", "text": text})
+
+    async def story_update(self, story: dict) -> None:
+        await self.pool.broadcast(self.game_key, {"type": "story_update", "story": story})
+
+
 def _narration_callbacks(request: web.Request, game_key: str):
     """把 Web SSE 广播适配为回合 service 使用的可选回调。"""
     pool = request.app.get("connection_pool")
     if pool is None:
         return None, None
 
-    async def on_delta(text: str) -> None:
-        await pool.broadcast(game_key, {"type": "narration_delta", "text": text})
-
     async def on_reset() -> None:
         await pool.broadcast(game_key, {"type": "narration_reset"})
 
-    return on_delta, on_reset
+    return _NarrationBroadcaster(pool, game_key), on_reset
 
 
 async def _broadcast_ruleset_change(

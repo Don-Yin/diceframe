@@ -29,6 +29,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+import hashlib
+import json
 from typing import Any, Literal
 
 from src.engine.world.contracts import canonical_id, validate_source_ref
@@ -43,6 +45,7 @@ CONTENT_KINDS = (
     # D&D ruleset catalog（§29）
     "monster", "npc_statblock", "item", "spell", "class_extension",
     "feature", "hazard", "trap", "encounter_profile", "reward",
+    "portrait_asset", "scene_image_asset",
 )
 
 
@@ -73,6 +76,8 @@ _CONTENT_KIND_SPECS: dict[str, ContentKindSpec] = {
     "class": ContentKindSpec("content_package", "lore-entry", "lorebook_entry", "lorebook"),
     "class_extension": ContentKindSpec("ruleset", "class-extension", "catalog", "ruleset"),
     "rule": ContentKindSpec("ruleset", "rule-v2", "catalog", "ruleset"),
+    "portrait_asset": ContentKindSpec("portrait", "avatar-ref", "avatar_upload", "portrait", cloneable=True),
+    "scene_image_asset": ContentKindSpec("scene_image", "scene-image-ref", "scene_image_upload", "scene_image", cloneable=True),
 }
 
 
@@ -371,10 +376,20 @@ class CommitPlan:
         }
 
 
+def commit_plan_digest(plan: CommitPlan) -> str:
+    """Stable token used to revalidate a preview before commit."""
+
+    payload = json.dumps(
+        plan.to_portable_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    )
+    return f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
+
+
 def build_commit_plan(
     drafts: Iterable[ContentDraft],
     *,
     existing: Iterable[ContentRef] = (),
+    available: Iterable[ContentRef] = (),
     duplicate_policy: Literal["update", "duplicate", "skip"] = "update",
 ) -> CommitPlan:
     """Build a stable plan with the explicit duplicate choice."""
@@ -383,6 +398,12 @@ def build_commit_plan(
         raise ValueError("duplicate_policy must be update, duplicate, or skip")
     draft_rows = tuple(drafts)
     existing_by_key = {ref.canonical(): ref for ref in existing}
+    known_refs = {ref.canonical() for ref in available}
+    known_refs.update(draft.ref.canonical() for draft in draft_rows)
+    unresolved = tuple(
+        ref for draft in draft_rows for ref in draft.references
+        if ref.canonical() not in known_refs
+    )
     operations: list[CommitOperation] = []
     for draft in draft_rows:
         old = existing_by_key.get(draft.ref.canonical())
@@ -397,6 +418,7 @@ def build_commit_plan(
     return CommitPlan(
         drafts=draft_rows,
         operations=tuple(operations),
+        unresolved_references=tuple(dict.fromkeys(unresolved)),
         duplicate_policy=duplicate_policy,
     )
 
@@ -469,6 +491,7 @@ __all__ = [
     "ContentDraft",
     "CommitOperation",
     "CommitPlan",
+    "commit_plan_digest",
     "ContentRef",
     "ContentRefChain",
     "ContentRefError",

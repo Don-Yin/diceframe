@@ -78,6 +78,8 @@ def list_runtime_tools(
                 "tool_ui": str(runtime.manifest.get("tool_ui") or "").strip(),
             })
             tools.append(item)
+            if 'agent_effect' in descriptor:
+                item['agent_effect'] = descriptor['agent_effect']
     return tools
 
 

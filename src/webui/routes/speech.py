@@ -24,6 +24,18 @@ async def api_test_speech(request: web.Request) -> web.Response:
     return await _synthesize(request)
 
 
+async def api_assistant_speech(request: web.Request) -> web.Response:
+    """Read DF Agent replies aloud with the configured TTS provider.
+
+    The agent is application-wide and owner-only, so this has no game
+    timeline to check against; owner authentication is the boundary.
+    """
+    denied = _require_owner(request)
+    if denied is not None:
+        return denied
+    return await _synthesize(request)
+
+
 async def api_speech_profiles(request: web.Request) -> web.Response:
     denied = _require_tts_admin(request)
     if denied is not None:
@@ -87,6 +99,12 @@ def _require_tts_admin(request: web.Request) -> web.Response | None:
     return None
 
 
+def _require_owner(request: web.Request) -> web.Response | None:
+    if not request.get("owner_authenticated", False) or not request.get("user_id"):
+        return web.json_response({"ok": False, "error": "Owner authentication required"}, status=401)
+    return None
+
+
 async def _synthesize(request: web.Request, game_key: str = "") -> web.Response:
     try:
         body = await request.json()
@@ -134,6 +152,7 @@ async def _synthesize(request: web.Request, game_key: str = "") -> web.Response:
 def register_speech(app: web.Application) -> None:
     app.router.add_get("/api/tts/voices", api_speech_voices)
     app.router.add_post("/api/tts/test", api_test_speech)
+    app.router.add_post("/api/assistant/speech", api_assistant_speech)
     app.router.add_get("/api/tts/profiles", api_speech_profiles)
     app.router.add_post("/api/tts/profiles", api_speech_profile_create)
     app.router.add_put("/api/tts/profiles/{profile_id}", api_speech_profile_update)

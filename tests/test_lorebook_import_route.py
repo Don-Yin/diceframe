@@ -9,12 +9,12 @@ from src.webui.routes.lorebooks import register_lorebooks
 
 class _Api:
     def __init__(self) -> None:
-        self.list_calls: list[tuple[str, str]] = []
+        self.list_calls: list[tuple[str, str, bool]] = []
 
-    def list_lorebooks(self, world_id="", game_key=""):
+    def list_lorebooks(self, world_id="", game_key="", include_all=False):
         # 路由必须把 world_id 与 game_key 都转发下去：当前游戏 / 角色范围的 Book
         # 否则永远不会出现在管理列表里。
-        self.list_calls.append((world_id, game_key))
+        self.list_calls.append((world_id, game_key, include_all))
         return {"books": [{"id": "world:w1", "name": "Demo", "primary": True, "scope": "world"}]}
 
     def preview_lorebook_import(self, payload):
@@ -36,7 +36,7 @@ async def test_lorebook_import_preview_and_commit_routes():
     api = _Api()
     async with TestClient(TestServer(_app(api))) as client:
         books = await client.get("/api/lorebooks?world_id=w1&game_key=web|room|gm")
-        assert api.list_calls == [("w1", "web|room|gm")]
+        assert api.list_calls == [("w1", "web|room|gm", False)]
         books_body = await books.json()
         preview = await client.post("/api/lorebooks/import/preview", json={"entries": []})
         preview_body = await preview.json()
@@ -52,6 +52,15 @@ async def test_lorebook_import_preview_and_commit_routes():
     assert preview_body["format"] == "sillytavern"
     assert committed.status == 200
     assert committed_body["book_id"] == "world:w1"
+
+
+@pytest.mark.asyncio
+async def test_lorebook_catalogue_scope_is_explicit():
+    api = _Api()
+    async with TestClient(TestServer(_app(api))) as client:
+        response = await client.get("/api/lorebooks?scope=all")
+    assert response.status == 200
+    assert api.list_calls == [("", "", True)]
 
 
 @pytest.mark.asyncio

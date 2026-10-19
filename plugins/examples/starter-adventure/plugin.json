@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "content_schema_version": 2,
+  "locale_schema_version": 1,
+  "default_locale": "en",
+  "id": "starter-adventure",
+  "name": "Lantern Harbor — Creator Starter",
+  "version": "1.0.0",
+  "plugin_type": "content-pack",
+  "content_profile": "adventure-module",
+  "content_delivery_mode": "catalog",
+  "description": "An original guided two-scene adventure, book and graph map. No automated combat or executable entrypoint.",
+  "license": "AGPL-3.0-only",
+  "config_schema": "config.schema.json",
+  "adventure_packages": [
+    "adventures/lantern-harbor"
+  ],
+  "capabilities": [
+    "content.world",
+    "content.map"
+  ],
+  "permissions": [
+    "content.read"
+  ],
+  "contributes": {
+    "world_templates": [
+      "content/worlds/*.json"
+    ],
+    "lorebooks": [
+      "content/lorebooks/*.json"
+    ],
+    "map_definitions": [
+      "maps/definitions/*.json"
+    ],
+    "map_locations": [
+      "maps/locations/*.json"
+    ]
+  },
+  "docs": "README.md"
+}

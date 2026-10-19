@@ -9,6 +9,7 @@ was at the top level. Reset clears it together with the other notes.
 from __future__ import annotations
 
 from typing import Any
+from src.engine import module_hooks
 
 from src.engine.module_state import (
     ModuleStateError, ModuleStateSpec, get_module_state, register_module_state,
@@ -98,3 +99,46 @@ def replace_scene(instance: Any, value: Any) -> None:
 
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)
 register_module_state(SPEC)
+
+
+_KINDS = {
+    module_hooks.NARRATIVE_SCENE: "scene", module_hooks.NARRATIVE_TIME: "game_time",
+    module_hooks.NARRATIVE_SUMMARY: "summary", module_hooks.NARRATIVE_KEY_FACTS: "key_facts",
+    module_hooks.NARRATIVE_CONFIRMED_ITEMS: "confirmed_items",
+}
+
+
+def _preflight(instance: Any, kind: str) -> None:
+    if kind == module_hooks.NARRATIVE_VIEW or kind in _KINDS:
+        require_writable(instance)
+
+
+def _read(instance: Any, kind: str) -> dict | None:
+    if kind == module_hooks.NARRATIVE_VIEW:
+        return get_module_state(instance, MODULE_NAME)
+    return None
+
+
+def _record(instance: Any, kind: str, value: Any) -> None:
+    field = _KINDS.get(kind)
+    if field is None:
+        return
+    require_writable(instance)
+    if field == "summary" and not isinstance(value, dict):
+        value = {}
+    elif field in {"key_facts", "confirmed_items"} and not isinstance(value, list):
+        value = []
+    elif field == "game_time" and not isinstance(value, str):
+        value = ""
+    get_module_state(instance, MODULE_NAME)[field] = value
+
+
+def _reset(instance: Any) -> None:
+    require_writable(instance)
+    get_module_state(instance, MODULE_NAME).update(fresh())
+
+
+module_hooks.register(module_hooks.STATE_WRITE_PREFLIGHT, MODULE_NAME, _preflight)
+module_hooks.register(module_hooks.STATE_READ, MODULE_NAME, _read)
+module_hooks.register(module_hooks.STATE_RECORD, MODULE_NAME, _record)
+module_hooks.register(module_hooks.INSTANCE_RESET, MODULE_NAME, _reset)

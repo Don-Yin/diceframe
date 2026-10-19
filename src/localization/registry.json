@@ -1,0 +1,7 @@
+{
+  "zh-CN": { "tier": "core", "status": "active", "endonym": "简体中文", "maintainers": [] },
+  "en": { "tier": "core", "status": "active", "endonym": "English", "maintainers": [] },
+  "ja": { "tier": "community", "status": "active", "endonym": "日本語", "maintainers": [] },
+  "de": { "tier": "community", "status": "active", "endonym": "Deutsch", "maintainers": [] },
+  "ru": { "tier": "community", "status": "active", "endonym": "Русский", "maintainers": [] }
+}

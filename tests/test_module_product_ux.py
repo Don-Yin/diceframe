@@ -3,7 +3,7 @@
 覆盖：
 
 ```text
-ModulesView 在线区块 → 只列 content-pack；installed / update_available 由服务端判定
+ModulesView 在线区块 → 只列 adventure-module / content-pack；installed / update_available 由服务端判定
 市场不可达            → ok=False + error_code（不是"空列表"）
 ModuleDetail 按钮     → 一律取服务端 guard 结果（actions/bound_games），与 enforce 同源
 HTTP                  → /api/modules/marketplace 不被 {module_id} 路由吞掉
@@ -19,6 +19,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from aiohttp import FormData
 from aiohttp.test_utils import TestClient, TestServer
 
 from src.engine import persistence
@@ -104,18 +105,20 @@ async def _persist_bound_save(env, *, target_id: str = "room-a") -> str:
 
 
 @pytest.mark.asyncio
-async def test_online_modules_list_only_content_packs(env) -> None:
+async def test_online_modules_list_only_supported_content_profiles(env) -> None:
     await env.api.import_module(_zip_payload(_module_files(catalog=True)))
     env.host.marketplace = _FakeMarketIndex([
         _market_item(MODULE_ID, version="1.0.0", latest={"version": "1.2.0"}),
         _market_item("other-module", latest={"version": "0.9.0"}),
+        _market_item("rules-content", content_profile="content-pack"),
+        _market_item("unknown-profile", content_profile="theme-module"),
         _market_item("some-tool", plugin_type="tool"),
     ])
 
     result = await env.api.list_module_marketplace()
 
     assert result["ok"] is True
-    assert [item["id"] for item in result["modules"]] == [MODULE_ID, "other-module"]
+    assert [item["id"] for item in result["modules"]] == [MODULE_ID, "other-module", "rules-content"]
     installed = result["modules"][0]
     assert installed["installed"] is True
     assert installed["installed_version"] == "1.0.0"
@@ -126,6 +129,21 @@ async def test_online_modules_list_only_content_packs(env) -> None:
     assert fresh["update_available"] is False
     assert fresh["adventure_count"] == 1
     assert fresh["ruleset_targets"] == ["core:dnd2024"]
+
+
+@pytest.mark.asyncio
+async def test_online_modules_filter_by_ruleset_and_profile(env) -> None:
+    env.host.marketplace = _FakeMarketIndex([
+        _market_item("dnd-module", ruleset_targets=["core:dnd2024"]),
+        _market_item("coc-module", ruleset_targets=["core:coc7"]),
+        _market_item("unscoped-content", content_profile="content-pack", ruleset_targets=[]),
+    ])
+
+    dnd = await env.api.list_module_marketplace(ruleset="dnd2024")
+    assert [item["id"] for item in dnd["modules"]] == ["dnd-module"]
+
+    coc = await env.api.list_module_marketplace(ruleset="coc")
+    assert [item["id"] for item in coc["modules"]] == ["coc-module"]
 
 
 @pytest.mark.asyncio
@@ -167,6 +185,29 @@ async def test_module_detail_actions_are_allowed_until_a_save_binds_it(env) -> N
     assert free["bound_games"] == []
     assert set(free["actions"]) == set(MODULE_ACTIONS)
     assert all(state["allowed"] for state in free["actions"].values())
+
+
+@pytest.mark.asyncio
+async def test_module_exposes_only_explicit_canonical_lorebook_sources(env) -> None:
+    await env.api.import_module(_zip_payload(_module_files(catalog=True)))
+    env.lorebook.create_lorebook({
+        "id": "module-book",
+        "name": "Castle Lore",
+        "source_kind": "module",
+        "source_id": MODULE_ID,
+    })
+    env.lorebook.create_lorebook({
+        "id": "world-book",
+        "name": "World Lore",
+        "source_kind": "world",
+        "source_id": "world-a",
+    })
+
+    listed = {item["id"]: item for item in env.api.list_modules()["modules"]}
+    assert listed[MODULE_ID]["lorebook_count"] == 1
+    detail = env.api.module_detail(MODULE_ID)["module"]
+    assert [book["id"] for book in detail["lorebooks"]] == ["module-book"]
+    assert env.api.module_lorebooks(MODULE_ID)["lorebooks"][0]["source_kind"] == "module"
 
     game_key = await _persist_bound_save(env)
 
@@ -312,3 +353,22 @@ async def test_module_detail_route_serves_guard_state(env) -> None:
     module = body["module"]
     assert [row["game_key"] for row in module["bound_games"]] == [game_key]
     assert module["actions"]["disable"]["allowed"] is False
+
+
+@pytest.mark.asyncio
+async def test_external_module_preview_is_review_only(env) -> None:
+    form = FormData()
+    form.add_field(
+        "file",
+        b'{"id":"foundry.keep","title":"Keep","esmodules":["boot.js"]}',
+        filename="module.json",
+        content_type="application/json",
+    )
+    async with TestClient(TestServer(_module_app(env.api))) as client:
+        response = await client.post("/api/modules/external/preview", data=form)
+        body = await response.json()
+
+    assert response.status == 200
+    assert body["format"] == "foundry"
+    assert body["review_required"] is True
+    assert body["auto_installable"] is False

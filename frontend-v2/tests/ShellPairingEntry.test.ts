@@ -15,13 +15,13 @@ function source(path: string): string {
 
 const appSource = source('src/App.vue')
 const settingsSource = source('src/features/admin/SettingsView.vue')
-const navigationStyles = source('src/styles/v2/navigation.css')
+const navigationStyles = source('src/styles/navigation.css')
 
 const headerActionsStart = appSource.indexOf('<div class="app-header-actions">')
 const headerActions = appSource.slice(headerActionsStart, appSource.indexOf('</header>'))
 const publicBranch = appSource.slice(
   appSource.indexOf('<RouterView v-if="fullscreen"'),
-  appSource.indexOf('<div v-else class="app-shell"'),
+  appSource.indexOf('<div v-else class="app-shell'),
 )
 
 describe('owner-only pairing entry in the app shell', () => {
@@ -42,6 +42,7 @@ describe('owner-only pairing entry in the app shell', () => {
     // fullscreen（publicRoute）分支只有主题按钮，没有任何配对入口。
     expect(publicBranch).not.toBe('')
     expect(publicBranch).not.toContain('DevicePairing')
+    expect(publicBranch).not.toContain('ExperienceNavigation')
     expect(appSource).toContain('const fullscreen = publicRoute')
   })
 

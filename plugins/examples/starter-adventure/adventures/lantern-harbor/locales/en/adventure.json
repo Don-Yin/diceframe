@@ -1,0 +1,14 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "adventure",
+    "id": "lantern-harbor"
+  },
+  "fields": {
+    "tutorial": {
+      "name": "Lantern Harbor",
+      "summary": "An original guided creator starter."
+    }
+  }
+}

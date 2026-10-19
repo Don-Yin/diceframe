@@ -1,3 +1,4 @@
+from src.engine.modules import checks
 """Public log responses must not expose snapshots or future internal fields."""
 
 from copy import deepcopy
@@ -6,13 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.game_state import GameState
 from src.webui.services import logs
 
 
 PUBLIC_FIELDS = frozenset({
     "round", "actions", "player_actions", "gm_response", "state_changes",
     "check_results", "swipes", "current_swipe", "timestamp",
-    "story_recaps", "scene_image",
+    "story_recaps", "scene_image", "story",
 })
 
 
@@ -109,7 +111,7 @@ def test_gm_log_retains_complete_entries_without_mutating_source(log_context):
     assert result["total"] == 2 and result["page"] == 1 and result["total_pages"] == 1
     # 展示层附加信息随日志返回（无揭示记录、默认自动模式）。
     assert result["check_reveals"] == {}
-    assert result["dice_reveal_mode"] == "click"
+    assert result["dice_reveal_mode"] == "auto"
     result["log"][0]["pre_world_state"]["facts"].clear()
     assert instance.log == before
 
@@ -211,3 +213,22 @@ def test_public_log_strips_gm_written_scene_image_prompts(log_context):
     assert "lich" not in json.dumps(public)
     assert all("lich" in entry["scene_image"]["prompt"] for entry in gm["log"])
     assert instance.log[0]["scene_image"]["prompt"] == "the hidden lich lair beneath the vault"
+
+
+def test_log_projection_keeps_reveal_marker_for_visible_current_round_checks(log_context):
+    dependencies, instance = log_context
+    instance.log[0]["check_results"] = [{"check_id": "history-check", "roll": 40}]
+    checks.replace_last_checks(instance, [{'check_id': 'current-check', 'roll': 60}])
+    checks.replace_round_checks_prepared(instance, True)
+    instance.state = GameState.ACTIVE_JUDGMENT
+    instance.modules["check_reveals"] = {
+        "schema_version": 1,
+        "records": {
+            "history-check": {"by": "gm", "at": "2026-09-23T12:01:00Z"},
+            "current-check": {"by": "gm", "at": "2026-09-23T12:02:00Z"},
+        },
+    }
+
+    result = logs.get_log(dependencies, "web|room|bot")
+
+    assert set(result["check_reveals"]) == {"history-check", "current-check"}

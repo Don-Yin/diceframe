@@ -2,14 +2,27 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
+import inspect
 from aiohttp import web
 
-from src.webui.routes._common import _get_api
+from src.webui.routes._common import _get_api, require_content_owner
 
 
 async def api_lorebooks(request: web.Request) -> web.Response:
-    return web.json_response(_get_api(request).list_lorebooks(
-        request.query.get("world_id", ""), request.query.get("game_key", ""),
+    world_id = request.query.get("world_id", "")
+    game_key = request.query.get("game_key", "")
+    include_all = request.query.get("scope", "") == "all" or request.query.get("include_all", "") in {"1", "true", "yes"}
+    api = _get_api(request)
+    if include_all:
+        return web.json_response(api.list_lorebooks(world_id, game_key, include_all=True))
+    return web.json_response(api.list_lorebooks(world_id, game_key))
+
+
+async def api_lorebook_usage(request: web.Request) -> web.Response:
+    if (denied := require_content_owner(request)) is not None:
+        return denied
+    return web.json_response(_get_api(request).lorebook_usage_summary(
+        request.query.get("game_key", ""), request.query.get("viewer", "gm"),
     ))
 
 
@@ -35,6 +48,23 @@ def _json_safe(value):
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
     return value
+
+
+def _commit_lorebook_import(api, payload, binding, book_id, plan_digest, duplicate_policy):
+    """Call the import facade while keeping older lightweight adapters usable."""
+    method = api.commit_lorebook_import
+    try:
+        parameters = inspect.signature(method).parameters.values()
+    except (TypeError, ValueError):
+        parameters = ()
+    accepts_kwargs = any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters)
+    names = {parameter.name for parameter in parameters}
+    kwargs = {}
+    if accepts_kwargs or "plan_digest" in names:
+        kwargs["plan_digest"] = plan_digest
+    if accepts_kwargs or "duplicate_policy" in names:
+        kwargs["duplicate_policy"] = duplicate_policy
+    return method(payload, binding, book_id, **kwargs)
 
 
 async def api_lorebook_create(request: web.Request) -> web.Response:
@@ -109,7 +139,7 @@ async def api_lorebook_import_commit(request: web.Request) -> web.Response:
     body = await request.json()
     if not isinstance(body, dict) or not isinstance(body.get("payload"), dict):
         return web.json_response({"ok": False, "error": "payload must be an object"}, status=400)
-    if "plan_digest" in body:
+    if "plan_digest" in body and "duplicate_policy" not in body:
         planned = _json_safe(_get_api(request).commit_lorebook_plan(body))
         if planned.get("ok"):
             return web.json_response(planned)
@@ -120,8 +150,9 @@ async def api_lorebook_import_commit(request: web.Request) -> web.Response:
             "ok": False, "error_code": "PLAN_DIGEST_REQUIRED",
             "error": "source, external_id and decision need a previewed plan_digest",
         }, status=400)
-    result = _get_api(request).commit_lorebook_import(
-        body["payload"], body.get("binding"), body.get("book_id"),
+    result = _commit_lorebook_import(
+        _get_api(request), body["payload"], body.get("binding"), body.get("book_id"),
+        str(body.get("plan_digest") or ""), str(body.get("duplicate_policy") or "update"),
     )
     if result.get("error_code") == "LOREBOOK_IDENTITY_CONFLICT":
         return web.json_response(result, status=409)
@@ -196,6 +227,7 @@ async def api_lorebook_activation_preview(request: web.Request) -> web.Response:
 
 def register_lorebooks(app: web.Application) -> None:
     app.router.add_get("/api/lorebooks", api_lorebooks)
+    app.router.add_get("/api/lorebooks/usage", api_lorebook_usage)
     app.router.add_post("/api/lorebooks", api_lorebook_create)
     app.router.add_put("/api/lorebooks/{book_id}", api_lorebook_update)
     app.router.add_delete("/api/lorebooks/{book_id}", api_lorebook_delete)

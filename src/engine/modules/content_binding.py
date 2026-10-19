@@ -74,6 +74,54 @@ def book_refs(instance: Any) -> list[dict[str, Any]]:
     return deepcopy(list(_state(instance).get("book_refs") or []))
 
 
+def copy_for_new_game(candidate: Any, source: Any) -> None:
+    """Carry explicit canonical selections, never another game's binding rows."""
+    require_writable(source)
+    require_writable(candidate)
+    ref = world_ref(source)
+    if ref:
+        set_world_ref(candidate, ref)
+    replace_book_refs(candidate, book_refs(source))
+    if _state(source).get('book_selection') == 'explicit':
+        select_books_explicitly(candidate)
+
+
+def select_books_explicitly(instance: Any) -> None:
+    """Opt out of automatic world/global inheritance, including an empty set.
+
+    Optional v1 extension: saves without this marker retain inherited books.
+    Actual binding rows and per-character visibility remain Lorebook-owned.
+    """
+    _state(instance)["book_selection"] = "explicit"
+
+
+def restore_snapshot(instance: Any, value: Any, *, present: bool) -> None:
+    """Restore a previously captured slot while its caller holds the run fence."""
+    modules = getattr(instance, "modules", None)
+    if not isinstance(modules, dict):
+        raise ModuleStateError("instance has no module state container")
+    if present:
+        modules[MODULE_NAME] = deepcopy(value)
+    else:
+        modules.pop(MODULE_NAME, None)
+
+
+def replace_book_refs(instance: Any, refs: list[dict[str, Any]]) -> None:
+    """Replace this run's explicit Book refs through the canonical parser."""
+
+    if not isinstance(refs, list):
+        raise ContentRefError("content binding book_refs must be a list")
+    parsed_refs = []
+    for ref in refs:
+        parsed = parse_content_ref(ref, default_source="world:unknown")
+        if parsed.kind != "lorebook":
+            raise ContentRefError("content binding book_refs must have kind 'lorebook'")
+        value = parsed.to_portable_dict()
+        if value not in parsed_refs:
+            parsed_refs.append(value)
+    _state(instance)["book_refs"] = parsed_refs
+
+
 def add_book_ref(instance: Any, ref: dict[str, Any]) -> None:
     require_writable(instance)
     parsed = parse_content_ref(ref, default_source="world:unknown")
@@ -104,5 +152,8 @@ __all__ = [
     "fresh",
     "require_writable",
     "set_world_ref",
+    "select_books_explicitly",
+    "replace_book_refs",
+    "restore_snapshot",
     "world_ref",
 ]

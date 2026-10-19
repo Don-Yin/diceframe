@@ -9,10 +9,9 @@ function escapeRegExp(s:string):string{
 }
 
 const LIST_RE=/^([\-•*]|\d+[.、]|[一二三四五六七八九十]+[、.])\s*/
-const CUE_RE=/^(?:随后|接着|与此同时|同时|忽然|突然|此时|检定|判定|结果|线索|任务|状态|奖励|代价|获得|失去|消耗|HP|生命|金币|经验|NPC|敌人|门|房间|then|next|meanwhile|suddenly|now|check|result|clue|quest|status|reward|cost|gain|lose|spend|life|gold|xp|enemy|door|room)/i
 const SPLIT_CUE='随后|接着|与此同时|同时|忽然|突然|此时|检定|判定|结果|线索|任务|状态|奖励|代价|获得|失去|消耗|HP|生命|金币|经验|NPC|敌人|then|next|meanwhile|suddenly|now|check|result|clue|quest|status|reward|cost|gain|lose|spend|life|gold|xp|enemy'
 
-function splitParagraphs(text:string):string[]{
+export function splitNarrationParagraphs(text:string):string[]{
   const source=String(text||'').replace(/\r\n/g,'\n').trim()
   if(!source)return []
   const blocks=source.split(/\n\s*\n/).map(s=>s.trim()).filter(Boolean)
@@ -20,9 +19,9 @@ function splitParagraphs(text:string):string[]{
   for(const block of blocks){
     const normalized=block.replace(new RegExp('([。！？；]|[.!?;])\\s*(?=(?:'+SPLIT_CUE+'))','gi'),'$1\n')
     const lines=normalized.split(/\n+/).map(s=>s.trim()).filter(Boolean)
-    const shouldSplit=lines.length>1&&(lines.some(line=>LIST_RE.test(line)||CUE_RE.test(line))||lines.length>=3||lines.every(line=>line.length<=90))
-    if(shouldSplit)out.push(...lines)
-    else out.push(lines.join('\n'))
+    // Explicit line breaks remain paragraph boundaries regardless of length.
+    // Otherwise pre-wrap displays later lines without their own first-line indent.
+    out.push(...lines)
   }
   return out
 }
@@ -163,7 +162,7 @@ export function parseGMText(text:string,lore?:LoreKeywords):GMBlock{
   let narration=extracted.narration;let tagBlock=''
   const dash=narration.indexOf('---')
   if(dash>=0){tagBlock=narration.substring(dash+3).trim();narration=narration.substring(0,dash)}
-  const paragraphs=splitParagraphs(narration).map(p=>highlightKeywords(p,lore))
+  const paragraphs=splitNarrationParagraphs(narration).map(p=>highlightKeywords(p,lore))
   const states=extracted.states.map(s=>({title:s.title,cls:s.cls,body:highlightKeywords(s.body,lore)}))
   return {paragraphs,states,tags:formatTagLine(tagBlock)}
 }

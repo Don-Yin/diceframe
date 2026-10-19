@@ -15,6 +15,10 @@ resolves intents outside the narrative log.  The flag belongs to the run, like
 the log: a new run (restart / reset) starts with no seat having acted, and a
 removed seat drops its flag.  It is monotonic within a run (a historical
 rewrite does not clear it), which errs on the side of the GM.
+
+The core flow reaches this module only through ``module_hooks`` (``seat.*``
+and the instance reset points).  Without the module no seat is locked, which
+is the behaviour before the seat lock existed (#480).
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from src.engine import module_hooks
 from src.engine.module_state import (
     ModuleStateError, ModuleStateSpec, get_module_state, register_module_state,
 )
@@ -110,5 +115,23 @@ def reset(instance: Any) -> None:
     get_module_state(instance, MODULE_NAME)["acted_seats"] = []
 
 
+def seat_acted(instance: Any, user_id: str, source: str) -> None:
+    """``seat.acted``: a declared action counts only when played for its player."""
+    if user_id not in getattr(instance, "players", {}):
+        return
+    if source == module_hooks.SEAT_SOURCE_ACTION:
+        from src.engine.player_control import get_control
+
+        if not plays_for_its_player(get_control(instance, user_id)):
+            return
+    mark_acted(instance, user_id)
+
+
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)
 register_module_state(SPEC)
+module_hooks.register(module_hooks.SEAT_PREFLIGHT, MODULE_NAME, require_writable)
+module_hooks.register(module_hooks.SEAT_ACTED, MODULE_NAME, seat_acted)
+module_hooks.register(module_hooks.SEAT_FORGOTTEN, MODULE_NAME, forget_seat)
+module_hooks.register(module_hooks.SEAT_HAS_ACTED, MODULE_NAME, has_acted)
+module_hooks.register(module_hooks.INSTANCE_RESET_PREFLIGHT, MODULE_NAME, require_writable)
+module_hooks.register(module_hooks.INSTANCE_RESET, MODULE_NAME, reset)

@@ -25,6 +25,9 @@ import {
   type IdentityField, type RuleAttr,
 } from '@/utils/ruleSchema'
 import { currencyAmountToInputText, currencyEditableUnitLabel, currencyInputStep, parseCurrencyInput } from '@/utils/currency'
+import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
+import { characterJourneyCopy } from '@/features/characters/copy'
+import { playContextQuery } from '@/navigation/appNavigation'
 
 interface CharacterData extends CharacterListResponse { cards: CharacterCard[] }
 interface ResourceEdit { current: number; max: number }
@@ -100,10 +103,21 @@ interface UpdateCharacterPayload extends JsonObject {
 const toast = useToast()
 const { confirm } = useConfirm()
 const { locale, t } = useLocale()
+const journeyCopy = computed(() => characterJourneyCopy(String(locale.value)))
+const playQuery = computed(() => playContextQuery(route.query, game.value) || { game: game.value })
 
-const game = ref(readCurrentGame())
+const route = useRoute()
+const routeGame = typeof route.query.game === 'string' ? route.query.game.trim() : ''
+const game = ref(routeGame || readCurrentGame())
+const activePane = ref<'library' | 'current'>(route.query.pane === 'current' ? 'current' : 'library')
+const currentError = ref('')
+const libraryError = ref('')
+const libraryLoading = ref(false)
+const currentLoading = ref(false)
+let loadSequence = 0
 const data = ref<CharacterData | null>(null)
 const error = ref('')
+const characterSaveError = ref('')
 const busy = ref(false)
 const edit = ref<CharacterEditForm | null>(null)
 const editLevelUp = ref<LevelUpState | null>(null)
@@ -135,6 +149,12 @@ const ruleAttrsTotal = ref(60)
 const ruleId = ref('')
 const ruleDetail = ref<{ skill_pool?: Array<string | SkillSpec>; skills?: Array<string | SkillSpec> } | null>(null)
 const ruleSchemaLoading = ref(false)
+const canCreateCard = computed(() => Boolean(ruleId.value && ruleDetail.value && !ruleSchemaLoading.value && !currentLoading.value && !currentError.value))
+let ruleSchemaSequence = 0
+const ruleOptions = computed<RuleSummary[]>(() => {
+  if (!game.value || !ruleMeta.value.rule_id || rules.value.some(rule => rule.rule_id === ruleMeta.value.rule_id)) return rules.value
+  return [{ rule_id: String(ruleMeta.value.rule_id), rule_name: String(ruleMeta.value.rule_name || ruleMeta.value.rule_id) }, ...rules.value]
+})
 
 const skillPool = computed<Array<string | SkillSpec>>(() => {
   const detail = ruleDetail.value || {}
@@ -146,6 +166,7 @@ const editRuleAttrs = computed<RuleAttr[]>(() => {
   const attrs = edit.value.attributes || {}
   return Object.keys(attrs).map(key => ({ key, name: key, min: 0, max: Math.max(100, Number(attrs[key]) || 100) }))
 })
+const damageDiceEnabled = computed(() => ruleMeta.value.mechanics === 'dnd5e_core')
 
 function errorMessage(err: unknown): string { return err instanceof Error ? err.message : String(err || t('operationFailed')) }
 function toSkillList(input: CharacterSheet['skills']): CharacterSkill[] {
@@ -240,12 +261,21 @@ function hpPercent(player: import('@/api/types').Player): number {
 }
 
 watch([ruleId, locale], async ([id]) => {
-  if (!id) { ruleDetail.value = null; return }
+  if (!id) {
+    ruleSchemaSequence++
+    ruleDetail.value = null
+    ruleSchemaLoading.value = false
+    return
+  }
+  const schemaGame = game.value
+  const sequence = ++ruleSchemaSequence
+  ruleDetail.value = null
   ruleSchemaLoading.value = true
   try {
     const schema = await api<CharacterSchemaResponse>(
       `/rules/${encodeURIComponent(String(id))}/character-schema?language=${encodeURIComponent(String(locale.value))}`,
     )
+    if (schemaGame !== game.value || sequence !== ruleSchemaSequence) return
     if (!schema.ok) throw new Error(schema.error || t('ruleLoadFailed'))
     if (!game.value) {
       ruleMeta.value = schema.rule_meta || {}
@@ -254,40 +284,70 @@ watch([ruleId, locale], async ([id]) => {
     }
     ruleDetail.value = { skill_pool: schema.skill_pool || [] }
   } catch (e: unknown) {
+    if (schemaGame !== game.value || sequence !== ruleSchemaSequence) return
     ruleDetail.value = null
     error.value = errorMessage(e)
-  } finally { ruleSchemaLoading.value = false }
+  } finally {
+    if (sequence === ruleSchemaSequence) ruleSchemaLoading.value = false
+  }
 })
 
 async function load() {
-  error.value = ''; data.value = null
-  try {
-    if (game.value) {
-      const [chars, cards, availableRules] = await Promise.all([
-        api<CharacterListResponse>(`/games/${encodeURIComponent(game.value)}/characters`),
-        api<CharacterCardsResponse>('/character-cards'),
-        api<RulesResponse>('/rules'),
-      ])
-      rules.value = availableRules.rules || []
-      data.value = { ...chars, cards: cards.cards || [] }
-      ruleMeta.value = chars.rule_meta || {}
-      ruleAttrs.value = chars.rule_attrs || []
-      ruleAttrsTotal.value = chars.rule_attrs_total || 60
+  const requestedGame = game.value
+  const sequence = ++loadSequence
+  error.value = ''
+  currentError.value = ''
+  libraryError.value = ''
+  data.value = { players: [], cards: [] }
+  libraryLoading.value = true
+  currentLoading.value = Boolean(requestedGame)
+  ruleSchemaSequence++
+  ruleId.value = ''
+  ruleMeta.value = {}
+  ruleAttrs.value = []
+  ruleAttrsTotal.value = 60
+  ruleDetail.value = null
+
+  const cardsRequest = api<CharacterCardsResponse>('/character-cards')
+  const rulesRequest = api<RulesResponse>('/rules')
+  const gameRequest = requestedGame
+    ? api<CharacterListResponse>(`/games/${encodeURIComponent(requestedGame)}/characters`)
+    : Promise.resolve(null)
+  const isCurrent = () => sequence === loadSequence && requestedGame === game.value
+  void cardsRequest.then(result => {
+    if (!isCurrent()) return
+    data.value!.cards = result.cards || []
+    libraryLoading.value = false
+  }).catch(reason => {
+    if (!isCurrent()) return
+    libraryLoading.value = false
+    libraryError.value = errorMessage(reason)
+    error.value = errorMessage(reason)
+  })
+  void rulesRequest.then(result => {
+    if (!isCurrent()) return
+    rules.value = result.rules || []
+    if (!requestedGame && (!ruleId.value || !rules.value.some(rule => rule.rule_id === ruleId.value))) ruleId.value = rules.value[0]?.rule_id || ''
+  }).catch(reason => {
+    if (isCurrent() && !error.value) error.value = errorMessage(reason)
+  })
+  void gameRequest.then(result => {
+    if (!isCurrent()) return
+    currentLoading.value = false
+    if (result) {
+      data.value = { ...result, cards: data.value?.cards || [] }
+      ruleMeta.value = result.rule_meta || {}
+      ruleAttrs.value = result.rule_attrs || []
+      ruleAttrsTotal.value = result.rule_attrs_total || 60
       ruleId.value = String(ruleMeta.value.rule_id || '')
-    } else {
-      const [cards, availableRules] = await Promise.all([
-        api<CharacterCardsResponse>('/character-cards'),
-        api<RulesResponse>('/rules'),
-      ])
-      rules.value = availableRules.rules || []
-      data.value = { players: [], cards: cards.cards || [] }
-      if (!ruleId.value || !rules.value.some(rule => rule.rule_id === ruleId.value)) {
-        ruleId.value = rules.value[0]?.rule_id || ''
-      }
     }
-  } catch (e: unknown) { error.value = errorMessage(e) }
+  }).catch(reason => {
+    if (!isCurrent()) return
+    currentLoading.value = false
+    if (requestedGame) currentError.value = errorMessage(reason)
+  })
+  await Promise.allSettled([cardsRequest, rulesRequest, gameRequest])
 }
-const route = useRoute()
 const tavernInput = ref<HTMLInputElement | null>(null)
 const diceframeInput = ref<HTMLInputElement | null>(null)
 const tavernImportOpen = ref(false)
@@ -400,9 +460,37 @@ async function deleteSelectedCards() {
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
 }
 
+function queryString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+watch(() => route.query.game, rawGame => {
+  const nextGame = queryString(rawGame)
+  if (nextGame === game.value) return
+  game.value = nextGame
+  ruleId.value = ''
+  edit.value = null
+  editCard.value = null
+  editNpcPortrait.value = null
+  editLevelUp.value = null
+  advancementCard.value = null
+  advancementPlayer.value = null
+  professionalEdit.value = null
+  showWizard.value = false
+  void load()
+})
+
+watch(() => route.query.pane, rawPane => {
+  if (rawPane === 'current' || rawPane === 'library') activePane.value = rawPane
+})
+
 onMounted(async () => {
+  if (route.query.edit_user) activePane.value = 'current'
+  const mountedGame = game.value
+  const mountedUser = queryString(route.query.edit_user)
   await load()
-  const uid = route.query.edit_user ? String(route.query.edit_user) : ''
+  if (mountedGame !== game.value) return
+  const uid = mountedUser
   if (uid && data.value?.players?.length) {
     const p = data.value.players.find(x => x.user_id === uid)
     if (p) openPlayerEditor(p)
@@ -436,6 +524,7 @@ async function onImportTavern(e: Event) {
 }
 
 function openEdit(p: import('@/api/types').Player) {
+  characterSaveError.value = ''
   const cs = p.character_sheet || {}
   const fields = identitySchema(ruleMeta.value).filter((f: IdentityField) => f.key !== 'background')
   const attrs: Record<string, number> = { ...(cs.attributes || {}) }
@@ -491,6 +580,7 @@ const autoHpValue = computed(() => calcAutoHp(edit.value?.attributes || {}, rule
 async function saveCharacter() {
   const e = edit.value
   if (!e) return
+  characterSaveError.value = ''
   const cs = e.player.character_sheet || {}
   busy.value = true
   try {
@@ -517,21 +607,36 @@ async function saveCharacter() {
     e.fields.forEach((f: IdentityField) => setIdentityUpdate(updates, f, e.identityValues[f.key]))
     updates.identity = updates.identity || {}
     updates.identity.background = e.background
-    updates.equipment = e.equipment.filter(it => String(it.name || '').trim()).map(it => ({ name: String(it.name).trim(), type: it.type || 'weapon', damage: Number(it.damage) || 0, slot: it.slot || 'main_hand', quality: it.quality || 'common' }))
+    updates.equipment = e.equipment.filter(it => String(it.name || '').trim()).map(it => {
+      const { damage_dice: _damageDice, ...otherFields } = it
+      return {
+        ...otherFields,
+        name: String(it.name).trim(), type: it.type || 'weapon', damage: Number(it.damage) || 0,
+        ...(damageDiceEnabled.value && String(it.damage_dice || '').trim() ? { damage_dice: String(it.damage_dice).trim() } : {}),
+        slot: it.slot || 'main_hand', quality: it.quality || 'common',
+      }
+    })
     updates.inventory = e.inventory.filter(it => String(it.name || '').trim()).map(it => ({ name: String(it.name).trim(), qty: Number(it.qty) || 1, effect: it.effect || '' }))
     updates.key_items = parseLines(e.keyText, p => p.length >= 3 ? { name: p[0], category: p[1] || 'key_item', note: p[2] } : p.length >= 2 ? { name: p[0], category: p[1] || 'key_item' } : { name: p[0] || '', category: 'key_item' })
-    await api(`/games/${encodeURIComponent(game.value)}/character/${encodeURIComponent(e.user_id)}`, { method: 'PUT', body: JSON.stringify(updates) })
+    const result = await api<{ ok?: boolean; error?: string }>(`/games/${encodeURIComponent(game.value)}/character/${encodeURIComponent(e.user_id)}`, { method: 'PUT', body: JSON.stringify(updates) })
+    if (result?.ok === false) throw new Error(result.error || t('operationFailed'))
     edit.value = null
     await load()
     toast.success(t('characterSaved'))
-  } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
+  } catch (cause: unknown) {
+    characterSaveError.value = errorMessage(cause)
+    error.value = characterSaveError.value
+    toast.error(characterSaveError.value)
+  } finally { busy.value = false }
 }
 
 async function deleteCharacter(p: import('@/api/types').Player) {
+  const requestedGame = game.value
+  const requestedUser = p.user_id
   const ok = await confirm({ title: t('removeCharacterTitle'), content: t('removeCharacterContent', { name: p.character_name }), positiveText: t('removeCharacterAction'), type: 'warning' })
-  if (!ok) return
+  if (!ok || requestedGame !== game.value || requestedUser !== p.user_id) return
   try {
-    await api(`/games/${encodeURIComponent(game.value)}/character/${encodeURIComponent(p.user_id)}`, { method: 'DELETE' })
+    await api(`/games/${encodeURIComponent(requestedGame)}/character/${encodeURIComponent(requestedUser)}`, { method: 'DELETE' })
     await load()
     toast.success(t('removed'))
   } catch (e: unknown) { error.value = errorMessage(e) }
@@ -680,6 +785,7 @@ async function saveNpcPortrait() {
 }
 
 async function onWizardSubmit(c: CharacterSheet) {
+  if (!canCreateCard.value) return
   busy.value = true
   try {
     await api('/character-cards', {
@@ -699,28 +805,48 @@ async function onWizardSubmit(c: CharacterSheet) {
 
 <template>
   <section class="view archive-page characters-page">
-    <header class="view-title archive-hero">
-      <div>
-        <span class="section-kicker">{{ t('charactersKicker') }}</span>
-        <h1>{{ t('characterManagement') }}</h1>
-        <p v-if="game">{{ t('currentSave') }}: {{ game }}</p>
-        <p v-else class="muted">{{ t('noSaveSelectedHint') }}</p>
-      </div>
-      <div class="actions">
-        <label v-if="!game" class="standalone-rule-select">
-          <span>{{ t('characterCardRule') }}</span>
-          <select v-model="ruleId" :disabled="ruleSchemaLoading">
-            <option v-for="rule in rules" :key="rule.rule_id" :value="rule.rule_id">{{ ruleNameOf(rule) }}</option>
-          </select>
-        </label>
-        <button class="success" :disabled="!ruleId || ruleSchemaLoading" @click="showWizard = true">+ {{ t('newCharacterCard') }}</button>
-        <button @click="load">{{ t('refresh') }}</button>
-      </div>
-    </header>
+    <ContentPageHeader class="view-title archive-hero characters-page-heading" kicker="CHARACTER ROSTER" :title="t('characterManagement')" :description="journeyCopy.description">
+      <template #actions>
+        <div class="actions character-page-actions">
+          <template v-if="activePane === 'library'">
+          <label class="standalone-rule-select">
+            <span>{{ t('characterCardRule') }}</span>
+            <select v-model="ruleId" :disabled="Boolean(game) || ruleSchemaLoading || !rules.length">
+              <option v-for="rule in ruleOptions" :key="rule.rule_id" :value="rule.rule_id">{{ ruleNameOf(rule) }}</option>
+            </select>
+          </label>
+          <button data-testid="new-character-card" class="primary" :disabled="!canCreateCard" @click="showWizard = true">+ {{ t('newCharacterCard') }}</button>
+          <span v-if="!currentLoading && !ruleSchemaLoading && !canCreateCard" class="form-hint">{{ journeyCopy.creationUnavailable }}</span>
+          </template>
+          <button @click="load">{{ t('refresh') }}</button>
+        </div>
+      </template>
+    </ContentPageHeader>
 
-    <p v-if="error" class="error-banner">{{ error }}</p>
+    <p v-if="error" class="error-banner" role="alert">{{ error }}</p>
 
-    <section v-if="game" class="character-section current-character-section">
+    <nav class="character-collection-tabs" role="tablist" :aria-label="journeyCopy.collectionsLabel">
+      <button id="character-library-tab" type="button" role="tab" aria-controls="character-library-panel" :aria-selected="activePane === 'library'" :class="{ active: activePane === 'library' }" @click="activePane = 'library'">
+        {{ journeyCopy.libraryTab }}
+      </button>
+      <button id="character-current-tab" type="button" role="tab" aria-controls="character-current-panel" :aria-selected="activePane === 'current'" :class="{ active: activePane === 'current' }" @click="activePane = 'current'">
+        {{ journeyCopy.currentTab }}
+      </button>
+    </nav>
+
+    <section v-show="activePane === 'current'" id="character-current-panel" class="character-section current-character-section" role="tabpanel" aria-labelledby="character-current-tab">
+      <div v-if="!game" data-testid="characters-current-guide" class="character-current-guide">
+        <h2>{{ journeyCopy.chooseSave }}</h2>
+        <p class="muted">{{ journeyCopy.chooseSaveHint }}</p>
+        <RouterLink class="content-button" :to="{ name: 'overview' }">{{ journeyCopy.backToSaves }}</RouterLink>
+      </div>
+      <p v-else-if="currentError" data-testid="characters-current-error" class="error-banner" role="alert">{{ currentError }}</p>
+      <p v-if="currentLoading" role="status">{{ journeyCopy.loading }}</p>
+      <template v-if="game">
+      <div class="character-game-context">
+        <span class="muted">{{ t('currentSave') }}: <strong>{{ game }}</strong></span>
+        <RouterLink class="content-button" :to="{ name: 'play', query: playQuery }">{{ journeyCopy.returnToPlay }}</RouterLink>
+      </div>
       <header class="character-section-head"><h2>{{ t('currentGameCharacters') }}</h2><span>{{ data?.players?.length || 0 }}</span></header>
       <div class="current-character-grid">
       <article v-for="p in data?.players || []" :key="p.user_id" class="char-card current-character-card">
@@ -753,21 +879,22 @@ async function onWizardSubmit(c: CharacterSheet) {
           </div>
         </div>
         <div class="actions current-character-actions">
-          <button class="success" @click="openPlayerEditor(p)">{{ isProfessionalGame() ? (String(locale).startsWith('zh') ? '高级角色中心' : 'Character center') : t('edit') }}</button>
+          <button class="primary" @click="openPlayerEditor(p)">{{ isProfessionalGame() ? (String(locale).startsWith('zh') ? '高级角色中心' : 'Character center') : t('edit') }}</button>
           <button v-if="isProfessionalGame() && p.character_sheet && professionalLevel(p.character_sheet) < 20 && liveAdvancementRow(p.user_id)?.entitled" class="primary" @click="advancementPlayer = p">{{ String(locale).startsWith('zh') ? '职业升级' : 'Class advancement' }}</button>
           <button v-if="!isProfessionalGame() && levelUpPoints(p) > 0" class="primary" @click="openLevelUp(p)">{{ t('allocateAttributePointsWithCount', { points: levelUpPoints(p) }) }}</button>
           <button @click="saveToCard(p)">{{ t('saveToSharedLibrary') }}</button>
           <button class="danger" @click="deleteCharacter(p)">{{ t('remove') }}</button>
         </div>
       </article>
-      <p v-if="!data?.players?.length" class="muted">{{ t('noCharacters') }}</p>
+      <p v-if="!currentLoading && !currentError && !data?.players?.length" class="muted">{{ t('noCharacters') }}</p>
       </div>
+      </template>
     </section>
 
-    <section v-if="data?.npcs?.length" class="character-section npc-section">
-      <header class="character-section-head"><h2>{{ t('currentGameNpcs') }}</h2><span>{{ data.npcs.length }}</span></header>
+    <section v-if="activePane === 'current' && Boolean(game) && Boolean(data?.npcs?.length)" class="character-section npc-section">
+      <header class="character-section-head"><h2>{{ t('currentGameNpcs') }}</h2><span>{{ data?.npcs?.length || 0 }}</span></header>
       <div class="npc-strip">
-        <article v-for="n in data.npcs" :key="npcKey(n)" class="char-card npc-mini-card">
+        <article v-for="n in data?.npcs || []" :key="npcKey(n)" class="char-card npc-mini-card">
           <button type="button" class="portrait-edit-button" :title="t('clickToChangeAvatar')" @click="openNpcPortrait(n)">
             <PortraitImage v-if="n.portrait" :portrait="n.portrait" :rule-id="ruleId" :seed="npcKey(n)" :name="String(n.character_name || n.name || '')" :size="54" />
             <span v-else class="portrait-image npc-portrait-empty" aria-hidden="true">＋</span>
@@ -781,7 +908,7 @@ async function onWizardSubmit(c: CharacterSheet) {
       </div>
     </section>
 
-    <section class="character-section shared-character-section">
+    <section v-show="activePane === 'library'" id="character-library-panel" class="character-section shared-character-section" role="tabpanel" aria-labelledby="character-library-tab">
       <header class="character-section-head shared-character-head">
         <div><h2>{{ t('sharedCharacterLibrary') }}</h2><span>{{ data?.cards?.length || 0 }}</span></div>
       </header>
@@ -814,10 +941,10 @@ async function onWizardSubmit(c: CharacterSheet) {
       </template>
     </Modal>
       <div class="character-library-toolbar">
-        <input v-model="characterSearch" :placeholder="t('characterLibrarySearch')">
+        <input v-model="characterSearch" type="search" :placeholder="t('characterLibrarySearch')">
         <select v-model="characterSort"><option value="name">{{ t('characterSortName') }}</option><option value="rule">{{ t('characterSortRule') }}</option></select>
-        <div class="character-view-switch"><button :class="{ active: libraryView === 'grid' }" @click="libraryView = 'grid'">▦</button><button :class="{ active: libraryView === 'list' }" @click="libraryView = 'list'">☷</button></div>
-        <div class="actions character-import-actions"><button class="danger" :disabled="busy || !selectedCardIds.size" @click="exportSelected">{{ t('exportSelected') }}</button><button class="danger" :disabled="busy || !selectedCardIds.size" @click="deleteSelectedCards">{{ t('deleteSelectedCards') }}</button><button class="success" :disabled="busy" @click="diceframeInput?.click()">{{ t('importDiceframeCard') }}</button><button :disabled="busy" @click="openTavernImport">{{ t('importTavernCard') }}</button></div>
+        <div class="character-view-switch"><button type="button" :aria-label="journeyCopy.gridView" :class="{ active: libraryView === 'grid' }" @click="libraryView = 'grid'">▦</button><button type="button" :aria-label="journeyCopy.listView" :class="{ active: libraryView === 'list' }" @click="libraryView = 'list'">☷</button></div>
+        <div class="actions character-import-actions"><template v-if="selectedCardIds.size"><button :disabled="busy" @click="exportSelected">{{ t('exportSelected') }}</button><button class="danger" :disabled="busy" @click="deleteSelectedCards">{{ t('deleteSelectedCards') }}</button></template><button class="primary" :disabled="busy" @click="diceframeInput?.click()">{{ t('importDiceframeCard') }}</button><button :disabled="busy" @click="openTavernImport">{{ t('importTavernCard') }}</button></div>
       </div>
     <div class="card-grid character-library-grid" :class="`view-${libraryView}`">
       <article v-for="c in filteredCards" :key="c.card_id || c.id" class="char-card library-character-card">
@@ -835,17 +962,19 @@ async function onWizardSubmit(c: CharacterSheet) {
           </div>
         </div>
         <div class="actions">
-          <button v-if="isProfessionalCard(c) && professionalLevel(c) < 20" class="success" @click="advancementCard = c">{{ String(locale).startsWith('zh') ? '职业升级' : 'Level up' }}</button>
+          <button v-if="isProfessionalCard(c) && professionalLevel(c) < 20" class="primary" @click="advancementCard = c">{{ String(locale).startsWith('zh') ? '职业升级' : 'Level up' }}</button>
           <button @click="openCardEditor(c)">{{ isProfessionalCard(c) ? (String(locale).startsWith('zh') ? '高级角色中心' : 'Character center') : t('editCard') }}</button>
           <button @click="exportSingleCard(c)">{{ t('export') }}</button>
           <button class="danger" @click="deleteCard(c)">{{ t('delete') }}</button>
         </div>
       </article>
-      <p v-if="!filteredCards.length" class="muted">{{ data?.cards?.length ? t('characterLibraryNoMatches') : t('noSharedCards') }}</p>
+      <p v-if="libraryLoading" role="status">{{ journeyCopy.loading }}</p>
+      <p v-if="!libraryLoading && !libraryError && !filteredCards.length" class="muted">{{ data?.cards?.length ? t('characterLibraryNoMatches') : t('noSharedCards') }}</p>
     </div>
     </section>
 
     <Modal v-if="edit" :title="t('editCharacter')" @close="edit = null">
+      <p v-if="characterSaveError" class="error-banner" role="alert">{{ characterSaveError }}</p>
       <label>{{ t('characterName') }}<input v-model="edit.character_name"></label>
       <PortraitPicker v-model="edit.portrait" :rule-id="ruleId" :seed="edit.user_id" :name="edit.character_name" />
       <label v-for="f in edit.fields" :key="f.key">{{ identityLabel(f) }}<input v-model="edit.identityValues[f.key]"></label>
@@ -869,7 +998,7 @@ async function onWizardSubmit(c: CharacterSheet) {
       <label>{{ t('skills') }}</label>
       <SkillEditor v-model="edit.skills" :pool="skillPool" :meta="ruleMeta" />
       <label>{{ t('backgroundStory') }}<textarea rows="3" v-model="edit.background"></textarea></label>
-      <ItemEditor v-model:equipment="edit.equipment" v-model:inventory="edit.inventory" />
+      <ItemEditor v-model:equipment="edit.equipment" v-model:inventory="edit.inventory" :damage-dice-enabled="damageDiceEnabled" />
       <label>{{ t('keyItemsLineHelp') }}<textarea rows="3" v-model="edit.keyText"></textarea></label>
       <template #actions>
         <button @click="edit = null">{{ t('cancel') }}</button>

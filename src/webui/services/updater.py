@@ -29,6 +29,7 @@ from src.docker_launcher.contracts import (
     safe_extract_package as safe_extract_docker_package,
     validate_package_tree as validate_docker_package_tree,
 )
+from src.docker_launcher.data_versions import data_for_payload, runtime_for_data
 from src.version import __version__
 
 logger = logging.getLogger("trpg")
@@ -40,6 +41,7 @@ DEFAULT_PROBATION_SECONDS = 90
 _UPDATER_DIR_NAME = "_updater"
 _STATE_FILE_NAME = "state.json"
 _RESTART_SIGNAL_NAME = "restart_signal.json"
+_ROLLBACK_LAUNCHER_PREFIX = "launcher-rollback-"
 
 _ASSET_PATTERNS = {
     "source": re.compile(r"DiceFrame-v.+windows\.zip$", re.IGNORECASE),
@@ -319,7 +321,7 @@ class UpdaterService:
 
     def __init__(self, dependencies: UpdaterDependencies) -> None:
         self._data_dir = dependencies.data_dir.resolve()
-        self._dir = self._data_dir / _UPDATER_DIR_NAME
+        self._dir = runtime_for_data(self._data_dir, os.environ) or self._data_dir / _UPDATER_DIR_NAME
         self._dir.mkdir(parents=True, exist_ok=True)
         self._state_file = self._dir / _STATE_FILE_NAME
         self._restart_signal = self._dir / _RESTART_SIGNAL_NAME
@@ -362,10 +364,196 @@ class UpdaterService:
             **self._state,
             "current_version": __version__,
             "self_update": is_self_update_supported(self._root),
+            "rollback": self.get_rollback_status(),
         }
 
     def is_busy(self) -> bool:
         return self._state.get("state") in _ACTIVE_STATES
+
+    def _read_portable_pointer_dir(
+        self, install_root: Path, field: str,
+    ) -> Path | None:
+        pointer = self._dir / "current.json"
+        if not pointer.exists():
+            return None
+        try:
+            payload = json.loads(pointer.read_text(encoding="utf-8"))
+            relative = str(payload.get(field) or "")
+            versions = (install_root / "versions").resolve()
+            candidate = (install_root / relative).resolve()
+            if (
+                not relative
+                or not _path_within(candidate, versions)
+                or not (candidate / "app" / "web_server.py").is_file()
+                or not (candidate / "python" / "python.exe").is_file()
+            ):
+                return None
+            return candidate
+        except (OSError, ValueError, json.JSONDecodeError):
+            logger.warning("便携版当前版本指针无效", exc_info=True)
+            return None
+
+    @staticmethod
+    def _portable_payload_version(directory: Path) -> str:
+        version_file = directory / "app" / "src" / "version.py"
+        try:
+            text = version_file.read_text(encoding="utf-8")
+            match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', text)
+            if match:
+                return match.group(1).strip().lstrip("vV")
+        except OSError:
+            pass
+        return directory.name.strip().lstrip("vV")
+
+    def _read_docker_pointer_dir(self, runtime_root: Path, field: str) -> Path | None:
+        pointer = runtime_root / "current.json"
+        if not pointer.exists():
+            return None
+        try:
+            payload = json.loads(pointer.read_text(encoding="utf-8"))
+            relative = str(payload.get(field) or "")
+            versions = (runtime_root / "docker-versions").resolve()
+            candidate = (runtime_root / relative).resolve()
+            if not relative or not _path_within(candidate, versions):
+                return None
+            return candidate
+        except (OSError, ValueError, json.JSONDecodeError):
+            logger.warning("Docker 当前版本指针无效", exc_info=True)
+            return None
+
+    def _rollback_target(self) -> tuple[str, Path, str] | None:
+        support = is_self_update_supported(self._root)
+        if not support.get("supported"):
+            return None
+        mode = str(support.get("mode") or "")
+        if mode == "portable":
+            install_root_text = os.getenv("TRPG_INSTALL_ROOT", "").strip()
+            if not install_root_text:
+                return None
+            install_root = Path(install_root_text).resolve()
+            current = self._read_portable_pointer_dir(install_root, "relative_dir")
+            target = self._read_portable_pointer_dir(install_root, "previous_relative_dir")
+            if not current or not target or current == target:
+                return None
+            version = self._portable_payload_version(target)
+            try:
+                _safe_version_dir(version)
+            except ValueError:
+                return None
+            return mode, target, version
+        if mode == "docker":
+            runtime_text = os.getenv("TRPG_DOCKER_RUNTIME_ROOT", "").strip()
+            if not runtime_text:
+                return None
+            runtime_root = Path(runtime_text).resolve()
+            current = self._read_docker_pointer_dir(runtime_root, "relative_dir")
+            target = self._read_docker_pointer_dir(runtime_root, "previous_relative_dir")
+            if not current or not target or current == target:
+                return None
+            try:
+                manifest = validate_docker_package_tree(
+                    target,
+                    platform=DOCKER_PLATFORM,
+                    python_abi=DOCKER_PYTHON_ABI,
+                    runtime_api=DOCKER_RUNTIME_API,
+                )
+                if os.getenv("TRPG_DOCKER_DATA_HOME"):
+                    data_for_payload(runtime_root, Path(os.environ["TRPG_DOCKER_DATA_HOME"]).resolve(), target)
+            except (OSError, ValueError):
+                logger.warning("Docker 上一版本包无效", exc_info=True)
+                return None
+            return mode, target, str(manifest["version"])
+        return None
+
+    def get_rollback_status(self) -> dict[str, Any]:
+        support = is_self_update_supported(self._root)
+        mode = str(support.get("mode") or "")
+        if mode not in {"portable", "docker"}:
+            return {
+                "available": False,
+                "mode": mode,
+                "target_version": "",
+                "reason": "当前安装方式没有可由 launcher 切换的上一版本",
+            }
+        target = self._rollback_target()
+        if target is None:
+            return {
+                "available": False,
+                "mode": mode,
+                "target_version": "",
+                "reason": "没有可用的上一版本程序副本",
+            }
+        return {
+            "available": True,
+            "mode": target[0],
+            "target_version": target[2],
+            "reason": "",
+            "restores_data": target[0] == "docker" and bool(os.getenv("TRPG_DOCKER_DATA_HOME")),
+        }
+
+    async def rollback_update(self) -> dict[str, Any]:
+        if self.is_busy():
+            return {"ok": False, "error": "已有更新任务在进行中"}
+        target = self._rollback_target()
+        if target is None:
+            return {"ok": False, "error": self.get_rollback_status()["reason"]}
+
+        mode, target_dir, version = target
+        if mode == "docker" and os.getenv("TRPG_DOCKER_DATA_HOME"):
+            from src.compat.program_rollback_access import prepare_rollback_access
+
+            runtime = Path(os.environ["TRPG_DOCKER_RUNTIME_ROOT"]).resolve()
+            home = Path(os.environ["TRPG_DOCKER_DATA_HOME"]).resolve()
+            target_data = data_for_payload(runtime, home, target_dir)
+            try:
+                await asyncio.to_thread(prepare_rollback_access, target_data)
+            except (OSError, ValueError) as exc:
+                return {"ok": False, "error": f"无法安全准备回退数据：{exc}"}
+        signal: dict[str, Any] = {
+            "schema": 1,
+            "operation": "rollback",
+            "mode": mode,
+            "expected_version": version,
+            "candidate_dir": str(target_dir),
+            "relative_dir": target_dir.relative_to(
+                Path(os.getenv("TRPG_DOCKER_RUNTIME_ROOT", "")).resolve()
+                if mode == "docker"
+                else Path(os.getenv("TRPG_INSTALL_ROOT", "")).resolve()
+            ).as_posix(),
+            "probation_seconds": DEFAULT_PROBATION_SECONDS,
+            "created_at": int(time.time()),
+        }
+        if mode == "portable":
+            install_root = Path(os.getenv("TRPG_INSTALL_ROOT", "")).resolve()
+            launcher = install_root / "DiceFrame.exe"
+            if not launcher.is_file():
+                return {"ok": False, "error": "当前便携版启动器不存在，无法安全回退"}
+            staged_launcher = self._dir / (
+                _ROLLBACK_LAUNCHER_PREFIX + _safe_version_dir(version) + ".exe"
+            )
+            try:
+                shutil.copy2(launcher, staged_launcher)
+            except OSError as exc:
+                return {"ok": False, "error": f"无法准备回退启动器：{exc}"}
+            signal["launcher_path"] = str(staged_launcher)
+
+        self._state.update(
+            state="restarting",
+            operation="rollback",
+            version=version,
+            kind=mode,
+            candidate_dir=str(target_dir),
+            error="",
+            restart_needed=False,
+        )
+        self._save_state()
+        _atomic_json(self._restart_signal, signal)
+        return {
+            "ok": True,
+            "state": "restarting",
+            "operation": "rollback",
+            "version": version,
+        }
 
     async def download_update(self, kind: str) -> dict[str, Any]:
         if self._mirrors is None:
@@ -643,7 +831,7 @@ class UpdaterService:
             shutil.rmtree(installing, ignore_errors=True)
 
         legacy_plugins = Path(os.getenv("TRPG_LEGACY_PLUGIN_DIR", "/app/plugins"))
-        _migrate_user_plugin_packages(legacy_plugins, self._dir.parent / "plugin-packages")
+        _migrate_user_plugin_packages(legacy_plugins, self._data_dir / "plugin-packages")
         return {
             "schema": 1,
             "mode": "docker",

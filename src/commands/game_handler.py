@@ -1,11 +1,14 @@
-﻿"""主游戏流程处理器 —— 回合推进 + LLM 调用 + 结果播报。"""
+"""主游戏流程处理器 —— 回合推进 + LLM 调用 + 结果播报。"""
 
 from __future__ import annotations
+
+from src.engine import module_hooks
 
 import logging
 from pathlib import Path
 from typing import Any, Literal
 
+from src.adventures.scene_context import SceneContextProvider
 from src.engine.action_gate import StructuredIntentRequirement
 from src.engine.game_instance import GameInstance, GameRegistry
 from src.llm.client import LLMClient
@@ -35,7 +38,7 @@ from src.commands.state_recap import (
 from src.commands.story_recap import StoryRecapGenerator
 from src.commands.swipe_generator import SwipeGenerator
 from src.engine.language import DEFAULT_LANGUAGE
-from src.engine.modules import narrative_notes
+
 from src.lorebook.retrieval import LoreRetriever
 from src.content_modules.projection import ContentProjectionService
 from src.rulesets.builtin import build_default_ruleset_registry
@@ -62,12 +65,17 @@ class GameHandler:
         brief_max_tokens: int = 4096,
         analysis_max_tokens: int = 4096,
         ruleset_registry: RulesetRuntimeRegistry | None = None,
+        context_recent_rounds: int = 0,
+        check_model_enabled: bool = False,
+        check_llm_client: LLMClient | None = None,
     ):
         self.registry = registry
         self._combat = CombatResolver()
         self._dice = DiceResolver()
         self._puzzles = PuzzleProcessor()
         self.llm_client = llm_client
+        self.ai_seat_runtime = None
+        self._after_round_completed = None
         self.matcher = lorebook_matcher
         self.lorebook_store = lorebook_store
         self.memory_store = memory_store
@@ -76,6 +84,7 @@ class GameHandler:
         self.ruleset_registry = ruleset_registry or build_default_ruleset_registry()
         self._prompt = PromptComposer(
             self.prompts_dir, self.rules_dir, self.memory_store, self.ruleset_registry,
+            context_recent_rounds=context_recent_rounds,
         )
         self.worlds_dir = worlds_dir or (Path(__file__).parent.parent.parent / "templates" / "worlds")
         self._plugin_host = None
@@ -117,6 +126,8 @@ class GameHandler:
             narrative_max_tokens,
             summary_max_tokens,
             analysis_max_tokens,
+            check_model_enabled=check_model_enabled,
+            check_llm_client=check_llm_client,
             lore_retriever=self.lore_retriever,
             content_projection=self.content_projection,
         )
@@ -176,6 +187,10 @@ class GameHandler:
 
     # ---- 新建游戏 ----
 
+    def set_game_defaults_provider(self, provider) -> None:
+        """Composition seam shared by Web and Bot creation; existing saves are untouched."""
+        self._factory.set_defaults_provider(provider)
+
     async def create_game(
         self, game_key: tuple, world_id: str, world_name: str,
         group_name: str, rule_id: str = "",
@@ -222,6 +237,10 @@ class GameHandler:
             self._round_processor.set_image_generation_service(service)
         if hasattr(self._swipe_generator, "set_scene_image_hook"):
             self._swipe_generator.set_scene_image_hook(self._round_processor.schedule_scene_image)
+
+    def set_scene_context_provider(self, provider: SceneContextProvider | None) -> None:
+        """Share one safe scene source across opening, rounds and player Q&A."""
+        self._prompt.set_scene_context_provider(provider)
 
     def set_adventure_world_advance(self, callback) -> None:
         """Connect optional Adventure v2 gate reevaluation to round settlement."""
@@ -281,7 +300,15 @@ class GameHandler:
         Returns: (narration: str, info_asymmetry: dict | None)
             info_asymmetry 格式: {"user_qq_xxx": "仅该玩家可见的消息", ...}
         """
-        return await self._round_processor.process_round(instance, on_delta=on_delta, on_reset=on_reset)
+        result = await self._round_processor.process_round(instance, on_delta=on_delta, on_reset=on_reset)
+        callback = getattr(self, "_after_round_completed", None)
+        if callback is not None:
+            callback(instance)
+        return result
+
+    def set_hosted_combat_resume(self, callback) -> None:
+        self._after_round_completed = callback
+        self._round_processor.set_defer_hosted_players(callback is not None)
 
     def prepare_round_checks(self, instance: GameInstance) -> list[dict]:
         """结算本轮结构化检定；若可消耗幸运，叙事会等待玩家选择。"""
@@ -301,6 +328,7 @@ class GameHandler:
             llm_client=self.llm_client,
             prompt_composer=self._prompt,
             requires_structured_intent=requires_structured_intent,
+            seat_runtime=getattr(self, "ai_seat_runtime", None),
         )
 
     async def _process_round_impl(self, instance: GameInstance, *, on_delta=None, on_reset=None) -> tuple[str, dict | None]:
@@ -329,7 +357,7 @@ class GameHandler:
         """兼容旧内部调用；实际逻辑已拆到 StateUpdateApplier。"""
         # The applier can write the scene after other state; reject an
         # unsupported notes slot before any of it changes.
-        narrative_notes.require_writable(instance)
+        module_hooks.preflight(instance, module_hooks.NARRATIVE_VIEW)
         self._state_applier.apply_state_update(instance, update)
 
     def load_item_categories(self, instance: GameInstance) -> dict[str, list[str]]:

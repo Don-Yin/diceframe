@@ -14,6 +14,8 @@ Review Round 1 在顶层 head 上发现的三个回归：
 
 from __future__ import annotations
 
+from src.engine.modules import narration_preferences
+
 import json
 import shutil
 from pathlib import Path
@@ -27,7 +29,7 @@ import web_server
 from src.adventures.bundle import AdventureBundleLoader
 from src.adventures.graph_v2 import ADVENTURE_GRAPH_FORMAT_V2
 from src.engine.game_instance import GameInstance, GameRegistry
-from src.engine.modules import room_access, table_settings
+from src.engine.modules import room_access
 from src.lorebook.store import LorebookStore
 from src.webui.access_password import hash_access_password
 from src.webui.api import WebAPI
@@ -159,7 +161,7 @@ def _make_game(
     instance.gm_uid = GM_UID
     instance.world_name = "template_world"
     instance.group_name = "回归局"
-    table_settings.replace_gm_style_override(instance, {"note": "gm secret"})
+    narration_preferences.replace_gm_style_override(instance, {"note": "gm secret"})
     instance.players = {PLAYER_UID: {"character_name": "甲", "character_sheet": {}}}
     if bind_adventure:
         bundle = AdventureBundleLoader(play_env.adventures_dir).resolve(

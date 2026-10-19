@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import logging
 from typing import Any
 
@@ -14,7 +16,8 @@ from src.engine.character_utils import is_conscious, record_death_save_failures,
 from src.engine.constants import WEAPON_DAMAGE, canonical_item_key
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text
-from src.engine.modules import checks, progression_state, round_presentation, table_settings
+from src.engine import module_hooks
+from src.engine.modules import checks, progression_state
 
 logger = logging.getLogger("trpg")
 
@@ -124,7 +127,7 @@ class CombatResolver:
         """保持旧字段并补齐多人结算引用；同 check_id 不重复追加。"""
         if any(
             str(item.get("check_id") or "") == result.check_id
-            for item in round_presentation.pending_combat_results(instance)
+            for item in module_hooks.read(instance, module_hooks.COMBAT_RESULTS)
         ):
             return
         instance.record_combat_result({
@@ -215,7 +218,7 @@ class CombatResolver:
                     weapon=weapon,
                     attr_value=attr_value,
                     combat_model=combat_model,
-                    difficulty=table_settings.difficulty(instance),
+                    difficulty=game_config.difficulty(instance),
                     check_result=check,
                     same_faction=same_faction,
                     attacker_uid=actor_uid,

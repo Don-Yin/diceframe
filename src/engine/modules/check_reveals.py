@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from src.engine import module_hooks
 from src.engine.module_state import ModuleStateSpec, get_module_state, register_module_state
 
 MODULE_NAME = "check_reveals"
@@ -58,5 +59,10 @@ def mark_revealed(instance: Any, check_id: str, by: str) -> dict[str, Any]:
     return record
 
 
+def read_state(instance: Any, kind: str) -> Any:
+    return records(instance) if kind == module_hooks.CHECK_REVEALS else None
+
+
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)
 register_module_state(SPEC)
+module_hooks.register(module_hooks.STATE_READ, MODULE_NAME, read_state)

@@ -53,6 +53,23 @@ def mode(instance: Any) -> str:
 
 def round_value(instance: Any) -> int:
     slot = get_module_state(instance, MODULE_NAME)
+    return _round_value(slot)
+
+
+def peek_round_value(instance: Any) -> int:
+    """Read a fence without materializing absent state during a preview."""
+    modules = getattr(instance, "modules", None)
+    if not isinstance(modules, dict):
+        raise ModuleStateError("instance has no module state container")
+    slot = modules.get(MODULE_NAME)
+    if not isinstance(slot, dict):
+        return 0
+    if slot.get("schema_version") != SCHEMA_VERSION:
+        raise ModuleStateError(f"unsupported progression module schema: {slot.get('schema_version')!r}")
+    return _round_value(slot)
+
+
+def _round_value(slot: dict[str, Any]) -> int:
     value = slot.get("round", 0)
     if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
         return value

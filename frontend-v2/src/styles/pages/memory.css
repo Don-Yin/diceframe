@@ -1,0 +1,325 @@
+/* Memory surfaces, controls and responsive states. Edit this owner directly. */
+
+.memory-search {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.memory-search input {
+  min-width: 180px;
+  padding: 7px 10px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 7px;
+  background: rgba(35,27,20,.7);
+  color: var(--df-text);
+}
+
+.memory-search button.ghost {
+  background: transparent;
+}
+
+.memory-meta {
+  margin: 6px 0 12px;
+  color: var(--df-text-muted);
+  font-size: 13px;
+}
+
+.memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.memory-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--df-border-soft);
+  transition: border-color .12s;
+}
+
+.memory-row:hover {
+  border-color: rgba(242,207,131,.5);
+}
+
+.memory-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.memory-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.memory-row-head strong {
+  font-size: 15px;
+}
+
+.memory-row-head .small {
+  font-size: 12px;
+}
+
+.memory-row-head .badge {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: rgba(216,173,82,.18);
+  color: var(--df-accent-strong);
+}
+
+.memory-row-head .badge.low {
+  background: rgba(180,90,60,.22);
+  color: #d8a878;
+}
+
+.memory-row-body {
+  margin: 4px 0 0;
+  color: var(--df-text-muted);
+  line-height: 1.55;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memory-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.memory-row-actions button {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.memory-pager {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: center;
+  margin: 18px 0;
+  padding: 10px;
+  border-top: 1px solid var(--df-border-soft);
+  color: var(--df-text-muted);
+  font-size: 13px;
+}
+
+.memory-pager button {
+  padding: 5px 12px;
+  font-size: 13px;
+}
+
+body.light .memory-row {
+  background: linear-gradient(180deg,var(--df-surface-raised),var(--df-surface-1));
+}
+
+@media (max-width:760px) {
+  .memory-search {
+    flex-wrap: wrap;
+  }
+}
+
+.memory-row {
+  border-color: var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  color: var(--df-text);
+  background: linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .035);
+}
+
+.memory-page {
+  width: min(1540px, 100%);
+}
+
+.memory-page .memory-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 11px;
+}
+
+.memory-page .memory-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 134px;
+  overflow: hidden;
+}
+
+.memory-page .memory-row::after {
+  position: absolute;
+  right: -34px;
+  bottom: -48px;
+  width: 112px;
+  height: 112px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 50%;
+  content: "";
+  opacity: .18;
+}
+
+.memory-page .memory-search input {
+  width: clamp(220px, 24vw, 320px);
+}
+
+.memory-page .memory-search button {
+  flex: 0 0 auto;
+  min-width: 58px;
+  padding-inline: 11px;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .memory-page .memory-search {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .memory-page .memory-search input {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .memory-page .memory-list, .memory-page .memory-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .memory-row-actions {
+    justify-content: flex-end;
+  }
+}
+
+.memory-page .content-page-heading-actions {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.memory-page .memory-list {
+  scroll-margin-top: 82px;
+}
+
+.memory-page .memory-row {
+  transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+
+.memory-page .memory-row:hover {
+  border-color: color-mix(in srgb, var(--df-interactive) 42%, var(--df-border-soft));
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--df-canvas) 34%, transparent), inset 0 1px 0 color-mix(in srgb, var(--df-accent) 8%, transparent);
+  transform: translateY(-1px);
+}
+
+.memory-page .memory-meta {
+  margin: -11px 0 15px;
+  padding: 9px 12px;
+  border-left: 2px solid var(--df-interactive);
+  color: var(--df-text-muted);
+  background: color-mix(in srgb, var(--df-interactive) 5%, transparent);
+  font-size: 12px;
+}
+
+.memory-page .memory-search {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: min(100%, 440px);
+}
+
+.memory-page .memory-search input {
+  flex: 1 1 190px;
+  min-width: 0;
+  min-height: 40px;
+}
+
+.memory-page .memory-search button {
+  min-height: 40px;
+}
+
+.memory-page .memory-row {
+  gap: 16px;
+  padding: 16px 18px;
+}
+
+.memory-page .memory-row-head {
+  gap: 8px;
+}
+
+.memory-page .memory-row-actions {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 760px) {
+  .memory-page .content-page-heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
+    padding-top: 12px;
+  }
+  .memory-page .content-page-heading-actions {
+    width: 100%;
+  }
+  .memory-page .memory-search {
+    justify-content: stretch;
+    min-width: 0;
+  }
+  .memory-page .memory-search input, .memory-page .memory-search button {
+    flex: 1 1 120px;
+  }
+  .memory-page .memory-search input {
+    flex-basis: 100%;
+  }
+  .memory-page .memory-row {
+    padding: 14px;
+  }
+  .memory-page .memory-row-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 440px) {
+  .memory-page .content-page-heading h1 {
+    font-size: 27px;
+  }
+  .memory-page .memory-row-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.view.memory-page {
+  width: min(var(--df-page-max), 100%);
+  max-width: var(--df-page-max);
+  box-sizing: border-box;
+  margin-inline: auto;
+  padding-inline: var(--df-page-gutter);
+  padding-top: var(--df-page-top);
+  padding-bottom: 42px;
+}
+
+.view.memory-page > .content-page-heading {
+  box-sizing: border-box;
+  margin-top: 0 !important;
+  margin-bottom: 20px !important;
+  padding: 12px 0 18px !important;
+}
+
+@media (max-width: 800px) {
+  .view.memory-page {
+    width: 100%;
+    max-width: 100%;
+    padding-inline: 12px;
+    padding-top: var(--df-page-top-mobile);
+    padding-bottom: 32px;
+  }
+  .view.memory-page > .content-page-heading {
+    margin-bottom: 16px !important;
+    padding-top: 10px !important;
+    padding-bottom: 14px !important;
+  }
+}

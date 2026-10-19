@@ -1,0 +1,29 @@
+{
+  "id": "harbor-notes",
+  "name": "Harbor Keeper Notes",
+  "language": "en",
+  "entries": [
+    {
+      "id": "keeper",
+      "uid": 1,
+      "name": "The keeper",
+      "type": "npc",
+      "keywords": [
+        "keeper"
+      ],
+      "content": "The keeper wants the beacon relit before the fishing boats return.",
+      "visibility": "public"
+    },
+    {
+      "id": "sealed-order",
+      "uid": 2,
+      "name": "Sealed order",
+      "type": "fact",
+      "keywords": [
+        "beacon"
+      ],
+      "content": "The keeper hid the blue lens under the pier.",
+      "visibility": "gm"
+    }
+  ]
+}

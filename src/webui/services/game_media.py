@@ -9,7 +9,7 @@ from src.compat.callbacks import load_world_template as load_world_template_comp
 from src.content_modules.refs import ContentRefError
 from src.engine.module_state import ModuleStateError
 from src.engine.modules import content_binding
-from src.webui.services._common import _is_safe_world_id
+from src.webui.services._common import _is_safe_world_id, resolve_default_scene_image
 
 GameKey = tuple[str, ...]
 
@@ -162,8 +162,11 @@ class GameMediaService:
             if use_default:
                 rule_id = self._dependencies.resolve_rule_id(instance)
                 instance.rule_id = rule_id
-                selected = self._dependencies.resolve_default_scene_image(
-                    str(instance.world_id or ""), rule_id,
+                selected = resolve_default_scene_image(
+                    self._dependencies.resolve_default_scene_image,
+                    str(instance.world_id or ""),
+                    rule_id,
+                    game_key,
                 )
             else:
                 selected = reference

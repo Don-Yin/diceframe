@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import io
 import json
 import logging
@@ -31,6 +32,10 @@ from src.webui.character_card_projection import (
 )
 
 logger = logging.getLogger("trpg")
+
+
+def _recovery_digest(value: Any) -> str:
+    return "sha256:" + hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
 def character_content_draft(
@@ -102,14 +107,46 @@ def _locked(function: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
-def _read_cards(dependencies: CharacterCardDependencies) -> list[dict[str, Any]]:
+@_locked
+def authoring_recovery_snapshot(dependencies: CharacterCardDependencies, identity: str) -> dict[str, Any]:
+    """Return a bounded, side-effect-free snapshot for narrative metadata undo."""
+    card_id = str(identity or "").strip()
+    cards = _read_cards(dependencies, strict=True)
+    # update_character_card deduplicates the complete library before writing;
+    # a recovery snapshot must refuse ambiguous source state rather than
+    # journal a write that could silently discard an unrelated duplicate.
+    if len(dedupe_cards(cards)) != len(cards):
+        raise ValueError("角色卡库存在重复卡片，无法安全恢复")
+    card = next((row for row in cards if row.get("id") == card_id), None)
+    if not isinstance(card, dict):
+        raise ValueError("角色卡不存在")
+    if dependencies.is_ruleset_card is not None and dependencies.is_ruleset_card(card):
+        raise ValueError("专业规则角色卡不能使用叙事元数据恢复")
+    try:
+        stat = dependencies.cards_path.stat()
+        content_digest = hashlib.sha256(dependencies.cards_path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise ValueError("角色卡库读取失败") from exc
+    fields = {key: copy.deepcopy(card.get(key, "")) for key in ("character_name", "background", "race", "class")}
+    return {
+        "target_name": str(fields["character_name"]),
+        "fields": fields,
+        "version": _recovery_digest({"bytes": content_digest, "mtime_ns": stat.st_mtime_ns}),
+    }
+
+
+def _read_cards(dependencies: CharacterCardDependencies, *, strict: bool = False) -> list[dict[str, Any]]:
     path = dependencies.cards_path
     if not path.exists():
         return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+        if strict and (not isinstance(data, list) or any(not isinstance(row, dict) for row in data)):
+            raise ValueError("invalid character library")
         return data if isinstance(data, list) else []
-    except Exception:
+    except Exception as exc:
+        if strict:
+            raise ValueError("existing character library could not be read") from exc
         logger.exception("读取角色卡库失败: %s", path)
         return []
 
@@ -276,6 +313,29 @@ def strip_card_provenance(character: dict) -> dict:
     """Drop caller-supplied provenance: only server-side import code sets it."""
 
     return _strip_keys(character, (CARD_PROVENANCE_KEY,))
+
+
+def preview_character_card_create(dependencies: CharacterCardDependencies, character: dict) -> dict[str, Any]:
+    """Validate a reusable blueprint and expose every create conflict without writing."""
+    source = str(character.get("source") or "角色卡库")
+    candidate = _to_character_card(character, source=source)
+    if dependencies.normalize_ruleset_card is not None:
+        candidate = dependencies.normalize_ruleset_card(candidate)
+    card = _to_character_card(candidate, source=source)
+    conflicts = [str(row.get("id") or "") for row in _read_cards(dependencies, strict=True)
+                 if row.get("id") == card["id"] or card_signature(row) == card_signature(card)]
+    return {"card": card, "conflicts": conflicts}
+
+
+@_locked
+def create_character_card(dependencies: CharacterCardDependencies, character: dict) -> dict[str, Any]:
+    """Reviewed create-only boundary; the normal save upsert is deliberately separate."""
+    checked = preview_character_card_create(dependencies, character)
+    if checked["conflicts"]:
+        raise ValueError("character target already exists")
+    card = checked["card"]
+    _write_cards(dependencies, [*_read_cards(dependencies, strict=True), card])
+    return {"ok": True, "card": card}
 
 
 @_locked

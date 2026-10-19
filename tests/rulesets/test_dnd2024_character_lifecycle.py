@@ -163,6 +163,11 @@ class _Api:
             self._live_ruleset_rest_dependencies, game_key, user_id, body,
         )
 
+    async def ruleset_rest_submit_live(self, game_key: str, user_id: str, body):
+        return await ruleset_rest.submit_live(
+            self._live_ruleset_rest_dependencies, game_key, user_id, body,
+        )
+
     async def ruleset_rest_resolve_live_party(
         self, game_key: str, user_id: str, body,
     ):

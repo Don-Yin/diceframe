@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import re
 from copy import deepcopy
 from hashlib import sha256
 from typing import Any
 
-from src.engine.modules import ruleset_runtime, table_settings
+from src.engine.modules import ruleset_runtime
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.play.contracts import story_encounter_instance_id
 from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch_id
@@ -175,7 +177,7 @@ class Dnd2024CampaignEngine:
         mode = str(automation.get("mode") or "")
         if mode not in AUTOMATION_MODES:
             automation["mode"] = (
-                "auto" if bool(table_settings.solo_mode(instance)) else "assist"
+                "auto" if bool(game_config.solo_mode(instance)) else "assist"
             )
         world_binding = campaign.setdefault(
             "world_binding", deepcopy(self._initial_campaign()["world_binding"]),
@@ -275,11 +277,12 @@ class Dnd2024CampaignEngine:
         if not (is_gm or is_player):
             return []
         actions: list[dict[str, Any]] = []
+        session_participants = self._session_zero_participant_ids(instance)
         session = campaign["session_zero"]
         tutorial = campaign["tutorial"]
         if (
             is_gm
-            and bool(table_settings.solo_mode(instance))
+            and bool(game_config.solo_mode(instance))
             and session.get("status") == "not_started"
             and tutorial.get("status") in {"not_started", "unavailable"}
         ):
@@ -299,7 +302,7 @@ class Dnd2024CampaignEngine:
                 "expected_version": version,
                 "defaults": self.default_agreement(),
             })
-        if session.get("status") == "pending" and is_player:
+        if session.get("status") == "pending" and actor_id in session_participants:
             response = session.get("responses", {}).get(actor_id, {})
             if response.get("response") != "accept":
                 actions.append({
@@ -541,7 +544,7 @@ class Dnd2024CampaignEngine:
         party = campaign.get("party_decision") or {}
         if str(party.get("status") or "") == "open":
             return True
-        if bool(table_settings.solo_mode(instance)) or len(instance.players) <= 1:
+        if bool(game_config.solo_mode(instance)) or len(instance.players) <= 1:
             return False
         tutorial = campaign.get("tutorial") or {}
         if tutorial.get("status") != "active":
@@ -728,7 +731,7 @@ class Dnd2024CampaignEngine:
         } and not is_gm:
             raise CampaignIntentError("only the GM can perform this campaign operation")
         if intent_type == "session_zero.quick_start":
-            if not bool(table_settings.solo_mode(instance)):
+            if not bool(game_config.solo_mode(instance)):
                 raise CampaignIntentError("recommended quick start is only available in solo mode")
             tutorial = state["campaign"]["tutorial"]
             if (
@@ -739,7 +742,10 @@ class Dnd2024CampaignEngine:
         elif intent_type == "session_zero.propose":
             self._normalize_agreement(intent.get("agreement"))
         elif intent_type == "session_zero.respond":
-            if session.get("status") != "pending" or not is_player:
+            if (
+                session.get("status") != "pending"
+                or submitted_by not in self._session_zero_participant_ids(instance)
+            ):
                 raise CampaignIntentError("there is no Session 0 proposal to answer")
             if intent.get("response") not in {"accept", "request_changes"}:
                 raise CampaignIntentError("Session 0 response must be accept or request_changes")
@@ -832,11 +838,23 @@ class Dnd2024CampaignEngine:
     def _all_players_accepted(instance: Any, session: dict[str, Any]) -> bool:
         if session.get("status") != "pending" or not session.get("pending_agreement"):
             return False
-        players = list(instance.players)
-        return bool(players) and all(
+        players = Dnd2024CampaignEngine._session_zero_participant_ids(instance)
+        return bool(instance.players) and all(
             session.get("responses", {}).get(uid, {}).get("response") == "accept"
             for uid in players
         )
+
+    @staticmethod
+    def _session_zero_participant_ids(instance: Any) -> list[str]:
+        """Return seats that need a human Session 0 response.
+
+        Server-hosted and unavailable seats cannot click an agreement. When a
+        table contains only such seats, the GM still retains authority to lock
+        the proposal; an empty participant list therefore needs no response.
+        """
+
+        active_humans = getattr(instance, "active_human_players", set())
+        return sorted(str(uid) for uid in active_humans if str(uid))
 
     @staticmethod
     def _normalize_agreement(raw: Any) -> dict[str, Any]:

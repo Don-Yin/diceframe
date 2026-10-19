@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import logging
+import re
 from dataclasses import asdict
 from src.engine.character_utils import initial_special_stat_value, set_hp
 from src.engine.currency import CurrencySystemError, validate_currency_system
@@ -664,13 +666,36 @@ def _unique_world_id(world_id: str, worlds_dir) -> str:
     from pathlib import Path
     if not worlds_dir:
         return world_id
-    base = world_id
-    candidate = world_id
+    from src.engine.world.contracts import MAX_CANONICAL_ID_CHARS
+    maximum = MAX_CANONICAL_ID_CHARS - len('world:')
+    base = world_id[:maximum]
+    candidate = base
     suffix = 2
     while (Path(worlds_dir) / f"{candidate}.json").exists():
-        candidate = f"{base}_{suffix}"
+        ending = f"_{suffix}"
+        candidate = f"{base[:maximum - len(ending)]}{ending}"
         suffix += 1
     return candidate
+
+
+def _generated_world_id(world_name: object, prompt: object) -> str:
+    """Build a storage identity from ASCII-safe input, keeping display names separate.
+
+    World IDs are used as ``ContentRef.source_id`` values, whose canonical
+    contract is ASCII.  LLM display names may be arbitrary Unicode, so use the
+    prompt as a readable fallback and a digest only when neither input yields
+    an ASCII slug.
+    """
+    for value in (world_name, prompt):
+        slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "").strip()).strip("_.-")
+        if slug:
+            # The primary Book ID also adds 'world:' to this identity.
+            from src.engine.world.contracts import MAX_CANONICAL_ID_CHARS
+            return f"ai_{slug[:MAX_CANONICAL_ID_CHARS - len('world:ai_')]}"
+    digest = hashlib.sha256(
+        f"{world_name or ''}\x00{prompt or ''}".encode("utf-8")
+    ).hexdigest()[:12]
+    return f"ai_world_{digest}"
 
 
 async def generate_world(llm_client, prompt: str, rule_id: str = "freeform_fantasy",
@@ -730,7 +755,7 @@ async def generate_world(llm_client, prompt: str, rule_id: str = "freeform_fanta
     if not data:
         return {"ok": False, "error": "AI 返回内容解析失败，请重试"}
 
-    world_id = "ai_" + data.get("world_name", prompt[:8]).replace(" ", "_")
+    world_id = _generated_world_id(data.get("world_name"), prompt)
     world_id = _unique_world_id(world_id, worlds_dir)
     world_prefix = world_id.replace("ai_", "")
     data["world_id"] = world_id

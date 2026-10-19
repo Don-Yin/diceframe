@@ -46,6 +46,19 @@
     "shield_of_faith": {"mode": "buff", "range": 60, "target_count": 1, "condition": "shield_of_faith", "condition_duration": "concentration", "concentration": true},
     "hex": {"mode": "debuff", "range": 90, "target_count": 1, "condition": "hexed", "condition_duration": "concentration", "concentration": true},
     "faerie_fire": {"mode": "saving_throw", "save": "dex", "range": 60, "condition": "faerie_fire", "condition_duration": "concentration", "concentration": true},
-    "heroism": {"mode": "buff", "range": 5, "target_count": 1, "condition": "heroism", "condition_duration": "concentration", "concentration": true}
+    "heroism": {"mode": "buff", "range": 5, "target_count": 1, "condition": "heroism", "condition_duration": "concentration", "concentration": true},
+    "divine_smite": {
+      "mode": "triggered_damage",
+      "trigger": "melee_hit",
+      "damage": "2d8",
+      "upcast_damage": "1d8",
+      "extra_damage": "1d8",
+      "extra_damage_creature_types": [
+        "fiend",
+        "undead"
+      ],
+      "damage_type": "radiant",
+      "range": 5
+    }
   }
 }

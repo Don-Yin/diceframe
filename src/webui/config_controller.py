@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import ipaddress
@@ -16,6 +17,7 @@ import aiohttp
 from aiohttp import web
 
 from src.ai_providers import resolve_provider
+from src.common_factory import close_model_clients
 from src.memory.embedding import EmbeddingClient
 from src.network_proxy import (
     effective_proxy_url,
@@ -41,6 +43,11 @@ from src.webui.routes.pairing import PAIRING_SERVICE_KEY
 from src.webui.routes.auth import ACCESS_PASSWORD_CONFIGURED_KEY
 from src.webui.runtime_config import ConfigStore
 from src.webui.server_identity import SERVER_IDENTITY_UNAVAILABLE, server_instance_id
+from src.webui.services.assistant_settings_tools import (
+    SettingsToolCallbacks,
+    build_settings_actions,
+    config_digest,
+)
 
 
 @dataclass(frozen=True)
@@ -69,6 +76,10 @@ class ConfigController:
 
     async def get(self, request: web.Request) -> web.Response:
         public = self.dependencies.public_config()
+        # Defaults can contain private Keeper instructions; anonymous bootstrap
+        # clients and invited seats must not receive the owner profile.
+        if not request.get("owner_authenticated", False) and request.get(ACCESS_PASSWORD_CONFIGURED_KEY) is not False:
+            public.pop("game_defaults", None)
         # The instance id keys a client's content-sync mapping. Only the owner
         # syncs with the library, so anonymous probes do not get a stable
         # identifier for the server.
@@ -106,6 +117,67 @@ class ConfigController:
         request: web.Request,
         body: dict,
     ) -> web.Response:
+        """HTTP adapter; the application path is exposed by ``apply_values``."""
+        return await self.apply_values(request.app, body)
+
+    def attach_agent_actions(self, app: Any, api: Any) -> None:
+        """Attach settings actions to an API that exposes the public registry.
+
+        This is intentionally capability based: older API objects without
+        ``register_application_actions`` simply skip the optional integration.
+        The apply callback re-enters the same reload lock and the same
+        application path used by the HTTP settings route.
+        """
+        register = getattr(api, "register_application_actions", None)
+        if not callable(register):
+            return
+
+        async def apply_config(changes: dict[str, Any]) -> dict[str, Any]:
+            lock = app.get("_config_reload_lock")
+            if lock is None:
+                lock = asyncio.Lock()
+                app["_config_reload_lock"] = lock
+            async with lock:
+                response = await self.apply_values(app, changes)
+            try:
+                payload = json.loads(response.body.decode("utf-8"))
+            except (AttributeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError("配置更新返回无效响应") from exc
+            if response.status >= 400 or not payload.get("ok"):
+                raise ValueError(str(payload.get("error") or "配置更新失败"))
+            return payload
+
+        async def apply_config_guarded(changes: dict[str, Any], expected_digest: str) -> dict[str, Any]:
+            lock = app.get("_config_reload_lock")
+            if lock is None:
+                lock = asyncio.Lock()
+                app["_config_reload_lock"] = lock
+            async with lock:
+                if expected_digest != config_digest(self.dependencies.state):
+                    raise ValueError("Settings changed; re-read settings and plan again")
+                response = await self.apply_values(app, changes)
+            try:
+                payload = json.loads(response.body.decode("utf-8"))
+            except (AttributeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError("配置更新返回无效响应") from exc
+            if response.status >= 400 or not payload.get("ok"):
+                raise ValueError(str(payload.get("error") or "配置更新失败"))
+            return payload
+
+        callbacks = SettingsToolCallbacks(
+            read_config=lambda: self.dependencies.state,
+            apply_config=apply_config,
+            apply_config_guarded=apply_config_guarded,
+            list_plugins=getattr(api, "list_plugins", None),
+            plugin_detail=getattr(api, "plugin_detail", None),
+        )
+        register(build_settings_actions(callbacks))
+
+    async def apply_values(
+        self,
+        app: Any,
+        body: dict,
+    ) -> web.Response:
         dependencies = self.dependencies
         state = dependencies.state
         if "web_cors_origins" in body and dependencies.cors_env_value:
@@ -133,8 +205,8 @@ class ConfigController:
         api_runtime_changed = bool(
             changed_keys & API_RUNTIME_CONFIG_KEYS
         ) or provider_runtime_changed(changed_keys)
-        old_subsystems = request.app.get("subsystems")
-        plugin_host = request.app.get("plugin_host")
+        old_subsystems = app.get("subsystems")
+        plugin_host = app.get("plugin_host")
         old_embedding = (
             old_subsystems.memory_store.embedding_client
             if old_subsystems is not None
@@ -142,7 +214,7 @@ class ConfigController:
             else None
         )
         subsystems = old_subsystems
-        new_api = request.app.get("api")
+        new_api = app.get("api")
         try:
             if model_runtime_changed:
                 subsystems = dependencies.build_subsystems(
@@ -153,12 +225,14 @@ class ConfigController:
                     subsystems,
                     plugin_host,
                     config=prepared.state,
+                    hub_client=app.get("hub_client"),
                 )
             elif api_runtime_changed and old_subsystems is not None:
                 new_api = dependencies.make_api(
                     old_subsystems,
                     plugin_host,
                     config=prepared.state,
+                    hub_client=app.get("hub_client"),
                 )
         except Exception as exc:
             if old_subsystems is not None and old_subsystems.memory_store is not None:
@@ -201,7 +275,7 @@ class ConfigController:
         if "web_cors_origins" in changed_keys:
             from src.webui.cors import parse_cors_origins
 
-            request.app["cors_origins"] = parse_cors_origins(
+            app["cors_origins"] = parse_cors_origins(
                 state.get("web_cors_origins", "")
             )
         if access_password_changed:
@@ -209,7 +283,7 @@ class ConfigController:
             was_open = not is_valid_access_password(
                 normalize_access_password(previous_state.get("access_token"))
             )
-            pairing = request.app.get(PAIRING_SERVICE_KEY)
+            pairing = app.get(PAIRING_SERVICE_KEY)
             if was_open and pairing is not None:
                 # 免密期签发的设备令牌是「谁连得上谁就是 owner」，第一次设置
                 # 访问密码必须把它们一起收回，否则锁门这一步等于没做。
@@ -244,25 +318,24 @@ class ConfigController:
 
         if model_runtime_changed and subsystems is not None:
             dependencies.activate_api_runtime(subsystems, new_api)
-            request.app["subsystems"] = subsystems
-            request.app["api"] = new_api
+            app["subsystems"] = subsystems
+            app["api"] = new_api
         elif api_runtime_changed and new_api is not None:
             dependencies.activate_api_runtime(old_subsystems, new_api)
-            request.app["api"] = new_api
+            app["api"] = new_api
+
+        if new_api is not None and new_api is not app.get("api"):
+            # Kept for hosts whose activation callback does not replace app.api.
+            self.attach_agent_actions(app, new_api)
+        elif new_api is not None and (model_runtime_changed or api_runtime_changed):
+            self.attach_agent_actions(app, new_api)
 
         if (
             model_runtime_changed
             and old_subsystems is not None
             and subsystems is not None
         ):
-            if (
-                old_subsystems.llm_client
-                and old_subsystems.llm_client is not subsystems.llm_client
-            ):
-                try:
-                    await old_subsystems.llm_client.close()
-                except Exception:
-                    self.logger.warning("关闭旧模型客户端失败", exc_info=True)
+            await close_model_clients(old_subsystems, keep=subsystems)
             new_embedding = getattr(
                 subsystems.memory_store,
                 "embedding_client",
@@ -304,8 +377,7 @@ class ConfigController:
     ) -> None:
         if candidate is None or candidate is previous:
             return
-        if candidate.llm_client:
-            await candidate.llm_client.close()
+        await close_model_clients(candidate, keep=previous)
         candidate_embedding = getattr(
             candidate.memory_store,
             "embedding_client",

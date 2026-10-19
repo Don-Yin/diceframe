@@ -29,6 +29,7 @@ from typing import Any
 from src.adventures.graph_v2 import (
     ADVENTURE_GRAPH_FORMAT_V2,
     AdventureGraphV2Error,
+    project_graph_v2,
     validate_graph_v2,
 )
 from src.adventures.outcomes import OutcomeError, outcomes_to_intents
@@ -38,6 +39,7 @@ from src.adventures.progress import (
     complete_node,
     complete_objective,
     new_progress,
+    validate_choice_state,
 )
 from src.engine.modules import adventure_runtime_state, economy_state
 
@@ -163,6 +165,7 @@ def complete_adventure_node(
     *,
     recipient_uid: str = "",
     actor_uid: str = "",
+    choice_id: str = "",
 ) -> dict[str, Any]:
     """§6.7：完成一个节点，在**一个权威事务**里执行它的 outcome 声明。
 
@@ -239,8 +242,9 @@ def complete_adventure_node(
             world_summary = apply_world_ops(instance, intents["world_ops"])
         # ③ 进度推进（含 gate 评估 → 开放合法后继）
         activated = complete_node(
-            progress, graph, wanted, instance=instance, rules_evaluator=evaluator,
+            progress, graph, wanted, instance=instance, rules_evaluator=evaluator, choice_id=choice_id,
         )
+        adventure_runtime_state.clear_completion_suggestion(instance, wanted)
         # ④ 进度事件（同一事务内）
         activated.extend(_apply_progress_events(
             progress, graph, intents["progress_events"],
@@ -270,6 +274,7 @@ def complete_adventure_node(
     return {
         "ok": True,
         "node_id": wanted,
+        "choice_id": choice_id,
         "activated_nodes": activated,
         "world_ops": len(intents["world_ops"]),
         "world_summary": world_summary,
@@ -278,6 +283,51 @@ def complete_adventure_node(
         "queued_rewards": list(queued_rewards or []),
         "actor_uid": str(actor_uid or ""),
     }
+
+
+def request_adventure_choice(
+    dependencies: AdventureRuntimeDependencies, instance: Any,
+    node_id: str, choice_id: str, actor_uid: str,
+) -> dict[str, Any]:
+    """Record a player's own advisory choice; GM confirms the party outcome."""
+    from src.adventures.gates import GateError, gates_satisfied
+
+    if actor_uid not in instance.players:
+        raise AdventureRuntimeError("choice requester is not a player in this game")
+    from src.engine.player_control import submission_block
+    control_error = submission_block(instance, actor_uid)
+    if control_error:
+        raise AdventureRuntimeError(control_error)
+    resolution = resolve_instance_adventure(dependencies, instance)
+    graph = adventure_graph(resolution) if resolution else None
+    if graph is None:
+        raise AdventureRuntimeError("game has no Adventure v2 graph")
+    visible = project_graph_v2(graph)
+    node = next((node for node in visible['nodes'] if node['id'] == node_id), None)
+    progress = adventure_runtime_state.progress(instance)
+    validate_choice_state(progress, graph)
+    if not isinstance(progress, dict) or node_id not in progress.get('active_nodes', []):
+        raise AdventureRuntimeError("choice node is not active")
+    if not node or node.get('choice_mode') != 'exclusive' or not any(transition.get('choice_id') == choice_id for transition in node['transitions']):
+        raise AdventureRuntimeError("choice is not available to this player")
+    original = next(node for node in graph['nodes'] if node['id'] == node_id)
+    transition = next(transition for transition in original['transitions'] if transition['choice_id'] == choice_id)
+    try:
+        evaluator = dependencies.rules_evaluator(instance) if dependencies.rules_evaluator else None
+        open_choice = gates_satisfied(transition.get('conditions') or [], instance=instance, progress=progress, rules_evaluator=evaluator)
+    except GateError:
+        open_choice = False
+    if not open_choice:
+        raise AdventureRuntimeError("choice conditions are not satisfied")
+    previous = progress.get('choice_requests', [])
+    if not isinstance(previous, list) or len(previous) > 256 or any(not isinstance(row, dict) or set(row) != {'node_id', 'choice_id', 'actor_uid'} for row in previous):
+        raise AdventureRuntimeError("saved choice requests are invalid")
+    requests = [row for row in previous if not (row['node_id'] == node_id and row['actor_uid'] == actor_uid)]
+    if len(requests) >= 256:
+        raise AdventureRuntimeError("choice request limit reached")
+    requests.append({'node_id': node_id, 'choice_id': choice_id, 'actor_uid': actor_uid})
+    progress['choice_requests'] = requests
+    return {'ok': True, 'node_id': node_id, 'choice_id': choice_id, 'actor_uid': actor_uid, 'pending_gm': True}
 
 
 def advance_adventure_world(
@@ -303,6 +353,7 @@ def advance_adventure_world(
     progress = adventure_runtime_state.progress(instance)
     if not isinstance(progress, dict) or not progress:
         raise AdventureRuntimeError("adventure progress is not initialized")
+    validate_choice_state(progress, graph)
 
     from src.adventures.gates import GateError, gates_satisfied
 
@@ -315,6 +366,12 @@ def advance_adventure_world(
         if node is None:
             continue
         for transition in node.get("transitions", []):
+            if node.get("choice_mode") == "exclusive":
+                selected = progress.get("selected_choices", {}).get(node_id)
+                if not selected:
+                    raise AdventureRuntimeError("completed exclusive node has no recorded choice")
+                if transition.get("choice_id") != selected:
+                    continue
             target = str(transition.get("to") or "")
             if not target or target in active or target in completed:
                 continue
@@ -351,4 +408,5 @@ __all__ = [
     "initialize_adventure_new_run",
     "initialize_adventure_run",
     "resolve_instance_adventure",
+    "request_adventure_choice",
 ]

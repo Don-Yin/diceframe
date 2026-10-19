@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from src.commands.game_handler import GameHandler
 from src.engine.game_instance import GameRegistry
@@ -12,6 +13,7 @@ from src.llm.client import LLMClient, ProviderConfig
 from src.lorebook.bootstrap import seed_builtin_worlds
 from src.lorebook.matcher import KeywordMatcher
 from src.lorebook.store import LorebookStore
+from src.migrations.world_identity import migrate_legacy_world_ids
 from src.memory.delta import MemoryStore
 from src.rulesets.builtin import build_default_ruleset_registry
 from src.rulesets.registry import RulesetRuntimeRegistry
@@ -28,6 +30,22 @@ class TRPGSubsystems:
     memory_store: MemoryStore
     ruleset_registry: RulesetRuntimeRegistry
     handler: GameHandler
+    check_llm_client: LLMClient | None = None
+
+
+async def close_model_clients(runtime: Any, *, keep: Any = None) -> None:
+    """Close each owned model client once; keep clients reused by a new runtime."""
+    retained = {id(getattr(keep, name, None)) for name in ("llm_client", "check_llm_client")}
+    closed = set()
+    for name in ("llm_client", "check_llm_client"):
+        client = getattr(runtime, name, None)
+        if client is None or id(client) in closed or id(client) in retained:
+            continue
+        closed.add(id(client))
+        try:
+            await client.close()
+        except Exception:
+            logger.warning("关闭模型客户端失败: %s", name, exc_info=True)
 
 
 def create_trpg_subsystems(
@@ -52,8 +70,16 @@ def create_trpg_subsystems(
     brief_max_tokens: int = 4096,
     analysis_max_tokens: int = 4096,
     model_request_timeout_seconds: float = 120,
+    generation_options: dict[str, Any] | None = None,
+    context_recent_rounds: int = 0,
+    check_model_enabled: bool = False,
+    check_provider: ProviderConfig | None = None,
     reuse: TRPGSubsystems | None = None,
 ) -> TRPGSubsystems:
+    if reuse is None:
+        converted = migrate_legacy_world_ids(data_dir, worlds_dir)
+        if converted:
+            logger.info('已迁移 %d 个旧世界来源标识 / Upgraded legacy world identities', len(converted))
     save_dir = data_dir / "saves"
 
     registry = reuse.registry if reuse is not None else GameRegistry(save_dir)
@@ -63,6 +89,14 @@ def create_trpg_subsystems(
         default=default_provider,
         proxy_url=proxy_url,
         request_timeout_seconds=model_request_timeout_seconds,
+        generation_options=generation_options,
+    )
+    check_llm_client = (
+        LLMClient(
+            providers=[check_provider], default=check_provider.provider_name,
+            proxy_url=proxy_url, request_timeout_seconds=model_request_timeout_seconds,
+        )
+        if check_model_enabled and check_provider is not None else None
     )
 
     if reuse is not None:
@@ -103,6 +137,9 @@ def create_trpg_subsystems(
         summary_max_tokens=summary_max_tokens,
         brief_max_tokens=brief_max_tokens,
         analysis_max_tokens=analysis_max_tokens,
+        context_recent_rounds=context_recent_rounds,
+        check_model_enabled=check_model_enabled,
+        check_llm_client=check_llm_client,
     )
     # 仅在新运行时已经完整构建后切换 embedding 客户端，避免构建失败时
     # 破坏仍在服务请求的旧运行时。GameRegistry 与数据库连接始终复用。
@@ -116,4 +153,5 @@ def create_trpg_subsystems(
         memory_store=memory_store,
         ruleset_registry=ruleset_registry,
         handler=handler,
+        check_llm_client=check_llm_client,
     )

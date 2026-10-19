@@ -42,6 +42,18 @@ describe('ProfessionalCharacterCenter', () => {
     })
   })
 
+  it('opens a direct rest entry without submitting or changing the character', async () => {
+    const wrapper = mount(ProfessionalCharacterCenter, {
+      props: { character, target: 'game', gameKey: 'web|room|bot', userId: 'player/1', ruleId: 'dnd2024_srd', language: 'zh-CN', initialFocus: 'rest' },
+      global: { stubs: { PortraitPicker: true } },
+    })
+    await flushPromises()
+    expect(wrapper.get('.center-tabs button:nth-child(4)').classes()).toContain('active')
+    expect(wrapper.find('.rest-center').exists()).toBe(true)
+    expect(mocks.api).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('only submits profile fields', async () => {
     const wrapper = mount(ProfessionalCharacterCenter, {
       props: {

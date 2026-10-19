@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
 
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import media, room_access
+from src.engine.modules import media, room_access, run_finale
 
 logger = logging.getLogger("trpg")
 
@@ -109,6 +109,8 @@ class GamePackageService:
                     archive.writestr("map-background.asset", map_image_path.read_bytes())
                     container["map_background"] = {"kind": "save_asset", "path": "map-background.asset"}
                 archive.writestr("state.json", json.dumps(state_data, ensure_ascii=False, indent=2))
+                for name, content in run_finale.package_files(state_data).items():
+                    archive.writestr(name, content)
                 chatlog = save_path.with_name("chatlog.jsonl")
                 if chatlog.exists():
                     archive.writestr("chatlog.jsonl", chatlog.read_bytes())

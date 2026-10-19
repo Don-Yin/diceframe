@@ -8,7 +8,9 @@ export function createOperationId(): string {
 }
 
 export function canRollRequest(request: ManualRollRequest, actorId: string, isGm: boolean): boolean {
-  return request.status === 'pending' && (isGm || request.target_uids.includes(actorId))
+  return request.status === 'pending' && (isGm
+    ? request.target_uids.some(uid => !request.results[uid])
+    : request.target_uids.includes(actorId) && !request.results[actorId])
 }
 export function isVisibleToActor(request: ManualRollRequest, actorId: string, isGm: boolean): boolean {
   return request.visibility === 'party' || isGm || request.target_uids.includes(actorId)
@@ -25,7 +27,7 @@ export function useManualRolls(gameKey: Ref<string>, runId: Ref<string>, actorId
   // 的目标是当前 actor 时才弹玩家确认窗；GM 对其他玩家的请求仍留在
   // 控台列表中，由目标玩家确认，避免 GM 页面替玩家自动掷骰。
   const targetPending = computed(() => visibleRequests.value.filter(item => (
-    item.status === 'pending' && item.target_uids.includes(actorId.value)
+    canRollRequest(item, actorId.value, false)
   )))
   const activeRequest = computed(() => targetPending.value.find(item => item.id === activeRequestId.value) || targetPending.value.find(item => !dismissed.value.has(item.id)) || null)
 

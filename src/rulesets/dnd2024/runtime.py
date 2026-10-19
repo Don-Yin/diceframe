@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from src.engine import module_hooks
+
 import logging
 from collections.abc import Mapping
 from copy import deepcopy
@@ -37,6 +39,7 @@ from src.rulesets.dnd2024.character.reconciliation import (
 from src.rulesets.dnd2024.campaign import CAMPAIGN_INTENT_TYPES, Dnd2024CampaignEngine
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 import src.rulesets.dnd2024.combat.visibility as combat_visibility
+from src.rulesets.dnd2024.combat.readiness import required_encounter_player_ids
 from src.rulesets.dnd2024.content.catalog import DndContentCatalog
 from src.rulesets.dnd2024.content.provider import (
     DndContentCatalogProvider,
@@ -73,6 +76,27 @@ logger = logging.getLogger(__name__)
 
 
 class Dnd2024Runtime:
+    def scene_objective_context(self, instance: Any, *, viewer_is_gm: bool) -> dict[str, Any]:
+        from src.engine.staged_transaction import fork_domain_state
+        snapshot = fork_domain_state(instance)
+        campaign = self._campaign_engine(snapshot, snapshot.language).gameplay_view(
+            snapshot, '__public_scene__', viewer_is_gm,
+        )
+        step = (campaign.get('tutorial') or {}).get('current_step')
+        if not step:
+            return {}
+        return {'current_nodes': [{'name': str(step.get('title') or '')[:160],
+                                   'description': str(step.get('narration') or '')[:800]}],
+                'objectives': [{'name': str(step.get('objective') or '')[:240], 'status': 'active'}]}
+
+    def finale_preflight(self, instance: Any) -> list[str]:
+        from src.rulesets.dnd2024.finale import preflight
+        return preflight(instance)
+
+    def settle_finale(self, instance: Any, receipt_id: str) -> dict[str, Any]:
+        from src.rulesets.dnd2024.finale import settle
+        return settle(instance, receipt_id)
+
     runtime_id = "core:dnd2024"
     runtime_version = 1
     capabilities = RulesetCapabilities(
@@ -349,11 +373,9 @@ class Dnd2024Runtime:
         # 重名冲突由 resolve_binding 抛 AdventureSourceConflict → 调用方 fail closed。
         resolution = self._adventure_loader.resolve_binding(binding, locale)
         bundle = resolution.bundle
-        if (
-            bundle.manifest.required_runtime_id != self.runtime_id
-            or bundle.manifest.required_runtime_version > self.runtime_version
-            or bundle.manifest.format not in self.capabilities.adventure_formats
-        ):
+        from src.adventures.compatibility import compatibility_reasons
+        reasons = compatibility_reasons(bundle.manifest, self, str(getattr(instance, 'world_id', '') or ''))
+        if reasons:
             raise ValueError("bound adventure package is incompatible with this rules runtime")
         if (
             bundle.manifest.world_policy == "fixed"
@@ -844,6 +866,27 @@ class Dnd2024Runtime:
         locale = str(getattr(instance, "language", "") or "")
         return self._combat_engine(instance, locale=locale).next_automatic_intent(instance)
 
+    def check_mode_policy(self, instance: Any, rule: Any, uid: str) -> dict[str, Any]:
+        from src.rulesets.dnd2024.combat.check_modes import policy
+
+        return policy(self._combat_engine(instance, locale=instance.language), instance, uid)
+
+    def hosted_intent_choices(self, instance: Any, seat_uid: str) -> list[dict[str, Any]]:
+        from src.rulesets.dnd2024.combat.hosted_choices import hosted_intent_choices
+
+        locale = str(getattr(instance, "language", "") or "")
+        return hosted_intent_choices(self._combat_engine(instance, locale=locale), instance, seat_uid)
+
+    def hosted_intent_context(self, instance: Any, seat_uid: str) -> dict[str, Any]:
+        if not self.hosted_intent_choices(instance, seat_uid):
+            return {}
+        locale = str(getattr(instance, "language", "") or "")
+        # Reuse the public combat projection, excluding campaign/Director context.
+        combat = self._combat_engine(instance, locale=locale).gameplay_view(instance)["combat"]
+        return {key: combat[key] for key in (
+            "status", "round", "current_actor_id", "initiative", "position_mode", "economy", "actors",
+        )}
+
     def on_player_join(self, instance: Any, user_id: str) -> None:
         """Enroll a late-joining character in an already active encounter."""
 
@@ -866,6 +909,7 @@ class Dnd2024Runtime:
         ).revive_player(instance, str(user_id), hp)
         if not result.get("ok"):
             raise ValueError(str(result.get("error") or "unable to revive character"))
+
         if result.get("applied"):
             updated = deepcopy(instance.get_character_sheet(str(user_id)))
             revision = int(updated.get("ruleset_revision", 0) or 0) + 1
@@ -882,6 +926,15 @@ class Dnd2024Runtime:
             updated["ruleset_revision"] = revision
             updated["ruleset_operation_log"] = operation_log[-32:]
             instance.set_character_sheet(str(user_id), updated)
+
+    @staticmethod
+    def preflight_narrative_health(instance: Any) -> None:
+        ruleset_runtime.require_writable(instance)
+
+    def apply_narrative_hp_delta(self, instance: Any, user_id: str, delta: int) -> int:
+        from .narrative_health import settle_narrative_hp
+        engine = Dnd2024CombatEngine(self.load_bundle(str(instance.language or "en")))
+        return settle_narrative_hp(engine, instance, user_id, delta)
 
     @staticmethod
     def memory_deltas_from_event_batch(
@@ -925,11 +978,11 @@ class Dnd2024Runtime:
     def apply_event_batch(
         self, instance: Any, batch: dict[str, Any],
     ) -> dict[str, Any]:
-        from src.engine.modules import narrative_notes
+
 
         # Campaign steps write the scene after the batch commits; reject an
         # unsupported notes slot before any ruleset state changes.
-        narrative_notes.require_writable(instance)
+        module_hooks.preflight(instance, module_hooks.NARRATIVE_VIEW)
         locale = str(getattr(instance, "language", "") or "")
         bundle = self.load_bundle(locale)
         before_characters = {
@@ -996,18 +1049,11 @@ class Dnd2024Runtime:
         request = ruleset_runtime.state(instance).get("encounter_request")
         if isinstance(request, dict):
             projected_request = deepcopy(request)
+            required_ids = required_encounter_player_ids(instance)
             ready_ids = {
                 str(item) for item in request.get("ready_player_ids") or [] if str(item)
             }
-            gm_uid = str(getattr(instance, "gm_uid", "") or "")
-            # 与普通回合 human_actions_ready 同一设计：AI 托管、未认领、暂离
-            # 或已倒下的席位不参与人工 ready barrier，避免一个不会点按钮的
-            # AI 座位把整桌遭遇卡成永久 pending。
-            human_seats = instance.active_human_players
-            required_ids = [
-                str(uid) for uid in instance.players
-                if str(uid) != gm_uid and str(uid) in human_seats
-            ]
+            ready_ids.intersection_update(required_ids)
             projected_request["readiness"] = {
                 "ready_player_ids": sorted(ready_ids),
                 "required_player_ids": required_ids,
@@ -1070,6 +1116,7 @@ class Dnd2024Runtime:
             "type", "kind", "actor_id", "target_id", "text", "natural", "modifier",
             "total", "target", "success", "critical", "delta", "amount", "damage_type",
             "healing",
+            "rolls", "advantage_mode", "advantage_sources", "bless_bonus",
             "distance", "round", "turn_index", "previous_actor_id", "condition", "reason",
             "spell_ref", "resource", "roll", "successes", "failures", "stable", "dead", "hp",
         }

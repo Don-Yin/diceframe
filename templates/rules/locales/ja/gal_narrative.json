@@ -1,0 +1,37 @@
+{
+  "locale_schema_version": 1,
+  "locale": "ja",
+  "target": {
+    "kind": "rule",
+    "id": "gal_narrative"
+  },
+  "rule": {
+    "rule_name": "GAL ナラティブ・プレビュー",
+    "description": "実験的なノーダイス・ノーステータスのビジュアルノベル風モード。既存のチャット画面で進む、一人用の物語対話です。",
+    "attr_hint": "GAL モードでは能力値の割り振りは不要です。キャラクター設定をそのまま書いてください。",
+    "skill_hint": "得意なことや好きなことを 1～5 個書いてください。描写用で、数値判定は行いません。",
+    "currency": "金貨"
+  },
+  "classes": {
+    "transfer_student": {
+      "name": "転学生",
+      "description": "この町や学校に来たばかりの新しい顔"
+    },
+    "club_member": {
+      "name": "部員",
+      "description": "放課後に部室に残る生徒"
+    },
+    "senior": {
+      "name": "先輩",
+      "description": "一学年上の先輩"
+    },
+    "childhood_friend": {
+      "name": "幼馴染",
+      "description": "幼い頃から一緒に育った仲間"
+    },
+    "newcomer": {
+      "name": "引っ越してきたばかり",
+      "description": "この街に越してきたばかりの住人"
+    }
+  }
+}

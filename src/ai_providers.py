@@ -18,7 +18,7 @@ _MODEL_CAPABILITIES = frozenset({"chat", "image", "embedding", "tts", "asr"})
 # 引用键 → 能力侧的运行时重建分组（与 config_update 的两个 frozenset 对应）
 PROVIDER_REF_KEYS = frozenset({
     "llm_provider_ref", "fallback1_provider_ref", "fallback2_provider_ref",
-    "embedding_provider_ref", "tts_provider_ref", "asr_provider_ref", "imagegen_provider_ref",
+    "embedding_provider_ref", "tts_provider_ref", "asr_provider_ref", "imagegen_provider_ref", "check_provider_ref",
 })
 
 # 已移除的公开配置入口。只用于明确拒绝请求和过滤残留，不参与运行时解析。
@@ -29,6 +29,7 @@ UNSUPPORTED_AI_CONFIG_KEYS = frozenset({
     "embedding_base_url", "embedding_api_key",
     "tts_base_url", "tts_api_key", "asr_base_url", "asr_api_key",
     "imagegen_base_url", "imagegen_api_key",
+    "check_base_url", "check_api_key", "check_api_format",
 })
 
 # 路由键 -> 该路由要求的模型能力。只对明确的手动覆盖做协调，
@@ -37,6 +38,7 @@ MODEL_CAPABILITY_ROUTES = (
     ("llm_provider_ref", "model", "chat", "主模型"),
     ("fallback1_provider_ref", "fallback1_model", "chat", "备用模型 1"),
     ("fallback2_provider_ref", "fallback2_model", "chat", "备用模型 2"),
+    ("check_provider_ref", "check_model", "chat", "独立检定模型"),
     ("embedding_provider_ref", "embedding_model", "embedding", "向量模型"),
     ("tts_provider_ref", "tts_model", "tts", "语音合成模型"),
     ("asr_provider_ref", "asr_model", "asr", "语音识别模型"),

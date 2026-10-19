@@ -1,47 +1,76 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
 import { api, apiBlob, errorMessage } from '@/api/client'
-import type { BatchDeleteGamesResponse, GameMutationResponse, GamesResponse, GameSummary } from '@/api/types'
+import type { BatchDeleteGamesResponse, GameMutationResponse, GamesResponse, GameSummary, SceneImageRef } from '@/api/types'
 import { useToast } from '@/composables/useToast'
 import { useConfirm } from '@/composables/useConfirm'
 import { useLocale } from '@/composables/useLocale'
 import { clearCurrentGame, rememberCurrentGame } from '@/stores/gameContext'
-import { NIcon, NDrawer, NDrawerContent } from 'naive-ui'
+import { NIcon } from 'naive-ui'
 import {
   BookOutline, HourglassOutline, PeopleOutline, DiceOutline, TrophyOutline,
   CompassOutline, EnterOutline, RefreshOutline, DownloadOutline, TrashOutline,
-  SparklesOutline,
-  LinkOutline,
+  LinkOutline, ImageOutline,
+  SearchOutline, GridOutline, ListOutline,
 } from '@vicons/ionicons5'
-import AssistantPanel from '@/components/AssistantPanel.vue'
 import PeerConnectModal from '@/features/peer/PeerConnectModal.vue'
-import AssistantGreetingBubble from './AssistantGreetingBubble.vue'
-import { useAssistant } from '@/composables/useAssistant'
+import { pruneGameSceneImageCache, resolveGameSceneImageUrl, sceneImageStyle } from '@/api/sceneImages'
 import { ruleSceneUrl } from '@/composables/useBackgroundImages'
-import { resolveGameSceneImageUrl, revokeSceneImageUrl, sceneImageStyle } from '@/api/sceneImages'
 import { getRendezvousConfig } from '@/api/peer'
 import { sortGames, type SaveSortMode } from './saveSorting'
+import { readOverviewGamesCache, writeOverviewGamesCache } from './overviewCache'
+import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
+import Button from '@/components/ui/Button.vue'
+import Card from '@/components/ui/Card.vue'
+import GameSceneImageDialog from '@/components/common/GameSceneImageDialog.vue'
 
 const router = useRouter()
-const assistantOpen = ref(false)
+const overviewRoot = ref<HTMLElement | null>(null)
+const lastToolsSummary = ref<HTMLElement | null>(null)
 const peerModalOpen = ref(false)
-const { stop: stopAssistant } = useAssistant()
-watch(assistantOpen, (open) => { if (!open) stopAssistant() })
+const coverTarget = ref<GameSummary | null>(null)
 
 const toast = useToast()
 const { confirm } = useConfirm()
 const { locale, t } = useLocale()
+const overviewCopy = computed(() => {
+  const lang = locale.value
+  if (lang === 'zh-CN') return { loading: '正在读取存档…', management: '存档管理', actions: '存档操作', selected: '已选择', adventureLibrary: '浏览内容' }
+  if (lang === 'ja') return { loading: 'セーブを読み込み中…', management: 'セーブ管理', actions: 'セーブ操作', selected: '選択済み', adventureLibrary: 'コンテンツを見る' }
+  if (lang === 'de') return { loading: 'Spielstände werden geladen…', management: 'Spielstandverwaltung', actions: 'Spielstandaktionen', selected: 'Ausgewählt', adventureLibrary: 'Inhalte durchsuchen' }
+  if (lang === 'ru') return { loading: 'Загрузка сохранений…', management: 'Управление сохранениями', actions: 'Действия с сохранением', selected: 'Выбрано', adventureLibrary: 'Обзор контента' }
+  return { loading: 'Loading saves…', management: 'Save management', actions: 'Save actions', selected: 'Selected', adventureLibrary: 'Browse content' }
+})
 
-const games = ref<GameSummary[]>([])
+const games = ref<GameSummary[]>(readOverviewGamesCache())
 const peerEntryVisible = ref(false)
 const saveSort = ref<SaveSortMode>('recent')
+const libraryQuery = ref('')
+const libraryView = ref<'grid' | 'list'>('grid')
 const sortedGames = computed(() => sortGames(games.value, saveSort.value, locale.value))
+const featuredGame = computed(() => sortGames(games.value, 'recent', locale.value)[0])
+const visibleGames = computed(() => {
+  const query = libraryQuery.value.trim().toLocaleLowerCase(locale.value)
+  if (!query) return sortedGames.value
+  return sortedGames.value.filter(game => [game.world_name, game.game_key, game.scene, game.rule_id]
+    .filter(Boolean)
+    .some(value => String(value).toLocaleLowerCase(locale.value).includes(query)))
+})
 const sceneImageUrls = ref<Record<string, string>>({})
+// Keep a local, lightweight scene visible while per-save artwork is fetched.
+// The archive index is intentionally rendered before those optional requests
+// finish, so every card needs a real first-paint image instead of a flat fill.
+const immediateSceneFallback = '/v2-assets/ui/campaign-mountain-city.jpg'
+let loadGeneration = 0
+let overviewDisposed = false
+let overviewActive = false
 const error = ref('')
 function setError(e: unknown) { error.value = errorMessage(e) }
 const busy = ref(false)
+const loading = ref(false)
 const selected = ref<string[]>([])
+const selectionMode = ref(false)
 
 const activeGames = computed(() => games.value.filter(g => stateClass(g.state) === 'badge-active').length)
 const playerCount = computed(() => games.value.reduce((sum, g) => sum + Number(g.player_count || 0), 0))
@@ -56,18 +85,62 @@ const statItems = computed(() => [
 ])
 
 async function load() {
+  const generation = ++loadGeneration
+  // Keep an already-rendered archive visible while /games refreshes.  This
+  // is what makes a route return feel instant; the fresh index can update in
+  // place instead of replacing the page with a loading state first.
+  loading.value = games.value.length === 0
   error.value = ''
   try {
     const r = await api<GamesResponse>('/games')
+    if (overviewDisposed || generation !== loadGeneration) return
     games.value = r.games || []
-    const previous = sceneImageUrls.value
-    const entries = await Promise.all(games.value.map(async game => [
+    writeOverviewGamesCache(games.value)
+    pruneGameSceneImageCache(games.value.map(game => game.game_key))
+    // Render the archive list as soon as the lightweight index arrives. Scene
+    // artwork is optional decoration and can be hydrated in the background;
+    // a slow image endpoint must not leave the whole homepage in a loading
+    // state when there are many saves.
+    loading.value = false
+    const snapshot = [...games.value]
+    // Resolve built-in references immediately and retain cached custom URLs.
+    // The image endpoint is only touched for a new/changed custom reference.
+    sceneImageUrls.value = Object.fromEntries(snapshot.map(game => [
       game.game_key,
-      await resolveGameSceneImageUrl(game.game_key, String(game.rule_id || '')),
-    ] as const))
-    sceneImageUrls.value = Object.fromEntries(entries)
-    for (const url of Object.values(previous)) revokeSceneImageUrl(url)
-  } catch (e: unknown) { setError(e) }
+      gameSceneUrlFromReference(game),
+    ]))
+    void Promise.allSettled(snapshot.map(async game => [
+      game.game_key,
+      await resolveGameSceneImageUrl(
+        game.game_key,
+        String(game.rule_id || ''),
+        false,
+        game.scene_image || null,
+      ),
+    ] as const)).then(results => {
+      // A refresh may have started while artwork was resolving. Do not let a
+      // stale response replace the newer archive map.
+      if (overviewDisposed || generation !== loadGeneration) {
+        return
+      }
+      const resolved = new Map(
+        results
+          .filter((result): result is PromiseFulfilledResult<readonly [string, string]> => result.status === 'fulfilled')
+          .map(result => result.value),
+      )
+      // Keep each card's immediate/reference image if one optional custom
+      // artwork request fails. A single stale or missing asset must not make
+      // every cover wait for the next route refresh.
+      sceneImageUrls.value = Object.fromEntries(snapshot.map(game => [
+        game.game_key,
+        resolved.get(game.game_key) || sceneImageUrls.value[game.game_key] || immediateSceneFallback,
+      ]))
+    })
+  } catch (e: unknown) {
+    if (!overviewDisposed && generation === loadGeneration) setError(e)
+  } finally {
+    if (!overviewDisposed && generation === loadGeneration) loading.value = false
+  }
 }
 
 async function loadPeerEntryVisibility() {
@@ -184,12 +257,15 @@ async function batchRemove() {
     const deleted = r.deleted?.length || 0
     const failed = r.failed?.length || 0
     toast.success(t('batchDeleted', { deleted, failed: failed ? t('failedCount', { count: failed }) : '' }))
-    for (const key of selected.value) clearCurrentGame(key)
-    selected.value = []
+    const deletedKeys = new Set(r.deleted || [])
+    for (const key of deletedKeys) clearCurrentGame(key)
+    selected.value = selected.value.filter(key => !deletedKeys.has(key))
     await load()
   } catch (e: unknown) { setError(e) } finally { busy.value = false }
 }
 
+function enterSelectionMode() { selectionMode.value = true }
+function exitSelectionMode() { selectionMode.value = false; selected.value = [] }
 function selectAll() { selected.value = games.value.map(g => g.game_key) }
 function selectInvert() {
   const set = new Set(selected.value)
@@ -213,49 +289,178 @@ function stateLabel(s?: string) {
 }
 
 function gameSceneStyle(game: GameSummary): Record<string, string> {
-  return sceneImageStyle(sceneImageUrls.value[game.game_key] || ruleSceneUrl(String(game.rule_id || '')))
+  return sceneImageStyle(sceneImageUrls.value[game.game_key] || immediateSceneFallback)
 }
 
-onMounted(() => {
+function gameSceneUrl(game: GameSummary): string {
+  return sceneImageUrls.value[game.game_key] || immediateSceneFallback
+}
+
+function gameSceneUrlFromReference(game: GameSummary): string {
+  const reference = game.scene_image
+  if (!reference || reference.kind === 'builtin') {
+    return ruleSceneUrl(reference?.id || String(game.rule_id || ''))
+  }
+  // Keep the previous custom cover during a background refresh. A changed
+  // reference is replaced when the cached resolver finishes, avoiding a
+  // visible fallback flash on route return.
+  return sceneImageUrls.value[game.game_key] || immediateSceneFallback
+}
+
+function openToolDetails(): HTMLElement[] {
+  return Array.from(overviewRoot.value?.querySelectorAll<HTMLElement>('.overview-archive-tools[open], .overview-game-tools[open]') || [])
+}
+
+function closeTools(restoreFocus = false) {
+  const summary = lastToolsSummary.value
+  openToolDetails().forEach(details => { details.removeAttribute('open') })
+  lastToolsSummary.value = null
+  if (restoreFocus && summary) void nextTick(() => summary.focus())
+}
+
+function changeCover(game: GameSummary) {
+  const summary = lastToolsSummary.value
+  closeTools()
+  summary?.focus()
+  coverTarget.value = { ...game }
+}
+
+async function onCoverSaved(gameKey: string, reference: SceneImageRef) {
+  // Invalidate artwork and index reads started before this confirmed change.
+  loadGeneration += 1
+  games.value = games.value.map(game => game.game_key === gameKey ? { ...game, scene_image: reference } : game)
+  writeOverviewGamesCache(games.value)
+  const savedGame = games.value.find(game => game.game_key === gameKey)
+  if (savedGame) {
+    const savedReference = JSON.stringify(reference)
+    // The confirmed cover can render even when the separate index refresh fails.
+    void resolveGameSceneImageUrl(gameKey, String(savedGame.rule_id || ''), false, reference).then(url => {
+      if (!overviewDisposed && JSON.stringify(games.value.find(game => game.game_key === gameKey)?.scene_image) === savedReference) {
+        sceneImageUrls.value = { ...sceneImageUrls.value, [gameKey]: url }
+      }
+    }, () => { /* Optional artwork can be fetched again on the next refresh. */ })
+  }
+  await load()
+}
+
+function onToolsToggle(event: Event) {
+  const details = event.currentTarget as HTMLDetailsElement
+  if (!details.open) return
+  lastToolsSummary.value = details.querySelector('summary') as HTMLElement | null
+  lastToolsSummary.value?.focus()
+  openToolDetails().forEach(other => {
+    if (other !== details) other.removeAttribute('open')
+  })
+}
+
+function onOverviewPointerDown(event: PointerEvent) {
+  const target = event.target as Node | null
+  if (target && !(target as Element).closest?.('.overview-game-tools, .overview-archive-tools')) closeTools()
+}
+
+function onOverviewKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && openToolDetails().length) {
+    event.preventDefault()
+    closeTools(true)
+  }
+}
+
+function activateOverview() {
+  if (overviewActive) return
+  overviewActive = true
+  overviewDisposed = false
   void load()
   void loadPeerEntryVisibility()
-})
-onBeforeUnmount(() => {
-  for (const url of Object.values(sceneImageUrls.value)) revokeSceneImageUrl(url)
-})
+  document.addEventListener('pointerdown', onOverviewPointerDown)
+  document.addEventListener('keydown', onOverviewKeydown)
+}
+
+function deactivateOverview() {
+  if (!overviewActive) return
+  overviewActive = false
+  overviewDisposed = true
+  coverTarget.value = null
+  document.removeEventListener('pointerdown', onOverviewPointerDown)
+  document.removeEventListener('keydown', onOverviewKeydown)
+  closeTools()
+}
+
+onMounted(activateOverview)
+onActivated(activateOverview)
+onDeactivated(deactivateOverview)
+onBeforeUnmount(deactivateOverview)
 </script>
 
 <template>
-  <section class="view overview-page">
+  <section ref="overviewRoot" class="view overview-page">
     <div class="overview-layout">
-      <div class="overview-main">
-        <header class="overview-hero">
-      <div>
-        <span class="section-kicker">{{ t('overviewKicker') }}</span>
-        <h1>{{ t('overviewTitle') }}</h1>
-        <p>{{ t('overviewSubtitle') }}</p>
-      </div>
-      <div class="overview-actions">
-        <button v-if="peerEntryVisible" class="peer-launch-button" @click="peerModalOpen = true"><NIcon :component="LinkOutline" />{{ t('peerDirectConnect') }}</button>
-        <button @click="saveImportInput?.click()" :disabled="busy">{{ t('importSave') }}</button>
-        <input ref="saveImportInput" type="file" accept=".zip" @change="onImportSave" hidden>
-        <button class="success" @click="play('')">{{ t('createAdventure') }}</button>
-      </div>
-    </header>
+    <div class="overview-main">
+        <ContentPageHeader
+          class="overview-hero"
+          kicker="GAME ARCHIVE"
+          :title="t('overviewTitle')"
+          :heading-aria-label="t('overviewTitle')"
+          :description="t('overviewSubtitle')"
+        >
+          <template #actions>
+            <div class="overview-actions" :class="{ 'overview-actions-peer': peerEntryVisible }">
+              <template v-if="peerEntryVisible">
+                <button class="overview-entry-action peer-launch-button" @click="peerModalOpen = true"><NIcon :component="LinkOutline" />{{ t('peerDirectConnect') }}</button>
+              </template>
+              <RouterLink data-testid="overview-adventure-library" class="overview-entry-action content-button" :to="{ name: 'library' }">{{ overviewCopy.adventureLibrary }}</RouterLink>
+              <button data-testid="overview-create-adventure" class="overview-entry-action primary" @click="play('')">{{ t('createAdventure') }}</button>
+              <button v-if="error" data-testid="overview-load-retry" type="button" @click="load" :disabled="busy"><NIcon :component="RefreshOutline" />{{ t('retry') }}</button>
+              <!-- With no archive yet the library toolbar does not exist, so keep
+                   an import entry here as a small empty-state escape hatch. -->
+              <button v-if="!loading && !games.length" class="overview-empty-import" @click="saveImportInput?.click()" :disabled="busy">{{ t('importSave') }}</button>
+              <input ref="saveImportInput" type="file" accept=".zip" @change="onImportSave" hidden>
+            </div>
+          </template>
+        </ContentPageHeader>
 
+    <Card v-if="featuredGame" as="section" class="overview-featured" data-testid="overview-featured">
+      <div class="overview-featured-art" :style="gameSceneStyle(featuredGame)" aria-hidden="true">
+        <!-- The featured cover is already cached when returning from another
+             route; synchronous decode prevents a one-frame blank/old fallback
+             while the browser schedules an async decode. -->
+        <img :src="gameSceneUrl(featuredGame)" alt="" fetchpriority="high" decoding="sync">
+      </div>
+      <div class="overview-featured-copy">
+        <span class="section-kicker">{{ t('recentAdventures') }}</span>
+        <h2>{{ featuredGame.world_name || featuredGame.game_key }}</h2>
+        <div class="overview-featured-details">
+          <p>{{ featuredGame.scene || t('notStarted') }}</p>
+          <div class="overview-featured-facts">
+            <span>{{ t('roundPrefix') }}{{ featuredGame.round_number || 0 }}{{ t('roundSuffix') }}</span>
+            <span>{{ t('players') }} {{ featuredGame.player_count || 0 }}/{{ featuredGame.max_players || 0 }}</span>
+            <span>{{ stateLabel(featuredGame.state) }}</span>
+          </div>
+          <Button variant="primary" size="lg" class="overview-featured-enter" @click="play(featuredGame.game_key)"><span>{{ t('enter') }}</span><NIcon :component="EnterOutline" /></Button>
+        </div>
+      </div>
+    </Card>
+
+    <details class="overview-stats-disclosure" open>
+      <summary>{{ t('archiveStats') }}</summary>
     <section class="overview-stats" :aria-label="t('archiveStats')">
       <article v-for="item in statItems" :key="item.key" :class="{ wide: item.wide }">
         <NIcon :component="item.icon" />
         <div><strong>{{ item.value }}</strong><span>{{ item.label }}</span></div>
       </article>
     </section>
+    </details>
 
-    <p v-if="error" class="error-banner">{{ error }}</p>
+    <p v-if="error" class="error-banner" role="alert">{{ error }}</p>
+    <section v-if="loading" class="empty-panel overview-loading" data-testid="overview-loading" role="status"><h2>{{ overviewCopy.loading }}</h2></section>
 
-    <section v-if="games.length" class="adventure-library">
+    <section v-else-if="games.length" class="adventure-library">
       <header class="library-heading">
         <div class="library-heading-copy"><span><i />{{ t('recentAdventures') }}</span><small>{{ games.length }} {{ t('totalSaves') }}</small></div>
-        <div class="library-heading-actions">
+        <div class="library-heading-actions" :class="{ 'is-selection-mode': selectionMode }">
+          <label class="library-search-field">
+            <NIcon :component="SearchOutline" aria-hidden="true" />
+            <input v-model="libraryQuery" type="search" :placeholder="locale === 'zh-CN' ? '搜索存档、世界或场景' : 'Search saves, worlds, or scenes'" :aria-label="locale === 'zh-CN' ? '搜索存档' : 'Search saves'">
+          </label>
           <label class="save-sort-field">
             <span>{{ t('saveSort') }}</span>
             <select v-model="saveSort" class="save-sort-select" :aria-label="t('saveSort')">
@@ -265,19 +470,36 @@ onBeforeUnmount(() => {
               <option value="round">{{ t('saveSortRound') }}</option>
             </select>
           </label>
-          <button @click="selectAll">{{ t('selectAll') }}</button>
-          <button @click="selectInvert">{{ t('invertSelection') }}</button>
-          <button @click="clearSelection" :disabled="!selected.length">{{ t('clearSelection') }}</button>
-          <button @click="exportAll" :disabled="busy">{{ t('exportAll') }}</button>
-          <button v-if="selected.length" class="danger" @click="batchRemove" :disabled="busy">{{ t('deleteSelected') }} {{ selected.length }}</button>
+          <button v-if="!selectionMode" class="overview-select-saves" data-testid="overview-select-saves" @click="enterSelectionMode">{{ t('chooseSave') }}</button>
+          <template v-else>
+            <span class="overview-selection-count">{{ selected.length }} {{ overviewCopy.selected }}</span>
+            <button @click="selectAll">{{ t('selectAll') }}</button>
+            <button @click="selectInvert">{{ t('invertSelection') }}</button>
+            <button @click="clearSelection" :disabled="!selected.length">{{ t('clearSelection') }}</button>
+            <button data-testid="overview-exit-selection" @click="exitSelectionMode">{{ t('cancel') }}</button>
+            <button v-if="selected.length" class="danger" @click="batchRemove" :disabled="busy">{{ t('deleteSelected') }} {{ selected.length }}</button>
+          </template>
+          <button class="overview-import-saves" @click="saveImportInput?.click()" :disabled="busy">{{ t('importSave') }}</button>
+          <details class="overview-archive-tools" @toggle="onToolsToggle">
+            <summary>{{ overviewCopy.management }}</summary>
+            <div>
+              <button @click="closeTools(true); exportAll()" :disabled="busy">{{ t('exportAll') }}</button>
+            </div>
+          </details>
+          <div class="library-view-toggle" role="group" :aria-label="locale === 'zh-CN' ? '存档视图' : 'Save view'">
+            <button type="button" :class="{ active: libraryView === 'grid' }" :aria-pressed="libraryView === 'grid'" :title="locale === 'zh-CN' ? '网格视图' : 'Grid view'" @click="libraryView = 'grid'"><NIcon :component="GridOutline" /></button>
+            <button type="button" :class="{ active: libraryView === 'list' }" :aria-pressed="libraryView === 'list'" :title="locale === 'zh-CN' ? '列表视图' : 'List view'" @click="libraryView = 'list'"><NIcon :component="ListOutline" /></button>
+          </div>
         </div>
       </header>
-      <div class="game-grid">
-        <article v-for="g in sortedGames" :key="g.game_key" class="game-card">
-          <div class="game-card-art" :style="gameSceneStyle(g)" aria-hidden="true" />
+      <div v-if="visibleGames.length" class="game-grid" :class="{ 'is-list': libraryView === 'list' }">
+        <article v-for="g in visibleGames" :key="g.game_key" :data-game-key="g.game_key" class="game-card" :class="{ 'is-selected': selected.includes(g.game_key) }">
+          <div class="game-card-art" :style="gameSceneStyle(g)" aria-hidden="true">
+            <img :src="gameSceneUrl(g)" alt="" loading="lazy" decoding="async">
+          </div>
           <div class="game-card-cover">
             <span class="cover-sigil"><NIcon :component="CompassOutline" /></span>
-            <label class="game-select compact">
+            <label v-if="selectionMode" class="game-select compact">
               <input type="checkbox" :value="g.game_key" v-model="selected" :aria-label="t('chooseSave')">
               <span>{{ t('choose') }}</span>
             </label>
@@ -297,46 +519,38 @@ onBeforeUnmount(() => {
             </div>
             <p class="muted meta">{{ t('token') }} {{ g.total_tokens || 0 }}<span v-if="g.seed_code"> · {{ t('seed') }} <code>{{ g.seed_code }}</code></span></p>
             <div class="game-card-actions">
-              <button class="success game-card-enter" @click="play(g.game_key)"><span>{{ t('enter') }}</span><NIcon :component="EnterOutline" /></button>
-              <div class="game-card-tools">
-                <button @click="exportGame(g.game_key)"><NIcon :component="DownloadOutline" />{{ t('export') }}</button>
-                <button @click="restartGame(g.game_key)" :disabled="busy"><NIcon :component="RefreshOutline" />{{ t('restart') }}</button>
-                <button @click="resetGame(g.game_key)" :disabled="busy"><NIcon :component="CompassOutline" />{{ t('reset') }}</button>
-                <button class="danger" @click="remove(g.game_key)" :disabled="busy"><NIcon :component="TrashOutline" />{{ t('delete') }}</button>
-              </div>
+              <Button variant="primary" size="lg" class="game-card-enter" @click="play(g.game_key)"><span>{{ t('enter') }}</span><NIcon :component="EnterOutline" /></Button>
+                <details class="overview-game-tools" @toggle="onToolsToggle"><summary>{{ overviewCopy.actions }}</summary><div class="game-card-tools">
+                <button @click="closeTools(true); exportGame(g.game_key)"><NIcon :component="DownloadOutline" />{{ t('export') }}</button>
+                <button type="button" data-testid="save-change-cover" @click="changeCover(g)" :disabled="busy"><NIcon :component="ImageOutline" />{{ t('worldsActionChangeCover') }}</button>
+                <button @click="closeTools(true); restartGame(g.game_key)" :disabled="busy"><NIcon :component="RefreshOutline" />{{ t('restart') }}</button>
+                <button @click="closeTools(true); resetGame(g.game_key)" :disabled="busy"><NIcon :component="CompassOutline" />{{ t('reset') }}</button>
+                <button class="danger" @click="closeTools(true); remove(g.game_key)" :disabled="busy"><NIcon :component="TrashOutline" />{{ t('delete') }}</button>
+                </div></details>
             </div>
           </div>
         </article>
       </div>
+      <section v-else class="empty-panel overview-filter-empty"><h2>{{ locale === 'zh-CN' ? '没有匹配的存档' : 'No matching saves' }}</h2><button type="button" @click="libraryQuery = ''">{{ locale === 'zh-CN' ? '清除搜索' : 'Clear search' }}</button></section>
     </section>
 
-    <section v-else class="empty-panel">
+    <section v-else-if="!loading && !error" class="empty-panel" data-testid="overview-empty">
       <h2>{{ t('emptyTitle') }}</h2>
       <p class="muted">{{ t('emptySubtitle') }}</p>
-      <button class="success" @click="play('')">{{ t('createAdventure') }}</button>
+      <button class="primary" @click="play('')">{{ t('createAdventure') }}</button>
     </section>
       </div>
 
-      <NDrawer
-        v-model:show="assistantOpen"
-        placement="right"
-        :width="440"
-        style="max-width: 100vw;"
-        class="overview-assistant-drawer"
-      >
-        <NDrawerContent :native-scrollbar="false" body-content-style="padding: 0; height: 100%;">
-          <AssistantPanel @close="assistantOpen = false" />
-        </NDrawerContent>
-      </NDrawer>
       <PeerConnectModal v-model:show="peerModalOpen" />
-      <AssistantGreetingBubble @open="assistantOpen = true" />
-      <button
-        class="overview-assistant-fab"
-        @click="assistantOpen = true"
-        :aria-label="t('toggleAssistant')"
-      >
-        <NIcon :component="SparklesOutline" size="20" />
-      </button>
+      <GameSceneImageDialog
+        v-if="coverTarget"
+        :key="coverTarget.game_key"
+        :game-key="coverTarget.game_key"
+        :rule-id="String(coverTarget.rule_id || '')"
+        :game-name="coverTarget.world_name || coverTarget.game_key"
+        @close="coverTarget = null"
+        @saved="onCoverSaved"
+      />
     </div>
   </section>
 </template>
@@ -351,59 +565,6 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-/* 抽屉内容铺满,助手面板自身撑满高度 */
-.overview-assistant-drawer :deep(.n-drawer-content) {
-  padding: 0;
-}
-.overview-assistant-drawer :deep(.n-drawer-body),
-.overview-assistant-drawer :deep(.n-drawer-body-content-wrapper) {
-  height: 100%;
-  padding: 0;
-}
-.overview-assistant-drawer :deep(.n-drawer-header) {
-  display: none;
-}
-.overview-assistant-drawer :deep(.assistant-panel) {
-  height: 100%;
-}
-
-/* 侧边悬浮圆钮:AI 助手入口 */
-.overview-assistant-fab {
-  position: fixed;
-  right: 18px;
-  bottom: calc(24px + env(safe-area-inset-bottom));
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  padding: 0;
-  border: 1px solid color-mix(in srgb, var(--df-accent-strong) 45%, var(--df-border-soft));
-  border-radius: 50%;
-  background: var(--df-surface-2);
-  color: var(--df-accent-strong);
-  cursor: pointer;
-  box-shadow: var(--df-shadow);
-}
-.overview-assistant-fab:hover {
-  border-color: var(--df-interactive-strong);
-  color: var(--df-interactive-strong);
-}
-
-@media (max-width: 700px) {
-  .overview-assistant-fab {
-    right: 14px;
-    bottom: calc(72px + env(safe-area-inset-bottom));
-    width: 44px;
-    height: 44px;
-  }
-
-  /* Mobile keeps the entry silent: no onboarding/help speech bubble. */
-  .overview-assistant-fab::before,
-  .overview-assistant-fab::after {
-    display: none !important;
-    content: none !important;
-  }
-}
 </style>
+
+<style src="./overview.css"></style>

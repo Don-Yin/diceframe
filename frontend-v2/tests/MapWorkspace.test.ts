@@ -58,4 +58,20 @@ describe('MapWorkspace', () => {
     expect(plain.find('.map-visibility-hint').exists()).toBe(false)
     i18n.global.locale.value = 'zh-CN'
   })
+
+  it('embedded mode keeps the page flow and does not lock body scrolling', async () => {
+    document.body.style.overflow = 'auto'
+    const wrapper = mount(MapWorkspace, {
+      global: { plugins: [i18n], stubs: { Teleport: true } },
+      props: { map, embedded: true },
+    })
+
+    expect(wrapper.find('.map-workspace-embedded').exists()).toBe(true)
+    expect(document.body.style.overflow).toBe('auto')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(wrapper.emitted('close')).toBeUndefined()
+    await wrapper.get('button[aria-label="关闭"]').trigger('click')
+    expect(wrapper.emitted('close')).toBeTruthy()
+    wrapper.unmount()
+  })
 })

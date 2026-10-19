@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import json
 import logging
 import secrets
@@ -11,20 +13,30 @@ from typing import Any
 
 from src.commands.game_lifecycle import RunInitializationError
 from src.engine.game_instance import GameState
-from src.engine.modules import adventure_runtime_state, content_binding, progression_state, room_access, table_settings
+from src.engine.modules import adventure_runtime_state, content_binding, progression_state, room_access
 from src.content_modules.refs import ContentRef, ContentRefError, parse_content_ref
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
 from src.engine.narrative_perspective import validate_narrative_perspective
+from src.engine.story import validate_story_mode
+from src.engine import module_hooks
+from src.engine import game_preferences
+from src.game_preferences import UNSET, validate_preferences
 from src.content.gm_style import normalize_gm_style_override
 from src.rulesets.contracts import LiveAdvancementPolicyRuntime
 
-from src.webui.services._common import _GAME_KEY_SEP, _is_safe_world_id
+from src.webui.services._common import (
+    _GAME_KEY_SEP,
+    _is_safe_world_id,
+    professional_character_validation_error,
+    resolve_default_scene_image,
+)
 from src.webui.services import game_creation_phases, game_seed_lifecycle
 from src.webui.game_lifecycle_context import (
     CreationPhase,
     CreationTransaction,
     GameLifecycleDependencies,
     _start_created_game,
+    resume_created_ai_table,
 )
 
 logger = logging.getLogger("trpg")
@@ -109,16 +121,31 @@ async def create_game(
     adventure_source_kind: str = "",
     adventure_source_id: str = "",
     play_mode: str = "",
-    narrative_perspective: str = "auto",
-    gm_style_override: dict[str, Any] | None = None,
-    advancement_mode: str = "milestone",
-    advancement_authority: str = "ai_gm",
+    narrative_perspective: Any = UNSET,
+    story_mode: Any = UNSET,
+    gm_style_override: Any = UNSET,
+    advancement_mode: Any = UNSET,
+    advancement_authority: Any = UNSET,
     unclaimed_control_default: str = "",
     world_ref: dict[str, Any] | None = None,
     book_bindings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if not dependencies.handler or not dependencies.registry:
         return {"ok": False, "error": "系统未就绪"}
+    defaults = validate_preferences(getattr(dependencies, 'get_game_defaults', lambda: {})())
+    narrative_perspective = defaults['narrative_perspective'] if narrative_perspective is UNSET else narrative_perspective
+    story_mode = defaults['story_mode'] if story_mode is UNSET else story_mode
+    gm_style_override = defaults['gm_style_override'] if gm_style_override is UNSET else gm_style_override
+    advancement_mode = defaults['advancement_mode'] if advancement_mode is UNSET else advancement_mode
+    advancement_authority = defaults['advancement_authority'] if advancement_authority is UNSET else advancement_authority
+    try:
+        normalized_story_mode = validate_story_mode(story_mode)
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "error_code": "INVALID_STORY_MODE",
+            "error": "故事模式无效，仅支持 prose 或 dialogue",
+        }
     if config_error := dependencies.llm_configuration_error(language):
         return config_error
     parsed_world_ref: ContentRef | None = None
@@ -158,6 +185,13 @@ async def create_game(
                 })
         except (ContentRefError, TypeError, ValueError) as exc:
             return {"ok": False, "error_code": "INVALID_BOOK_BINDINGS", "error": str(exc)}
+        # Validate before materializing worlds or creating registry state.
+        # Explicit refs address a Book, never the world's primary-book alias.
+        store = dependencies.lorebook
+        for binding in normalized_book_bindings:
+            book_id = binding["ref"].id
+            if store is None or not hasattr(store, "get_lorebook") or not store.get_lorebook(book_id):
+                return {"ok": False, "error_code": "BOOK_NOT_FOUND", "error": book_id}
         if normalized_book_bindings and not lorebook_world_id:
             first_ref = normalized_book_bindings[0]["ref"]
             if first_ref.source_kind == "world":
@@ -174,16 +208,36 @@ async def create_game(
     normalized_play_mode = str(play_mode or "").strip().casefold()
     if not normalized_play_mode:
         normalized_play_mode = "adventure" if str(adventure_id or "").strip() else "free"
-    if normalized_play_mode not in {"free", "adventure"}:
+    if normalized_play_mode not in adventure_runtime_state.PLAY_MODES:
         return {"ok": False, "error": "玩法模式无效"}
+    if normalized_play_mode == "gal":
+        if not solo:
+            return {"ok": False, "error_code": "GAL_REQUIRES_SOLO", "error": "GAL 玩法只能创建单人局"}
+        if str(rule_id or "").strip() != "gal_narrative":
+            return {"ok": False, "error_code": "GAL_REQUIRES_NARRATIVE_RULE", "error": "GAL 玩法必须使用 gal_narrative 叙事规则"}
+        if str(adventure_id or "").strip():
+            return {"ok": False, "error_code": "GAL_CANNOT_BIND_ADVENTURE", "error": "GAL 玩法不能绑定冒险包"}
     if normalized_play_mode == "adventure" and not str(adventure_id or "").strip():
         return {"ok": False, "error": "冒险包剧情模式必须选择冒险包"}
     if normalized_play_mode == "free" and str(adventure_id or "").strip():
         return {"ok": False, "error": "标准自由对局不能绑定冒险包"}
 
+    unique_id = f"{world_id}_{time.time_ns()}"
+    game_key = ("web", unique_id, "web_bot")
     try:
-        default_scene_image = dependencies.resolve_default_scene_image(
-            source_world_id or world_id, rule_id
+        default_scene_images = (
+            dependencies.list_default_scene_images(
+                source_world_id or world_id,
+                rule_id,
+            )
+            if dependencies.list_default_scene_images is not None
+            else []
+        )
+        default_scene_image = resolve_default_scene_image(
+            dependencies.resolve_default_scene_image,
+            source_world_id or world_id,
+            rule_id,
+            _GAME_KEY_SEP.join(game_key),
         )
         selected_scene_image = dependencies.materialize_scene_image(
             scene_image if scene_image else default_scene_image
@@ -191,9 +245,6 @@ async def create_game(
         selected_map_background = dependencies.validate_map_background(map_background)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
-
-    unique_id = f"{world_id}_{time.time_ns()}"
-    game_key = ("web", unique_id, "web_bot")
 
     instance = dependencies.registry.get(game_key)
     if instance and instance.state not in (GameState.CREATED, GameState.ENDED):
@@ -246,15 +297,23 @@ async def create_game(
                 for character in players
             ]
     except ValueError as exc:
-        error_code = (
-            "INCOMPATIBLE_ADVENTURE"
-            if str(adventure_id or "").strip()
-            else "INVALID_PROFESSIONAL_CHARACTER"
-        )
+        error_code, error = professional_character_validation_error(exc)
+        if error_code == "PROFESSIONAL_CHARACTER_BLUEPRINT_REQUIRED":
+            return {
+                "ok": False,
+                "error_code": error_code,
+                "error": error,
+            }
+        if str(adventure_id or "").strip():
+            return {
+                "ok": False,
+                "error_code": "INCOMPATIBLE_ADVENTURE",
+                "error": str(exc),
+            }
         return {
             "ok": False,
             "error_code": error_code,
-            "error": str(exc),
+            "error": error,
         }
 
     game_creation_phases.materialize_world(
@@ -272,6 +331,7 @@ async def create_game(
         difficulty=difficulty,
         scene_image=scene_image,
         default_scene_image=default_scene_image,
+        default_scene_images=default_scene_images,
     )
     transaction.advance(CreationPhase.WORLD_MATERIALIZED)
 
@@ -319,6 +379,9 @@ async def create_game(
     )
     if content_error is not None:
         return content_error
+    # Story mode is a module-owned preference and must be established before
+    # opening generation so the generation path sees the selected mode.
+    module_hooks.record(instance, module_hooks.STORY_MODE, normalized_story_mode)
     adventure_runtime_state.replace_play_mode(instance, normalized_play_mode)
     # FIX-04 §6.5/§6.6：v2 冒险在同一创建事务里初始化进度并原子物化世界种子；
     # 失败即整体回滚（不留下 partial save / partial world）。
@@ -344,6 +407,7 @@ async def create_game(
         narrative_perspective=normalized_narrative_perspective,
     )
     instance.set_gm_style_override(normalized_gm_style)
+    game_preferences.apply(instance, {key: defaults[key] for key in ('push_enabled', 'quick_actions_enabled', 'dice_reveal_mode', 'luck_timeout_seconds')})
     if isinstance(runtime, LiveAdvancementPolicyRuntime):
         try:
             runtime.configure_live_advancement(
@@ -385,6 +449,8 @@ async def create_game(
                 "id": source_book_id,
                 "digest": "",
             })
+        if book_bindings is not None:
+            content_binding.select_books_explicitly(instance)
         if normalized_book_bindings:
             store = dependencies.lorebook
             if store is None or not hasattr(store, "bind_lorebook"):
@@ -469,6 +535,9 @@ async def create_game(
             "error": "保存新游戏失败，未留下半成品存档，请重试。",
         }
 
+    # 提交之后才唤醒纯 AI 对局；自动推进失败不会破坏已经成功保存的创建结果。
+    await resume_created_ai_table(dependencies, instance)
+
     return {
         "ok": True,
         "game_key": _GAME_KEY_SEP.join(game_key),
@@ -480,7 +549,8 @@ async def create_game(
         "players": created_players,
         "round_number": progression_state.round_value(instance),
         "state": instance.state.value,
-        "seed_code": table_settings.seed_code(instance),
+        "seed_code": game_config.seed_code(instance),
+        "story_mode": module_hooks.ask(module_hooks.STATE_READ, instance, module_hooks.STORY_MODE, default="prose"),
         "adventure_binding": dict(instance.adventure_binding),
     }
 
@@ -513,7 +583,7 @@ async def reset_game(
         "narration": dependencies.clean_public_narration(
             inst.log[-1].get("gm_response", "") if inst.log else ""
         ),
-        "seed_code": table_settings.seed_code(inst),
+        "seed_code": game_config.seed_code(inst),
     }
 
 
@@ -542,7 +612,7 @@ async def restart_game(
         "narration": dependencies.clean_public_narration(
             inst.log[-1].get("gm_response", "") if inst.log else ""
         ),
-        "seed_code": table_settings.seed_code(inst),
+        "seed_code": game_config.seed_code(inst),
     }
 
 

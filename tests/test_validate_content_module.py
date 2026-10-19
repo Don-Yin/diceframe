@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.validate_content_module import validate_module
 
 
@@ -62,3 +64,20 @@ def test_missing_plugin_json_fails_closed(tmp_path: Path) -> None:
     report = validate_module(empty)
     assert report["ok"] is False
     assert report["errors"] == ["missing plugin.json"]
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_validation_does_not_write_to_the_authors_workspace(tmp_path: Path, valid: bool) -> None:
+    plugin_dir = _make_module(tmp_path)
+    if not valid:
+        manifest = plugin_dir / "plugin.json"
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data["entrypoint"] = ["python", "forbidden.py"]
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+    before = {path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+
+    report = validate_module(plugin_dir)
+
+    assert report["ok"] is valid, report
+    after = {path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    assert after == before

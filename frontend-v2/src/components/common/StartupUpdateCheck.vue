@@ -6,12 +6,13 @@ import { errorMessage } from '@/api/client'
 import { useUpdateCheck } from '@/composables/useUpdateCheck'
 import { getDialog } from '@/composables/useNaiveBridge'
 import { useLocale } from '@/composables/useLocale'
+import { selectReleaseNotes } from '@/utils/releaseNotes'
 
 const route = useRoute()
 const router = useRouter()
 const emit = defineEmits<{ settled: [] }>()
 const { checkForUpdates } = useUpdateCheck()
-const { t } = useLocale()
+const { t, locale } = useLocale()
 // Show at most once per process; cross-version dedupe is handled below.
 let notified = false
 let activeDialog: DialogReactive | null = null
@@ -95,7 +96,7 @@ async function checkOnce() {
       markNotified(result.latest.version || '')
       showUpdateDialog(
         version,
-        String(result.latest.body || ''),
+        selectReleaseNotes(String(result.latest.body || ''), locale.value).text,
       )
       return
     }

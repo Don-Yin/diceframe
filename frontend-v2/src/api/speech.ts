@@ -70,6 +70,21 @@ export const speechApi = {
     )
     return result.text
   },
+  assistantSynthesize: async (request: TtsSpeechRequest): Promise<Blob> => {
+    const response = await apiBlob('/assistant/speech', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })
+    return response.blob()
+  },
+  assistantTranscribe: async (blob: Blob, lang = ''): Promise<string> => {
+    const query = lang ? `?lang=${encodeURIComponent(lang)}` : ''
+    const result = await api<{ ok: boolean; text: string }>(
+      `/assistant/transcription${query}`,
+      { method: 'POST', body: blob },
+    )
+    return result.text
+  },
   transcribeTest: async (blob: Blob, lang = ''): Promise<string> => {
     const query = lang ? `?lang=${encodeURIComponent(lang)}` : ''
     const result = await api<{ ok: boolean; text: string }>(

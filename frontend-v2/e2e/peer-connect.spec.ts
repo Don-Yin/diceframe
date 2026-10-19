@@ -5,9 +5,10 @@ const DND_GAME_KEY = 'web|e2e-dnd2024|web_bot'
 
 test('two clients establish a direct data channel through Hub signaling', async ({ browser, request }) => {
   const context = await browser.newContext({ locale: 'zh-CN' })
-  await prepareAuthenticatedContext(context, request)
-  const host = await context.newPage()
-  const guest = await context.newPage()
+  try {
+    await prepareAuthenticatedContext(context, request)
+    const host = await context.newPage()
+    const guest = await context.newPage()
 
   await host.goto('/#/peer')
   await host.getByLabel('要开放的多人冒险').selectOption('web|e2e-room|web_bot')
@@ -47,7 +48,9 @@ test('two clients establish a direct data channel through Hub signaling', async 
   // 移动端角色面板默认收起，名字节点存在但隐藏；用 attached 断言身份已建立即可。
   await expect(guest.getByText('Peer E2E Player').first()).toBeAttached({ timeout: 20_000 })
 
-  await context.close()
+  } finally {
+    await context.close()
+  }
 })
 
 test('a separate peer client joins a DND 2024 table with a canonical professional character', async ({ browser, request }, testInfo) => {
@@ -56,12 +59,13 @@ test('a separate peer client joins a DND 2024 table with a canonical professiona
 
   const hostContext = await browser.newContext({ locale: 'zh-CN' })
   const guestContext = await browser.newContext({ locale: 'zh-CN' })
-  await Promise.all([
-    prepareAuthenticatedContext(hostContext, request),
-    prepareAuthenticatedContext(guestContext, request),
-  ])
-  const host = await hostContext.newPage()
-  const guest = await guestContext.newPage()
+  try {
+    await Promise.all([
+      prepareAuthenticatedContext(hostContext, request),
+      prepareAuthenticatedContext(guestContext, request),
+    ])
+    const host = await hostContext.newPage()
+    const guest = await guestContext.newPage()
 
   await host.goto('/#/peer')
   await guest.goto('/#/peer')
@@ -116,5 +120,7 @@ test('a separate peer client joins a DND 2024 table with a canonical professiona
   expect(joined?.character_sheet?.ruleset_character).toBeTruthy()
   expect(joined?.character_sheet?.ruleset_character?.profile?.notes).toBe('由双客户端直连保存')
 
-  await Promise.all([hostContext.close(), guestContext.close()])
+  } finally {
+    await Promise.all([hostContext.close(), guestContext.close()])
+  }
 })

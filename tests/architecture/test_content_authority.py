@@ -1,9 +1,8 @@
-"""Shrink-only baseline for the remaining legacy lorebook world callers.
+"""Architecture guard for legacy lorebook world-owned reads.
 
-PR A does not pretend that the old ``list_entries(world_id)`` surface is
-already gone.  It records the current debt so later Track C PRs can remove
-callers one at a time without permitting a new runtime dependency on the
-legacy world projection.
+Track C compatibility is isolated behind the explicit content projection
+adapter.  Business modules must not add or retain direct
+``list_entries(world_id)`` calls.
 """
 
 from __future__ import annotations
@@ -18,20 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # Keys are source file + enclosing function, rather than line numbers, so
 # harmless edits inside a legacy caller do not make the baseline brittle.
-LEGACY_WORLD_LIST_ENTRIES: dict[tuple[str, str], int] = {
-    ("src/commands/round_actions.py", "initialize_puzzles_from_lorebook"): 1,
-    ("src/lorebook/retrieval.py", "ensure_world"): 1,
-    ("src/webui/services/characters.py", "list_characters"): 1,
-    ("src/webui/services/game_creation_phases.py", "copy_lorebook_entries"): 1,
-    ("src/webui/services/knowledge.py", "preview"): 1,
-    ("src/webui/services/plugins.py", "export_content_pack"): 1,
-    ("src/webui/services/worlds.py", "_user_template_from_lore"): 1,
-    ("src/webui/services/worlds.py", "list_entries"): 1,
-    ("src/webui/services/worlds.py", "import_entries"): 1,
-    ("src/webui/services/worlds.py", "_prepare_entry"): 1,
-    ("src/webui/services/worlds.py", "generate_lorebook_entries"): 1,
-    ("src/webui/services/worlds.py", "_sync_user_template_lorebook"): 1,
-}
+LEGACY_WORLD_LIST_ENTRIES: dict[tuple[str, str], int] = {}
 
 
 def _references_world_id(node: ast.AST) -> bool:
@@ -100,7 +86,9 @@ def assert_shrink_only(
 
 
 def test_legacy_world_list_entries_match_shrink_only_baseline() -> None:
-    assert_shrink_only(scan_legacy_world_list_entries(ROOT), LEGACY_WORLD_LIST_ENTRIES)
+    observed = scan_legacy_world_list_entries(ROOT)
+    assert_shrink_only(observed, LEGACY_WORLD_LIST_ENTRIES)
+    assert not observed
 
 
 def test_new_legacy_world_list_entries_caller_is_rejected(tmp_path: Path) -> None:
@@ -116,6 +104,4 @@ def test_new_legacy_world_list_entries_caller_is_rejected(tmp_path: Path) -> Non
 
 
 def test_removed_legacy_world_list_entries_caller_is_allowed() -> None:
-    observed = Counter(LEGACY_WORLD_LIST_ENTRIES)
-    observed.pop(("src/webui/services/worlds.py", "list_entries"))
-    assert_shrink_only(observed, LEGACY_WORLD_LIST_ENTRIES)
+    assert_shrink_only(Counter(), LEGACY_WORLD_LIST_ENTRIES)

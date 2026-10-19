@@ -71,3 +71,18 @@ def check_d100_bonus(threshold: int, bonus_dice: int = 0, penalty_dice: int = 0)
                         total=total, natural=total,
                         is_critical=(verdict == "大成功"), is_fumble=(verdict == "大失败"))
     return result, verdict
+
+
+def project_percentile_dice(candidates: list[int], chosen: int, mode: str) -> dict:
+    """Project rule-owned faces; never present independent d100s as shared units."""
+    if not candidates or chosen not in candidates or any(type(value) is not int or not 1 <= value <= 100 for value in candidates):
+        raise ValueError("invalid percentile candidates")
+    units = candidates[0] % 10
+    if any(value % 10 != units for value in candidates):
+        raise ValueError("CoC candidates must use shared units")
+    if len(candidates) > 1 and mode not in {"advantage", "disadvantage"}:
+        raise ValueError("extra percentile candidates require a bonus or penalty mode")
+    return {"units": units, "tens": [(value % 100) // 10 * 10 for value in candidates],
+            "candidates": list(candidates), "taken_index": candidates.index(chosen),
+            "bonus_dice": len(candidates) - 1 if mode == "advantage" else 0,
+            "penalty_dice": len(candidates) - 1 if mode == "disadvantage" else 0}

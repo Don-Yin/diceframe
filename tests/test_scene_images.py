@@ -72,6 +72,61 @@ def test_default_precedence_is_world_then_rule_then_builtin(tmp_path):
     }
 
 
+def test_builtin_defaults_expose_variants_without_changing_legacy_primary(tmp_path):
+    api = _Api(tmp_path)
+
+    candidates = api.scene_images.default_candidates("", "dnd5e")
+
+    assert candidates[0] == {"kind": "builtin", "id": "dnd5e"}
+    assert len(candidates) >= 2
+    assert all(item["kind"] == "builtin" for item in candidates)
+
+
+def test_builtin_variant_pools_keep_each_ruleset_theme(tmp_path):
+    api = _Api(tmp_path)
+
+    assert [item["id"] for item in api.scene_images.default_candidates("", "freeform_coc")] == [
+        "freeform_coc", "freeform_coc_harbor", "freeform_coc_town",
+    ]
+    assert [item["id"] for item in api.scene_images.default_candidates("", "freeform_cyberpunk")] == [
+        "freeform_cyberpunk", "freeform_cyberpunk_alley", "freeform_cyberpunk_rooftops",
+    ]
+    assert [item["id"] for item in api.scene_images.default_candidates("", "freeform_wuxia")] == [
+        "freeform_wuxia", "freeform_wuxia_mountains", "freeform_wuxia_riverside",
+    ]
+
+
+def test_default_variant_selection_is_stable_for_a_save_and_can_vary_between_saves(tmp_path):
+    api = _Api(tmp_path)
+
+    first = api.scene_images.choose_default("", "dnd5e", "save-a")
+    again = api.scene_images.choose_default("", "dnd5e", "save-a")
+
+    assert first == again
+    # The chooser is deterministic rather than relying on process-global RNG;
+    # a different save identity is allowed to select another candidate.
+    choices = {
+        api.scene_images.choose_default("", "dnd5e", f"save-{index}")["id"]
+        for index in range(32)
+    }
+    assert len(choices) >= 2
+
+
+def test_explicit_pool_keeps_legacy_primary_even_when_list_omits_it(tmp_path):
+    api = _Api(tmp_path)
+    api.rule = {
+        "scene_image": {"kind": "builtin", "id": "freeform_fantasy"},
+        "scene_images": [
+            {"kind": "builtin", "id": "mountain_city"},
+            {"kind": "builtin", "id": "dark_fantasy"},
+        ],
+    }
+
+    assert [item["id"] for item in api.scene_images.default_candidates("", "freeform_fantasy")] == [
+        "freeform_fantasy", "mountain_city", "dark_fantasy",
+    ]
+
+
 def test_package_scene_image_writes_portable_asset_reference(tmp_path):
     api = _Api(tmp_path)
     upload = api.scene_images.save_upload(

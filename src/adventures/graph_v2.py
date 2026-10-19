@@ -31,6 +31,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from src.engine.world.contracts import RELATION_KINDS
+
 from src.adventures.gates import GateError, validate_gates
 
 ADVENTURE_GRAPH_FORMAT_V2 = "diceframe:adventure-graph-v2"
@@ -104,10 +106,11 @@ def _validate_node_outcomes(raw: Any, node_id: str) -> list[dict[str, Any]]:
     return validated
 
 
-def _validate_transition(raw: Any, label: str) -> dict[str, Any]:
+def _validate_transition(raw: Any, label: str, *, exclusive: bool = False) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise AdventureGraphV2Error(f"{label} transition must be an object")
-    extra = sorted(set(raw) - {"to", "conditions"})
+    allowed = {"to", "conditions"} | ({"choice_id", "choice_label"} if exclusive else set())
+    extra = sorted(set(raw) - allowed)
     if extra:
         raise AdventureGraphV2Error(f"{label} transition has unknown field: {extra[0]!r}")
     to_id = _required_id(raw.get("to"), f"{label} transition.to")
@@ -115,7 +118,16 @@ def _validate_transition(raw: Any, label: str) -> dict[str, Any]:
         conditions = validate_gates(raw.get("conditions", []), label=label)
     except GateError as exc:
         raise AdventureGraphV2Error(f"{label} {exc}") from exc
-    return {"to": to_id, "conditions": conditions}
+    result = {"to": to_id, "conditions": conditions}
+    if exclusive:
+        result["choice_id"] = _required_id(raw.get("choice_id"), f"{label} choice_id")
+        if len(result['choice_id']) > 128:
+            raise AdventureGraphV2Error(f"{label} choice_id exceeds 128 characters")
+        text = raw.get("choice_label")
+        if not isinstance(text, str) or not text.strip() or len(text) > 256:
+            raise AdventureGraphV2Error(f"{label} choice_label must contain 1–256 characters")
+        result["choice_label"] = text.strip()
+    return result
 
 
 # 种子上界（母方案 §167）：与 world 容器上限同量级、收紧到冒险种子语义。
@@ -160,6 +172,8 @@ def _validate_world_seed(raw: Any) -> dict[str, Any]:
         extra = sorted(set(relation) - {"relation_id", "kind", "from_ref", "to_ref", "visibility", "source_ref"})
         if extra:
             raise AdventureGraphV2Error(f"world_seed relation has unknown field: {extra[0]!r}")
+        if relation["kind"] not in RELATION_KINDS:
+            raise AdventureGraphV2Error(f"world_seed relation kind is invalid: {relation['kind']!r}")
     for fact in facts:
         if not isinstance(fact, dict) or not fact.get("key") or "value" not in fact:
             raise AdventureGraphV2Error("world_seed fact needs key and value")
@@ -208,6 +222,9 @@ def validate_graph_v2(adventure: Any) -> dict[str, Any]:
         raise AdventureGraphV2Error(f"v2 adventure has unknown field: {extra[0]!r}")
 
     adventure_id = _required_id(adventure.get("id"), "v2 adventure id")
+    schema = adventure.get("schema_version", 1)
+    if type(schema) is not int or schema not in (1, 2):
+        raise AdventureGraphV2Error("unsupported adventure graph schema")
     visibility = _validate_visibility(adventure.get("visibility", "public"), "adventure")
 
     # chapters：仅 id + name（成员关系由节点 chapter_id 表达，v2 不做双向
@@ -237,6 +254,8 @@ def validate_graph_v2(adventure: Any) -> dict[str, Any]:
             # ADV2-04 / FIX-04 §6.1：node 完成后的 outcome 声明（唯一归属点）。
             "on_complete",
         }
+        if schema == 2:
+            node_allowed.add("choice_mode")
         node_extra = sorted(set(raw) - node_allowed)
         if node_extra:
             raise AdventureGraphV2Error(f"v2 node has unknown field: {node_extra[0]!r}")
@@ -281,6 +300,14 @@ def validate_graph_v2(adventure: Any) -> dict[str, Any]:
         transitions = _bounded_list(
             raw.get("transitions", []), f"node {node_id} transitions", MAX_TRANSITIONS_PER_NODE,
         )
+        choice_mode = raw.get("choice_mode", "parallel")
+        if choice_mode not in {"parallel", "exclusive"}:
+            raise AdventureGraphV2Error("unsupported node choice_mode")
+        validated_transitions = [_validate_transition(transition, f"node {node_id}", exclusive=choice_mode == "exclusive") for transition in transitions]
+        if choice_mode == "exclusive":
+            identities = [transition["choice_id"] for transition in validated_transitions]
+            if not identities or len(set(identities)) != len(identities):
+                raise AdventureGraphV2Error("exclusive choices require distinct choice identities")
         nodes[node_id] = {
             "id": node_id,
             "type": node_type,
@@ -289,15 +316,14 @@ def validate_graph_v2(adventure: Any) -> dict[str, Any]:
             "optional": bool(raw.get("optional", False)),
             "name": str(raw.get("name") or ""),
             "description": str(raw.get("description") or ""),
-            "transitions": [
-                _validate_transition(transition, f"node {node_id}")
-                for transition in transitions
-            ],
+            "transitions": validated_transitions,
             "on_complete": _validate_node_outcomes(raw.get("on_complete"), node_id),
             "scene_ref": refs.get("scene_ref"),
             "encounter_ref": refs.get("encounter_ref"),
             "npc_refs": list(npc_refs),
         }
+        if choice_mode == "exclusive":
+            nodes[node_id]["choice_mode"] = "exclusive"
     if not nodes:
         raise AdventureGraphV2Error("v2 adventure requires at least one node")
 
@@ -384,6 +410,7 @@ def validate_graph_v2(adventure: Any) -> dict[str, Any]:
 
     return {
         "id": adventure_id,
+        "schema_version": schema,
         "format": ADVENTURE_GRAPH_FORMAT_V2,
         "world_seed": world_seed,
         "visibility": visibility,
@@ -500,7 +527,7 @@ def project_graph_v2(graph: dict[str, Any], *, viewer_is_gm: bool = False) -> di
         projected = dict(node)
         if not viewer_is_gm:
             projected["transitions"] = [
-                {"to": str(transition.get("to") or "")}
+                {key: transition[key] for key in ("to", "choice_id", "choice_label") if key in transition}
                 for transition in node.get("transitions", [])
                 if str(transition.get("to") or "") in visible_ids
             ]

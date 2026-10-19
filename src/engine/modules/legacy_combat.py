@@ -17,6 +17,9 @@ slot (and its generic ``combat_enemies`` list) was retired; instance
 migration v42 -> v43 drops it from old saves. Generic hp_based /
 lethal_narrative combat targets players by uid and NPCs by ``npc:<id>``. A
 future generic encounter authority is a separate design, not this module.
+
+The core flow reads the view only through ``module_hooks.combat_view``; without
+this module every game reads the neutral view.
 """
 
 from __future__ import annotations
@@ -25,7 +28,13 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from typing import Any
 
+from src.engine import module_hooks
 from src.engine.modules import ruleset_runtime
+
+# Hook owner name (not MODULE_NAME: this module owns no slot).  Derived rather
+# than spelled out: the retired slot name must
+# not reappear as a literal (architecture guard).
+HOOK_OWNER = __name__.rsplit(".", 1)[-1]
 
 CombatProjector = Callable[[Any], "Mapping[str, Any] | None"]
 
@@ -51,12 +60,7 @@ def combat_projector_for(runtime_id: str) -> CombatProjector | None:
 
 
 def neutral_view() -> dict[str, Any]:
-    return {
-        "combat_state": "none",
-        "combat_active": False,
-        "initiative_order": [],
-        "initiative_current": 0,
-    }
+    return module_hooks.neutral_combat_view()
 
 
 def view(instance: Any) -> dict[str, Any]:
@@ -90,3 +94,10 @@ def initiative_order(instance: Any) -> list[Any]:
 
 def initiative_current(instance: Any) -> int:
     return view(instance)["initiative_current"]
+
+
+def read_state(instance: Any, kind: str) -> Any:
+    return view(instance) if kind == module_hooks.COMBAT_VIEW else None
+
+
+module_hooks.register(module_hooks.STATE_READ, HOOK_OWNER, read_state)

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "adventure_id": "plugin:lantern-harbor",
+  "version": "1.0.0",
+  "format": "diceframe:adventure-graph-v2",
+  "world_policy": "portable",
+  "recommended_world_id": "lantern_harbor",
+  "required_runtime": {
+    "id": "core:dnd2024",
+    "minimum_version": 1
+  },
+  "default_locale": "en",
+  "supported_locales": [
+    "en",
+    "zh-CN"
+  ]
+}

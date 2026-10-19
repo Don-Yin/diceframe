@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from src.engine import module_hooks
+
 import json
 from typing import Any
 
-from src.engine.modules import narrative_notes
+
 
 
 ADVENTURE_CHOICE_TOOL_NAME = "dnd2024_adventure_choice"
@@ -132,7 +134,7 @@ async def plan_encounter_preset(
     if not actions:
         return None
     context = json.dumps({
-        "scene": str(narrative_notes.scene(instance) or "")[:500],
+        "scene": str(module_hooks.narrative_view(instance)["scene"] or "")[:500],
         "recent_narration": [
             str(item.get("gm_response") or "")[:1000]
             for item in (getattr(instance, "log", []) or [])[-2:]
@@ -210,7 +212,7 @@ async def plan_adventure_choice(
     if not allowed:
         return None
     context = json.dumps({
-        "scene": str(narrative_notes.scene(instance) or "")[:300],
+        "scene": str(module_hooks.narrative_view(instance)["scene"] or "")[:300],
         "step": {
             "id": str(step.get("id") or ""),
             "title": str(step.get("title") or "")[:200],

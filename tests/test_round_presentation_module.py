@@ -1,5 +1,7 @@
 """Persistence and live compatibility contracts for round presentation."""
 
+from legacy_save_fixtures import legacy_table_payload
+
 from copy import deepcopy
 
 import pytest
@@ -49,13 +51,17 @@ def test_existing_slot_wins_even_when_empty_or_unknown(slot):
 @pytest.mark.parametrize("value", [None, "invalid", 4, False])
 def test_malformed_values_use_defaults(value):
     payload = {key: value for key in VALUES}
-    assert _migrate_v25_to_v26(payload)["modules"][module.MODULE_NAME] == module.fresh()
+    # The historical migration shape is unchanged; runtime normalization adds
+    # the optional display preference for loaded saves.
+    legacy_defaults = {"schema_version": 1, **{key: module.fresh()[key] for key in VALUES}}
+    assert _migrate_v25_to_v26(payload)["modules"][module.MODULE_NAME] == legacy_defaults
     assert module.ensure({"schema_version": 1, **{key: value for key in VALUES}}) == module.fresh()
     assert module.ensure(value) == module.fresh()
 
 
 def test_missing_values_use_defaults():
-    assert _migrate_v25_to_v26({})["modules"][module.MODULE_NAME] == module.fresh()
+    legacy_defaults = {"schema_version": 1, **{key: module.fresh()[key] for key in VALUES}}
+    assert _migrate_v25_to_v26({})["modules"][module.MODULE_NAME] == legacy_defaults
     assert module.ensure({"schema_version": 1}) == module.fresh()
 
 
@@ -82,6 +88,7 @@ def test_codec_roundtrip_preserves_all_values(legacy):
     instance = GameInstance(game_key=("web", "roundtrip", "bot"))
     payload = instance.to_dict()
     if legacy:
+        payload = legacy_table_payload(payload)
         payload["instance_schema_version"] = 25
         payload["modules"].pop(module.MODULE_NAME)
         payload.update(deepcopy(VALUES))
@@ -90,7 +97,7 @@ def test_codec_roundtrip_preserves_all_values(legacy):
     restored = GameInstance.from_dict(payload)
     saved = restored.to_dict()
     assert all(key not in saved for key in VALUES)
-    assert saved["modules"][module.MODULE_NAME] == {"schema_version": 1, **VALUES}
+    assert saved["modules"][module.MODULE_NAME] == {"schema_version": 1, "quick_actions_enabled": True, **VALUES}
     again = GameInstance.from_dict(saved)
     for field, value in VALUES.items():
         assert READ[field](again) == value
@@ -122,13 +129,14 @@ def test_existing_mutation_methods_keep_their_behavior():
 
 
 @pytest.mark.asyncio
-async def test_reset_clears_all_five_fields_and_preserves_list_identity():
+async def test_reset_clears_round_fields_and_preserves_preferences_and_list_identity():
     instance = GameInstance(game_key=("web", "reset", "bot"))
+    module.record_state(instance, 'quick_actions_enabled', False)
     for field, value in deepcopy(VALUES).items():
         WRITE[field](instance, value)
     lists = {field: READ[field](instance) for field in VALUES if isinstance(VALUES[field], list)}
     await instance.reset()
-    assert instance.modules[module.MODULE_NAME] == module.fresh()
+    assert instance.modules[module.MODULE_NAME] == {**module.fresh(), 'quick_actions_enabled': False}
     for field, value in lists.items():
         assert READ[field](instance) is value
 

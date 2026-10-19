@@ -1,5 +1,7 @@
 """World-report persistence, lifecycle and writer contracts."""
 
+from legacy_save_fixtures import legacy_table_payload
+
 from copy import deepcopy
 
 import pytest
@@ -80,6 +82,7 @@ def test_codec_roundtrip_preserves_all_reports(legacy):
     instance = GameInstance(game_key=("web", "roundtrip", "bot"))
     payload = instance.to_dict()
     if legacy:
+        payload = legacy_table_payload(payload)
         payload["instance_schema_version"] = 26
         payload["modules"].pop(module.MODULE_NAME)
         payload.update(deepcopy(VALUES))

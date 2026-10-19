@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useLocale } from '@/composables/useLocale'
 
 const emit = defineEmits<{ open: [] }>()
@@ -25,6 +25,7 @@ function persistDismissed() {
 }
 
 const visible = ref(!readDismissed())
+const bubble = ref<HTMLElement | null>(null)
 
 function dismiss() {
   visible.value = false
@@ -35,10 +36,17 @@ function chooseOpen() {
   dismiss()
   emit('open')
 }
+
+function dismissForPageInteraction(event: Event) {
+  if (visible.value && event.target instanceof Node && !bubble.value?.contains(event.target)) dismiss()
+}
+
+onMounted(() => document.addEventListener('pointerdown', dismissForPageInteraction, true))
+onUnmounted(() => document.removeEventListener('pointerdown', dismissForPageInteraction, true))
 </script>
 
 <template>
-  <div v-if="visible" class="overview-assistant-bubble-wrap">
+  <div v-if="visible" ref="bubble" class="overview-assistant-bubble-wrap">
     <button type="button" class="overview-assistant-bubble" @click="chooseOpen">{{ t('assistantBubbleText') }}</button>
     <button type="button" class="overview-assistant-bubble-close" :aria-label="t('close')" @click="dismiss">×</button>
   </div>
@@ -50,7 +58,7 @@ function chooseOpen() {
 .overview-assistant-bubble-wrap {
   position: fixed;
   right: calc(18px + 48px + 10px);
-  bottom: calc(30px + env(safe-area-inset-bottom));
+  bottom: var(--assistant-shell-entry-bottom, calc(30px + env(safe-area-inset-bottom)));
   z-index: 20;
   display: flex;
   align-items: center;
@@ -62,6 +70,7 @@ function chooseOpen() {
   color: var(--df-text);
   box-shadow: var(--df-shadow);
   animation: assistant-bubble-in .18s ease-out;
+  pointer-events: none;
 }
 
 .overview-assistant-bubble {
@@ -72,6 +81,7 @@ function chooseOpen() {
   font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
+  pointer-events: auto;
 }
 
 .overview-assistant-bubble:hover {
@@ -86,6 +96,7 @@ function chooseOpen() {
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .overview-assistant-bubble-close:hover {
@@ -102,7 +113,7 @@ function chooseOpen() {
 @media (max-width: 700px) {
   .overview-assistant-bubble-wrap {
     right: calc(14px + 44px + 8px);
-    bottom: calc(76px + env(safe-area-inset-bottom));
+    bottom: var(--assistant-shell-entry-bottom, calc(76px + env(safe-area-inset-bottom)));
     max-width: calc(100vw - 28px);
   }
 }

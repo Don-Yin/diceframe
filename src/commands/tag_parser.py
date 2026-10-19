@@ -13,12 +13,14 @@ from src.llm.parser import normalize_tag_protocol
 from src.llm.protocol import normalize_protocol_line
 from src.commands.tag_handlers import (
     ACTION_TAGS,
+    ADVENTURE_TAGS,
     KNOWN_TAGS,
     LIMITS_BY_COMBAT_MODEL,
     LOOT_TAGS,
     PLAYER_TAGS,
     WORLD_TAGS,
     parse_action_tag,
+    parse_adventure_tag,
     parse_loot_tag,
     parse_player_tag,
     parse_world_tag,
@@ -30,7 +32,7 @@ def _new_result() -> dict:
         "state_update": {"players": {}, "npcs": {}, "scene_change": "", "loot": []},
         "memory_delta": {"add": [], "update": [], "forget": []},
         "info_asymmetry": {},
-        "plot_update": {"quests": [], "relations": [], "decisions": []},
+        "plot_update": {"quests": [], "relations": [], "decisions": [], "adventure_completion": None},
         "xp_rewards": {},  # uid -> xp_amount (LLM 可选标签)
         "milestone_grants": [],  # D&D live advancement entitlement targets
         "growth_skills": [],  # [{uid, skill}] 用于 CoC 技能成长检定
@@ -44,9 +46,17 @@ def _extract_tag_lines(text: str, result: dict) -> list[str]:
     if "---" in text:
         parts = text.split("---", 1)
         tag_block = parts[1].strip()
-        if tag_block.upper().startswith("NONE"):
-            return []
-        return tag_block.split("\n")
+        # ``NONE`` is a valid marker for "no other state changes", but it
+        # must not hide a required SCENE_PANEL that follows it.  Older
+        # parsing stopped at any block beginning with NONE, so a model that
+        # emitted ``NONE`` before its storyboard silently lost the panels.
+        # Skip standalone NONE lines and continue parsing the remaining
+        # protocol records.  A block containing only NONE still yields no
+        # executable tags as before.
+        return [
+            line for line in tag_block.splitlines()
+            if line.strip().upper() != "NONE"
+        ]
     result.setdefault("_missing_tag_separator", True)
     return []
 
@@ -85,5 +95,7 @@ def parse_tag_state(text: str, combat_model: str = "hp_based") -> dict:
             parse_loot_tag(tag, value, result)
         elif tag in ACTION_TAGS:
             parse_action_tag(tag, value, result)
+        elif tag in ADVENTURE_TAGS:
+            parse_adventure_tag(tag, value, result)
 
     return result

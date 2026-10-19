@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
+from src.engine import check_decisions
+
 import logging
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -9,17 +13,17 @@ from typing import Any, Callable
 from src.engine.game_instance import GameState
 from src.engine.health import health_payload
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
-from src.engine.modules import (
-    adventure_runtime_state, checks, economy_state, legacy_combat, media, narrative_notes, private_channels,
-    progression_state, room_access, round_presentation, ruleset_runtime, session_stats, table_settings,
-)
+from src.engine import module_hooks
+from src.engine.modules import adventure_runtime_state, checks, economy_state, progression_state, room_access, ruleset_runtime, session_stats
 from src.engine.player_control import away_control_policy
 from src.engine.visibility_rules import manual_roll_visible_to, proposal_visible_to
 from src.llm.parser import sanitize_narration
 from src.rulesets.contracts import GameDetailProjectionRuntime
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.webui.services._common import _GAME_KEY_SEP
+from src.webui.services.rest_activity import rest_activity
 from src.webui.ruleset_rest_projection import public_rest_session
+from src.game_profiles.projection import routing_descriptor
 
 logger = logging.getLogger("trpg")
 
@@ -68,25 +72,25 @@ def list_games(dependencies: GameQueryDependencies) -> dict[str, Any]:
             "world_id": instance.world_id,
             "world_name": instance.world_name,
             "rule_id": projected_rule_id(dependencies, instance),
-            "scene_image": dict(media.scene_image(instance) or {}),
-            "map_background": dict(media.map_background(instance) or {}),
+            "scene_image": dict(module_hooks.read_value(instance, module_hooks.SCENE_IMAGE) or {}),
+            "map_background": dict(module_hooks.read_value(instance, module_hooks.MAP_BACKGROUND) or {}),
             "group_name": instance.group_name,
             "state": instance.state.value,
             "round_number": progression_state.round_value(instance),
             "player_count": len(instance.players),
             "max_players": max(1, int(room_access.max_players(instance) or 6)),
-            "combat_active": legacy_combat.combat_active(instance),
-            "scene": narrative_notes.scene(instance),
+            "combat_active": module_hooks.combat_view(instance)["combat_active"],
+            "scene": module_hooks.narrative_view(instance)["scene"],
             "total_llm_calls": session_stats.total_llm_calls(instance),
             "total_tokens": session_stats.total_tokens(instance),
             "started_at": session_stats.started_at(instance),
             "last_activity": session_stats.last_activity(instance),
-            "seed_code": table_settings.seed_code(instance),
+            "seed_code": game_config.seed_code(instance),
             "language": normalize_language(
                 getattr(instance, "language", DEFAULT_LANGUAGE)
             ),
-            "solo_mode": table_settings.solo_mode(instance),
-            "narrative_perspective": table_settings.narrative_perspective(instance),
+            "solo_mode": game_config.solo_mode(instance),
+            "narrative_perspective": module_hooks.narration_preferences(instance)["narrative_perspective"],
             "gm_uid": instance.gm_uid or "",
             "ready_count": multiplayer["ready_count"],
             "alive_count": multiplayer["alive_count"],
@@ -189,19 +193,19 @@ def game_detail(
         "run_id": instance.run_id,
         "world_id": instance.world_id or "",
         "rule_id": projected_rule_id(dependencies, instance),
-        "scene_image": dict(media.scene_image(instance) or {}),
-        "map_background": dict(media.map_background(instance) or {}),
+        "scene_image": dict(module_hooks.read_value(instance, module_hooks.SCENE_IMAGE) or {}),
+        "map_background": dict(module_hooks.read_value(instance, module_hooks.MAP_BACKGROUND) or {}),
         "world_name": instance.world_name,
         "group_name": instance.group_name,
         "state": instance.state.value,
         "round_number": progression_state.round_value(instance),
         "player_count": len(instance.players),
-        "scene": narrative_notes.scene(instance),
+        "scene": module_hooks.narrative_view(instance)["scene"],
         "total_llm_calls": session_stats.total_llm_calls(instance),
         "total_tokens": session_stats.total_tokens(instance),
         "started_at": session_stats.started_at(instance),
         "last_activity": session_stats.last_activity(instance),
-        "seed_code": table_settings.seed_code(instance),
+        "seed_code": game_config.seed_code(instance),
         "language": normalize_language(
             getattr(instance, "language", DEFAULT_LANGUAGE)
         ),
@@ -211,12 +215,14 @@ def game_detail(
         "away_control_policy": away_control_policy(instance),
         "has_room_password": bool(room_access.has_room_password(instance)),
         "economy_reward_policy": dict(
-            table_settings.economy_reward_policy(instance) or {}
+            economy_state.reward_policy(instance) or {}
         ),
         "combat_extension": _combat_extension_projection(instance, dependencies, viewer_uid),
-        "quick_actions": round_presentation.quick_actions(instance),
+        "quick_actions": module_hooks.read(instance, module_hooks.QUICK_ACTIONS),
+        "quick_actions_enabled": module_hooks.ask(module_hooks.STATE_READ, instance, module_hooks.QUICK_ACTIONS_ENABLED, default=True),
         "economy_proposals": economy_proposals,
         "pending_luck_decisions": instance.pending_luck_checks(),
+        "pending_push_decisions": check_decisions.pending(instance),
         "round_check_results": (
             [dict(item) for item in checks.last_checks(instance)]
             if (
@@ -225,27 +231,32 @@ def game_detail(
             )
             else []
         ),
-        "difficulty": table_settings.difficulty(instance),
-        "solo_mode": table_settings.solo_mode(instance),
-        "narrative_perspective": table_settings.narrative_perspective(instance),
+        "difficulty": game_config.difficulty(instance),
+        "solo_mode": game_config.solo_mode(instance),
+        "narrative_perspective": module_hooks.narration_preferences(instance)["narrative_perspective"],
+        "story_mode": module_hooks.ask(module_hooks.STATE_READ, instance, module_hooks.STORY_MODE, default="prose"),
         # custom_instructions 可能包含剧透级 GM 笔记：gm_style_override 只下发给 GM。
         "gm_style_override": (
-            table_settings.gm_style_override(instance)
+            module_hooks.narration_preferences(instance)["gm_style_override"]
             if viewer_is_gm or (viewer_uid and viewer_uid == (instance.gm_uid or ""))
             else None
         ),
         "max_players": room_access.max_players(instance),
         "multiplayer": instance.multiplayer_status(),
         "rest_session": public_rest_session(instance),
+        "rest_activity": rest_activity(instance),
+        "run_lifecycle": module_hooks.read_value(instance, module_hooks.RUN_LIFECYCLE_VIEW) or {'status': 'playing'},
+        "gm_workspace_revision": module_hooks.gm_workspace_revision(instance) if viewer_is_gm else None,
         "plot_tracker": (
             instance.plot_tracker.to_dict() if instance.plot_tracker else None
         ),
         "recap": _public_recap(instance),
-        "token_budget_bump": round_presentation.last_token_budget_bump(instance),
+        "token_budget_bump": module_hooks.read_value(instance, module_hooks.TOKEN_BUDGET_BUMP),
         "adventure_binding": dict(
             getattr(instance, "adventure_binding", {}) or {}
         ),
         "play_mode": str(adventure_runtime_state.play_mode(instance) or "free"),
+        "game_profile": routing_descriptor(instance),
         "manual_rolls": _public_manual_rolls(instance, viewer_uid),
     }
     if ruleset_runtime.binding(instance):
@@ -373,12 +384,12 @@ def _public_recap(instance: Any) -> dict[str, Any]:
     ]
     return {
         "narrative": clean_public_narration(
-            (narrative_notes.summary(instance) or {}).get("narrative") or ""
+            (module_hooks.narrative_view(instance)["summary"] or {}).get("narrative") or ""
         ),
-        "key_facts": list(narrative_notes.key_facts(instance) or [])[-8:],
+        "key_facts": list(module_hooks.narrative_view(instance)["key_facts"] or [])[-8:],
         "recent_rounds": recent_rounds,
         "pending_actions": pending_actions,
-        "current_scene": narrative_notes.scene(instance),
+        "current_scene": module_hooks.narrative_view(instance)["scene"],
         "round_number": progression_state.round_value(instance),
     }
 
@@ -443,7 +454,7 @@ def table_talk(
         return {"ok": False, "error": "游戏不存在"}
     exchanges = [
         dict(item)
-        for item in (private_channels.table_talk(instance) or [])
+        for item in module_hooks.read(instance, module_hooks.TABLE_TALK)
         if isinstance(item, dict) and item.get("visibility") == "party"
     ]
     return {"ok": True, "exchanges": exchanges[-50:]}
@@ -458,7 +469,7 @@ def _private_log_messages(
         )
 
     messages: list[dict[str, Any]] = []
-    for user_id, items in (private_channels.private_log(instance) or {}).items():
+    for user_id, items in (module_hooks.read_value(instance, module_hooks.PRIVATE_LOG) or {}).items():
         if only_user_id and user_id != only_user_id:
             continue
         for item in items or []:

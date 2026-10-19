@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import ast
 from copy import deepcopy
 from dataclasses import fields, replace
@@ -18,7 +20,7 @@ from src.engine.modules import narrative_notes
 from src.engine import progression
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import progression_state, table_settings
+from src.engine.modules import progression_state
 from src.engine.modules import combat_extension_state
 from webapi_harness import web_api  # noqa: F401  # pytest fixture
 from tests.test_round_failure_recovery import _new_game
@@ -42,7 +44,7 @@ UNKNOWN_SLOTS = [
 
 def instance_with_state(slot=None):
     instance = GameInstance(game_key=("web", "progression", "bot"), gm_uid="gm")
-    table_settings.replace_solo_mode(instance, True)
+    game_config.replace_solo_mode(instance, True)
     instance.round_number = 7
     instance.state = GameState.ACTIVE_ACTION
     instance.players = {"gm": {"character_name": "Hero", "character_sheet": {"hp": 12, "gold": 20}}}
@@ -580,17 +582,23 @@ async def test_current_package_export_import_and_unknown_mode_sse(tmp_path):
 
 
 def test_e2e_seed_script_constructs_and_encodes_all_fixtures(tmp_path):
-    from scripts.prepare_e2e_data import prepare_e2e_data
+    from scripts.prepare_e2e_data import E2E_GAME_KEYS, prepare_e2e_data
 
     prepare_e2e_data(tmp_path)
     saves = list((tmp_path / "saves").rglob("state.json"))
-    assert len(saves) == 4
+    expected_keys = set(E2E_GAME_KEYS)
+    assert len(expected_keys) == len(E2E_GAME_KEYS), "fixture identities must be unique"
+    assert {tuple(path.parent.name.split("#")) for path in saves} == expected_keys
     for path in saves:
         payload = json.loads(path.read_text(encoding="utf-8"))
         assert "round_number" not in payload
         assert payload["instance_schema_version"] == CURRENT_INSTANCE_SCHEMA_VERSION
         restored = GameInstance.from_dict(payload)
+        assert restored.game_key == tuple(path.parent.name.split("#"))
         assert restored.round_number == payload["modules"]["progression"]["round"]
+        # Loading fills optional defaults; the normalized save must then be stable.
+        normalized = frozen(restored)
+        assert GameInstance.from_dict(normalized).to_dict() == normalized
 
 
 def test_all_python_constructor_calls_use_postconstruction_round_assignment():

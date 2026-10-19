@@ -520,6 +520,9 @@ def _v11(conn: sqlite3.Connection) -> None:
     of "detached", so the replacement index accepts exactly what v10 accepted.
     """
 
+    from src.migrations.lorebook_branches import prepare_local_v10
+
+    prepare_local_v10(conn, _v10)
     ensure_column(conn, "lorebooks", "import_link", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "lorebooks", "import_state_digest", "TEXT NOT NULL DEFAULT ''")
     conn.execute("DROP INDEX IF EXISTS idx_lorebooks_external_identity")
@@ -530,9 +533,31 @@ def _v11(conn: sqlite3.Connection) -> None:
     )
 
 
+def _v12(conn: sqlite3.Connection) -> None:
+    """Add owner-private recovery records, preserving the local v10 journal."""
+    from src.migrations.lorebook_branches import validate_operations_table
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS lorebook_operations (
+            id TEXT PRIMARY KEY,
+            owner TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('prepared','applied','undone','restored')),
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    validate_operations_table(conn)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lorebook_operations_owner_created "
+        "ON lorebook_operations(owner, created_at DESC, id DESC)"
+    )
+
+
 MIGRATIONS: tuple[tuple[int, object], ...] = (
     (1, _v1), (2, _v2), (3, _v3), (4, _v4), (5, _v5), (6, _v6), (7, _v7), (8, _v8),
-    (9, _v9), (10, _v10), (11, _v11),
+    (9, _v9), (10, _v10), (11, _v11), (12, _v12),
 )
 CURRENT_LOREBOOK_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

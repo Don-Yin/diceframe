@@ -1,0 +1,399 @@
+/* Rules surfaces, controls and responsive states. Edit this owner directly. */
+
+.card-choice.rule-mismatch {
+  border-color: rgba(216,173,82,.55);
+}
+
+.rule-warn-card {
+  border: 1px solid #7e3737;
+  background: rgba(159,61,53,.14);
+  color: #ff9286;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin: 10px 0;
+  font-size: 13px;
+}
+
+.rule-meta-row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  color: var(--df-text-muted);
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.rule-meta-row strong {
+  color: var(--df-accent-strong);
+  margin-right: 4px;
+}
+
+.rule-meta-row span {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.rule-meta-row span:last-child {
+  flex: 1 1 100%;
+  font-family: var(--df-font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.rule-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 8px;
+  background: linear-gradient(180deg,var(--df-surface-1),var(--df-surface-2));
+  box-shadow: var(--df-shadow),inset 0 1px 0 rgba(255,255,255,.05);
+}
+
+.rule-card .actions {
+  margin-top: auto;
+  flex-wrap: wrap;
+}
+
+.rule-card h2 {
+  margin: 0;
+  line-height: 1.4;
+  min-height: 2.8em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.rule-card p {
+  max-height: 3.2em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.rules-page .rule-card .actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.rules-page .rule-card .actions button {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.rule-help-dialog {
+  width: min(680px,100%);
+}
+
+.rule-help-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.rule-help-grid article, .rule-help-section {
+  padding: 12px;
+  border: 1px solid var(--df-border-soft);
+}
+
+.rule-help-grid strong {
+  display: block;
+  color: var(--df-accent-strong);
+  margin-bottom: 5px;
+}
+
+.rule-help-grid span, .rule-help-section p {
+  color: var(--df-text-muted);
+  line-height: 1.65;
+}
+
+.rule-help-section {
+  margin-top: 10px;
+}
+
+.rule-help-section h3 {
+  margin: 0 0 8px;
+}
+
+body.light .rules-page .rule-card, body.light .rule-help-grid article, body.light .rule-help-section {
+  background: linear-gradient(180deg,var(--df-surface-raised),var(--df-surface-1));
+}
+
+@media (max-width:640px) {
+  .rule-help-grid {
+    grid-template-columns: 1fr;
+  }
+  .rules-page .rule-card .actions {
+    flex-wrap: wrap;
+  }
+}
+
+.rule-editor-form {
+  display: grid;
+  gap: 12px;
+}
+
+.rule-editor-section {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 8px;
+  background: rgba(216,173,82,.06);
+}
+
+.rule-attr-edit {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 80px 80px 74px;
+  gap: 7px;
+  align-items: center;
+}
+
+.rule-json-box summary {
+  cursor: pointer;
+  color: var(--df-accent-strong);
+  font-weight: 700;
+}
+
+.rule-json-box textarea {
+  font-family: var(--df-font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.rule-edit-dialog {
+  width: min(860px,100%);
+  max-height: calc(100dvh - 30px);
+}
+
+@media (max-width:640px) {
+  .rule-attr-edit {
+    grid-template-columns: 1fr 1fr;
+  }
+  .rule-attr-edit button {
+    grid-column: 1/-1;
+  }
+}
+
+body.light .rule-warn-card {
+  color: var(--df-danger-strong);
+}
+
+.rules-page .rule-card, .rule-help-grid article, .rule-help-section {
+  border-radius: var(--df-radius-md);
+  color: var(--df-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .035);
+}
+
+.rule-help-grid article, .rule-help-section {
+  border-color: var(--df-border-soft);
+  background: color-mix(in srgb, var(--df-surface-2) 86%, transparent);
+}
+
+.rules-page {
+  width: min(1540px, 100%);
+}
+
+.rules-page > .card-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 13px;
+}
+
+.rules-page .rule-card {
+  position: relative;
+  min-height: 300px;
+  padding: 18px 16px 14px;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--df-accent) 34%, var(--df-border-soft));
+  background: radial-gradient(circle at 100% 0, color-mix(in srgb, var(--df-accent) 8%, transparent), transparent 38%),
+    linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
+}
+
+.rules-page .rule-card::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 36px;
+  height: 36px;
+  border-top: 1px solid var(--df-accent);
+  border-left: 1px solid var(--df-accent);
+  content: "";
+  opacity: .7;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+  background: color-mix(in srgb, var(--df-accent) 13%, transparent);
+}
+
+.rules-page .rule-card h2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  min-height: 56px;
+  margin: 6px 0 14px;
+  font-size: 20px;
+}
+
+.rules-page .rule-card h2 > span {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.rules-page .rule-card h2 > .badge {
+  flex: 0 0 auto;
+  margin: 2px 0 0;
+  white-space: nowrap;
+}
+
+.rules-page .rule-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 13px;
+  padding: 10px 0;
+  border-block: 1px solid var(--df-border-soft);
+}
+
+.rules-page .rule-meta-row span {
+  font-size: 11px;
+}
+
+.rules-page .rule-meta-row span:last-child {
+  flex-basis: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rules-page .rule-card > div:first-child > p {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--df-text-muted);
+  line-height: 1.7;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.rules-page .rule-card .actions {
+  margin-top: auto;
+}
+
+@media (min-width: 1380px) {
+  .rules-page > .card-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .rules-page > .card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.rules-page .content-page-heading-actions {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.rules-page .content-page-heading-actions .actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rules-page .content-page-heading-actions button {
+  min-height: 40px;
+}
+
+.rules-page > .card-grid {
+  scroll-margin-top: 82px;
+}
+
+.rules-page .rule-card {
+  transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+
+.rules-page .rule-card:hover {
+  border-color: color-mix(in srgb, var(--df-interactive) 42%, var(--df-border-soft));
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--df-canvas) 34%, transparent), inset 0 1px 0 color-mix(in srgb, var(--df-accent) 8%, transparent);
+  transform: translateY(-1px);
+}
+
+.rules-page .rule-warn-card {
+  margin: -8px 0 14px;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--df-warning, var(--df-accent)) 40%, var(--df-border-soft));
+  border-radius: var(--df-radius-md);
+  color: var(--df-text-secondary);
+  background: color-mix(in srgb, var(--df-warning, var(--df-accent)) 7%, var(--df-surface-1));
+}
+
+@media (max-width: 760px) {
+  .rules-page .content-page-heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
+    padding-top: 12px;
+  }
+  .rules-page .content-page-heading-actions {
+    width: 100%;
+  }
+  .rules-page .content-page-heading-actions .actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+    width: 100%;
+  }
+  .rules-page .rule-warn-card {
+    margin-top: -2px;
+  }
+}
+
+@media (max-width: 440px) {
+  .rules-page .content-page-heading h1 {
+    font-size: 27px;
+  }
+}
+
+.view.rules-page {
+  width: min(var(--df-page-max), 100%);
+  max-width: var(--df-page-max);
+  box-sizing: border-box;
+  margin-inline: auto;
+  padding-inline: var(--df-page-gutter);
+  padding-top: var(--df-page-top);
+  padding-bottom: 42px;
+}
+
+.view.rules-page > .content-page-heading {
+  box-sizing: border-box;
+  margin-top: 0 !important;
+  margin-bottom: 20px !important;
+  padding: 12px 0 18px !important;
+}
+
+@media (max-width: 800px) {
+  .view.rules-page {
+    width: 100%;
+    max-width: 100%;
+    padding-inline: 12px;
+    padding-top: var(--df-page-top-mobile);
+    padding-bottom: 32px;
+  }
+  .view.rules-page > .content-page-heading {
+    margin-bottom: 16px !important;
+    padding-top: 10px !important;
+    padding-bottom: 14px !important;
+  }
+}

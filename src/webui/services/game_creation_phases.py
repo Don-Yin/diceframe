@@ -21,6 +21,7 @@ from src.webui.game_lifecycle_context import (
     CreationTransaction,
     GameLifecycleDependencies,
 )
+from src.content_modules.projection import entries_for_world
 
 logger = logging.getLogger("trpg")
 
@@ -93,6 +94,7 @@ def materialize_world(
     difficulty: str,
     scene_image: dict[str, Any] | None,
     default_scene_image: dict[str, str],
+    default_scene_images: list[dict[str, str]] | None = None,
 ) -> None:
     """Materialize optional lorebook/template state before instance creation."""
 
@@ -152,10 +154,31 @@ def materialize_world(
         "default_rule": resolved_rule,
         "starter_lorebook": [],
     }
-    if not scene_image:
-        template["scene_image"] = dependencies.materialize_scene_image(
-            default_scene_image,
-        )
+    pool = list(default_scene_images or [])
+    # The create page may send the concrete built-in member it previewed so
+    # the first save is WYSIWYG.  Keep the full default pool on a newly
+    # materialized custom world in that case; uploaded/generated references
+    # remain explicit single-cover overrides.
+    builtin_default_selection = (
+        isinstance(scene_image, dict)
+        and scene_image.get("kind") == "builtin"
+        and len(pool) > 1
+    )
+    if not scene_image or builtin_default_selection:
+        if len(pool) > 1:
+            template["scene_images"] = [
+                dependencies.materialize_scene_image(reference)
+                for reference in pool
+            ]
+            template["scene_image"] = (
+                dependencies.materialize_scene_image(scene_image)
+                if builtin_default_selection
+                else template["scene_images"][0]
+            )
+        else:
+            template["scene_image"] = dependencies.materialize_scene_image(
+                scene_image if builtin_default_selection else default_scene_image
+            )
     if create_lorebook and not custom_world:
         template["_diceframe_managed"] = "game"
         template["_diceframe_owner_game"] = _GAME_KEY_SEP.join(
@@ -206,7 +229,7 @@ def copy_lorebook_entries(
             "order": 110,
         })
         return binding_id
-    entries = lorebook.list_entries(source_world_id)
+    entries = entries_for_world(lorebook, source_world_id)
     if not entries:
         return None
     if not lorebook.get_world(world_id):

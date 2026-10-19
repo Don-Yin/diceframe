@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from legacy_save_fixtures import legacy_table_payload
+
 from copy import deepcopy
 from dataclasses import fields
 
@@ -44,6 +46,7 @@ def legacy_save_of(instance: GameInstance, scene) -> dict:
     notes = payload["modules"]["narrative_notes"]
     notes.pop("scene")
     notes["schema_version"] = 1
+    payload = legacy_table_payload(payload)
     payload["instance_schema_version"] = 39
     payload["scene"] = scene
     return payload

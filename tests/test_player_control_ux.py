@@ -112,6 +112,56 @@ async def test_creation_applies_a_per_card_control_choice(web_api) -> None:
 
 
 @pytest.mark.asyncio
+async def test_creation_of_an_all_ai_table_starts_progression(web_api) -> None:
+    """An all-AI table must not stop at the first ACTIVE_ACTION gate."""
+
+    api, _lorebook, _registry, _fake_llm, _worlds_dir = web_api
+    created = await api.create_game(
+        "template_world",
+        "纯 AI 开局",
+        players=[{
+            "character_name": "AI 冒险者",
+            "attributes": {"str": 12},
+            "control": "ai",
+        }],
+    )
+    assert created.get("ok") is not False, created
+    instance = api.get_game_instance(created["game_key"])
+
+    assert not instance.active_human_players
+    # The committed first round has been processed automatically.  A new
+    # round is then ready for the next explicit autoplay tick.
+    assert instance.round_number == 2
+    assert instance.state == GameState.ACTIVE_ACTION
+
+
+@pytest.mark.asyncio
+async def test_seed_restart_of_an_all_ai_table_starts_progression(web_api) -> None:
+    """The seed restart entry point applies the same post-commit trigger."""
+
+    api, _lorebook, _registry, _fake_llm, _worlds_dir = web_api
+    original = await api.create_game(
+        "template_world",
+        "原始世界",
+        players=[{"character_name": "原始角色", "attributes": {"str": 10}}],
+    )
+    restarted = await api.create_from_seed(
+        original["seed_code"],
+        players=[{
+            "character_name": "AI 重开者",
+            "attributes": {"str": 11},
+            "control": "ai",
+        }],
+    )
+
+    assert restarted.get("ok") is True, restarted
+    instance = api.get_game_instance(restarted["game_key"])
+    assert not instance.active_human_players
+    assert instance.round_number == 2
+    assert instance.state == GameState.ACTIVE_ACTION
+
+
+@pytest.mark.asyncio
 async def test_per_card_choice_beats_the_room_default(web_api) -> None:
     api, _lorebook, _registry, _fake_llm, _worlds_dir = web_api
     characters = [dict(c) for c in CHARACTERS]

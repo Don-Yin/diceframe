@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import random
 from types import SimpleNamespace
 
@@ -19,7 +21,7 @@ from src.webui.services.turns import TurnDependencies, submit_action
 from src.webui.services._common import _parse_game_key
 
 from dnd2024_http_common import GameplayApiShim, quick_character
-from src.engine.modules import ruleset_runtime, table_settings
+from src.engine.modules import ruleset_runtime
 
 
 class _EnabledRuntime(Dnd2024Runtime):
@@ -137,7 +139,7 @@ def _ready_story_encounter(runtime: _EnabledRuntime, instance: GameInstance) -> 
     instance.world_id = "greymoor"
     package = runtime._adventure_loader.resolve("core:lanterns_of_greymoor", "en")
     assert instance.bind_adventure(package.binding("greymoor"))
-    table_settings.replace_solo_mode(instance, True)
+    game_config.replace_solo_mode(instance, True)
     for intent_type, fields in (
         ("session_zero.quick_start", {}),
         ("tutorial.choose", {"choice_id": "inspect_cold_ash"}),

@@ -1,0 +1,1509 @@
+/* Create surfaces, controls and responsive states. Edit this owner directly. */
+
+@media (max-width: 800px) {
+  .create-page {
+    padding-inline: 12px;
+  }
+}
+
+.reference-create-page {
+  width: min(1480px, 100%);
+  padding-top: 12px;
+}
+
+.create-page-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 70px;
+  padding: 10px 2px 16px;
+}
+
+.create-page-header p {
+  margin: 0;
+}
+
+.create-page-header h1 {
+  margin: 0;
+  color: var(--df-accent-strong);
+  font: 800 clamp(38px, 4vw, 48px)/1.02 var(--df-font-title);
+  letter-spacing: -.02em;
+}
+
+.create-page-header__eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--df-interactive-strong);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .16em;
+}
+
+.create-back {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  font-size: 20px;
+}
+
+.create-wizard-shell {
+  display: grid;
+  grid-template-columns: 264px minmax(0, 1fr);
+  min-height: min(720px, calc(100dvh - 130px));
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--df-accent) 35%, var(--df-border-soft));
+  border-radius: var(--df-radius-lg);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--df-surface-1) 93%, transparent), color-mix(in srgb, var(--df-surface-1) 88%, transparent)),
+    var(--df-bg-ruins-image) center / cover no-repeat;
+  box-shadow: var(--df-shadow-strong);
+}
+
+.create-stage-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 14px 20px 16px;
+  background: color-mix(in srgb, var(--df-surface-1) 66%, transparent);
+}
+
+.create-ready-fields {
+  display: contents;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.create-step-rail {
+  display: flex;
+  flex-direction: column;
+  @undefined;
+  padding: 28px 18px;
+  border-right: 1px solid var(--df-border-soft);
+  background: color-mix(in srgb, var(--df-surface-2) 58%, transparent);
+}
+
+.create-step-rail__sigil {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 24px;
+  place-items: center;
+  border: 1px solid var(--df-accent);
+  border-radius: 50%;
+  color: var(--df-accent-strong);
+}
+
+.create-step-rail__item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  min-height: 84px;
+  padding: 12px 0;
+  border-radius: var(--df-radius-sm);
+  color: var(--df-text-muted);
+}
+
+.create-step-rail__item > span:last-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.create-step-rail__item:not(.last-step)::after {
+  position: absolute;
+  left: 16px;
+  top: 44px;
+  bottom: -12px;
+  width: 1px;
+  content: '';
+  background: var(--df-border-soft);
+}
+
+.create-step-rail__item.complete::after {
+  background: var(--df-interactive);
+}
+
+.create-step-rail .create-progress-marker {
+  width: 32px;
+  height: 32px;
+}
+
+.create-step-rail__item strong {
+  font-size: 14px;
+}
+
+.create-step-rail__item small {
+  color: var(--df-text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+  letter-spacing: .1em;
+}
+
+.create-step-rail__item.current, .create-step-rail__item.current small {
+  color: var(--df-accent-strong);
+}
+
+.create-step-rail__item.current .create-progress-marker {
+  border-color: var(--df-interactive);
+  background: color-mix(in srgb, var(--df-interactive) 12%, var(--df-surface-1));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--df-interactive) 8%, transparent);
+}
+
+.create-step-rail__item.complete .create-progress-marker {
+  color: var(--df-interactive-strong);
+  border-color: var(--df-interactive);
+}
+
+.create-rail-summary {
+  display: grid;
+  gap: 8px;
+  margin-top: auto;
+  padding: 14px 12px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-sm);
+  background: var(--df-control-bg);
+}
+
+.create-rail-summary > div {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.create-rail-summary span {
+  color: var(--df-text-muted);
+}
+
+.create-rail-summary strong {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.create-progress {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: color-mix(in srgb, var(--df-surface-2) 58%, transparent);
+}
+
+.create-progress-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+  color: var(--df-text-muted);
+  font-size: 11px;
+}
+
+.create-progress-item:not(:last-child)::after {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 22%;
+  height: 1px;
+  content: "";
+  background: var(--df-border-soft);
+}
+
+.create-progress-marker {
+  display: grid;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 50%;
+  background: var(--df-surface-1);
+  font-family: var(--df-font-title);
+}
+
+.create-progress-item.current, .create-progress-item.complete {
+  color: var(--df-accent-strong);
+}
+
+.create-progress-item.current .create-progress-marker, .create-progress-item.complete .create-progress-marker {
+  border-color: var(--df-interactive);
+  background: color-mix(in srgb, var(--df-interactive) 15%, var(--df-surface-1));
+}
+
+.create-progress-item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.create-api-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.create-api-hint p {
+  margin: 3px 0 0;
+}
+
+.create-stage-head {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--df-border-soft);
+}
+
+.create-stage-head > span {
+  color: color-mix(in srgb, var(--df-accent-strong) 72%, transparent);
+  font-family: var(--df-font-title);
+  font-size: 34px;
+  line-height: 1;
+}
+
+.create-stage-head h2, .create-stage-head p {
+  margin: 0;
+}
+
+.create-stage-head h2 {
+  font-size: 21px;
+}
+
+.create-stage-head p {
+  margin-top: 3px;
+  color: var(--df-text-muted);
+  font-size: 11px;
+}
+
+.create-step-card {
+  display: grid;
+  align-content: start;
+  gap: 17px;
+  min-width: 0;
+  padding: 19px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.create-field-grid, .create-config-surface {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px 15px;
+}
+
+.create-field-grid-compact {
+  padding: 13px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: color-mix(in srgb, var(--df-surface-2) 56%, transparent);
+}
+
+.create-step-card label {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  color: var(--df-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.create-step-card label small {
+  color: var(--df-text-muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.create-step-card .wide {
+  grid-column: 1 / -1;
+}
+
+.create-mode-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 11px;
+}
+
+.create-mode-cards button {
+  display: grid;
+  min-height: 92px;
+  place-items: center;
+  gap: 5px;
+  padding: 13px;
+  border-color: var(--df-border-soft);
+  background: linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
+}
+
+.create-mode-cards button b {
+  color: var(--df-text-muted);
+  font-size: 22px;
+}
+
+.create-mode-cards button.active {
+  border-color: var(--df-interactive);
+  color: var(--df-accent-strong);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--df-interactive) 18%, var(--df-surface-2)), var(--df-surface-1));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--df-interactive) 22%, transparent), 0 8px 25px rgba(0, 0, 0, .18);
+}
+
+.create-config-surface {
+  padding: 15px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: color-mix(in srgb, var(--df-surface-1) 52%, transparent);
+}
+
+.create-check {
+  display: flex !important;
+  align-items: center;
+  align-self: end;
+  min-height: 40px;
+}
+
+.create-check input {
+  width: auto;
+}
+
+.create-character-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.create-character-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(235px, 1fr));
+  gap: 11px;
+}
+
+.create-character-card {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 13px;
+  min-height: 165px;
+  padding: 13px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
+}
+
+.create-character-card h3, .create-character-card p {
+  margin: 0;
+}
+
+.create-character-card p, .create-character-card small {
+  color: var(--df-text-muted);
+}
+
+.create-character-card .actions {
+  grid-column: 1 / -1;
+  align-self: end;
+}
+
+.create-character-empty {
+  display: grid;
+  min-height: 165px;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  border-style: dashed;
+  background: color-mix(in srgb, var(--df-surface-2) 42%, transparent);
+}
+
+.create-character-empty b {
+  font-size: 28px;
+}
+
+.create-confirm-cover {
+  display: grid;
+  min-height: 190px;
+  place-items: center;
+  align-content: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--df-accent) 38%, var(--df-border-soft));
+  border-radius: var(--df-radius-md);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--df-canvas) 15%, transparent), var(--df-surface-1) 94%),
+    var(--df-bg-scene-image) center 43% / cover no-repeat;
+}
+
+.create-confirm-cover > span {
+  font-size: 35px;
+}
+
+.create-confirm-cover h2, .create-confirm-cover p {
+  margin: 4px;
+}
+
+.create-confirm-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.create-confirm-grid article {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: var(--df-surface-2);
+}
+
+.create-confirm-grid span {
+  color: var(--df-text-muted);
+  font-size: 10px;
+}
+
+.create-confirm-grid strong {
+  overflow: hidden;
+  color: var(--df-accent-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.create-confirm-characters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.create-confirm-characters span {
+  padding: 6px 10px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 999px;
+  color: var(--df-text-secondary);
+  background: var(--df-control-bg);
+  font-size: 11px;
+}
+
+.create-actions {
+  position: static;
+  z-index: auto;
+  bottom: auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: auto;
+  padding-top: 15px;
+  border: 0;
+  border-top: 1px solid var(--df-border-soft);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.create-actions button:first-child {
+  margin-right: auto;
+}
+
+.create-recommended-rules {
+  display: grid;
+  gap: 8px;
+}
+
+.create-recommended-rules .rec-head {
+  color: var(--df-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.create-recommended-rules .rec-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.create-recommended-rules .rec-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: stretch;
+  justify-items: stretch;
+  gap: 4px;
+  align-content: start;
+  min-height: 96px;
+  padding: 12px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
+  text-align: left;
+  cursor: pointer;
+}
+
+.create-recommended-rules .rec-card.active {
+  border-color: var(--df-interactive);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--df-interactive) 22%, transparent);
+}
+
+.create-recommended-rules .rec-card strong {
+  color: var(--df-accent-strong);
+  font-size: 14px;
+}
+
+.create-recommended-rules .rec-card small {
+  color: var(--df-interactive-strong);
+  font-size: 10px;
+}
+
+.create-recommended-rules .rec-card small.professional {
+  color: var(--df-accent-strong);
+  font-weight: 800;
+}
+
+.create-recommended-rules .rec-card p {
+  margin: 0;
+  color: var(--df-text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.create-recommended-rules .rec-hint {
+  color: var(--df-text-muted);
+  font-size: 10px;
+}
+
+@media (max-width: 800px) {
+  .wizard {
+    place-items: start center;
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+    overflow: hidden;
+  }
+  .wizard-inner {
+    display: flex;
+    width: 100%;
+    max-height: calc(var(--app-h, 100dvh) - 20px - env(safe-area-inset-bottom));
+    flex-direction: column;
+    padding: 14px;
+    overflow: hidden;
+  }
+  .wizard-steps {
+    flex: 0 0 auto;
+  }
+  .wizard-pane {
+    min-height: 0;
+    padding-right: 2px;
+    overflow-y: auto;
+  }
+  .wizard-actions {
+    position: sticky;
+    z-index: 1;
+    bottom: 0;
+    flex: 0 0 auto;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--df-border-soft);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--df-surface-2) 82%, transparent), var(--df-surface-2) 30%);
+  }
+}
+
+.create-adventure-package-field {
+  display: grid;
+  gap: 8px;
+}
+
+.create-adventure-select-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.narrative-perspective-field, .advancement-policy-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.advancement-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.narrative-perspective-field legend {
+  margin-bottom: 7px;
+  color: var(--df-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.narrative-perspective-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.narrative-perspective-cards button {
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+  min-height: 78px;
+  padding: 12px 13px;
+  text-align: left;
+  border-color: var(--df-border-soft);
+  background: color-mix(in srgb, var(--df-surface-2) 76%, transparent);
+}
+
+.narrative-perspective-cards button small {
+  color: var(--df-text-muted);
+  line-height: 1.5;
+}
+
+.narrative-perspective-cards button.active {
+  border-color: var(--df-interactive);
+  color: var(--df-accent-strong);
+  background: color-mix(in srgb, var(--df-interactive) 15%, var(--df-surface-2));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--df-interactive) 18%, transparent);
+}
+
+@media (max-width: 620px) {
+  .create-progress {
+    gap: 4px;
+    padding: 7px;
+  }
+  .create-progress-item {
+    gap: 4px;
+    font-size: 10px;
+  }
+  .create-progress-marker {
+    flex-basis: 21px;
+    width: 21px;
+    height: 21px;
+  }
+  .create-progress-item:not(:last-child)::after {
+    display: none;
+  }
+  .narrative-perspective-cards, .advancement-policy-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .create-adventure-select-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+.recommendation-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.recommendation-badges small.beta-badge {
+  border: 1px solid color-mix(in srgb, var(--df-warning, #dca85d) 55%, transparent);
+  border-radius: 999px;
+  padding: 2px 6px;
+  color: var(--df-warning, #dca85d);
+  background: color-mix(in srgb, var(--df-warning, #dca85d) 11%, transparent);
+}
+
+.create-adventure-package-field > label {
+  display: grid;
+  gap: 6px;
+}
+
+.create-manage-adventures {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: max-content;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-sm);
+  color: var(--df-text);
+  background: var(--df-control-bg);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.create-stage-head-copy {
+  min-width: 0;
+}
+
+.create-step-guidance {
+  max-width: 72ch;
+  line-height: 1.55;
+}
+
+.create-selected-adventure {
+  display: grid;
+  gap: 0;
+}
+
+.create-selected-adventure .content-launch-summary {
+  margin-bottom: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.create-selected-adventure-note {
+  margin: 0;
+  padding: 9px 14px;
+  border: 1px solid var(--df-border-soft);
+  border-top: 0;
+  border-radius: 0 0 var(--df-radius-lg) var(--df-radius-lg);
+  color: var(--df-text-muted);
+  background: color-mix(in srgb, var(--df-interactive) 5%, var(--df-surface-2));
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.create-mode-cards button {
+  align-content: start;
+  justify-items: start;
+  text-align: left;
+}
+
+.create-mode-cards button small {
+  color: var(--df-text-muted);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.create-confirm-context, .create-confirm-settings, .create-confirm-party {
+  display: grid;
+  gap: 10px;
+}
+
+.create-confirm-section-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.create-confirm-section-head > span {
+  color: var(--df-interactive-strong);
+  font-family: var(--df-font-title);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.create-confirm-section-head > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.create-confirm-section-head strong {
+  color: var(--df-text-secondary);
+  font-size: 12px;
+}
+
+.create-confirm-section-head small {
+  color: var(--df-text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.create-confirm-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.create-confirm-grid article {
+  min-height: 72px;
+}
+
+.create-confirm-grid article small {
+  color: var(--df-text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.create-actions button {
+  min-height: 40px;
+}
+
+@media (max-width: 800px) {
+  .reference-create-page {
+    padding: 10px 10px calc(18px + env(safe-area-inset-bottom));
+  }
+  .create-page-header {
+    padding-inline: 0;
+  }
+  .create-wizard-shell {
+    min-height: 0;
+    margin-top: 4px;
+  }
+  .create-progress {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+    backdrop-filter: blur(12px);
+  }
+  .create-stage-head {
+    gap: 10px;
+    padding-bottom: 12px;
+  }
+  .create-stage-head > span {
+    font-size: 28px;
+  }
+  .create-stage-head h2 {
+    font-size: 18px;
+  }
+  .create-field-grid, .create-config-surface {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .create-actions {
+    position: sticky;
+    z-index: 3;
+    bottom: 0;
+    flex-wrap: wrap;
+    margin: 0 -13px;
+    padding: 10px 13px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--df-border-soft);
+    background: color-mix(in srgb, var(--df-surface-1) 94%, transparent);
+    box-shadow: 0 -10px 24px color-mix(in srgb, var(--df-canvas) 20%, transparent);
+    backdrop-filter: blur(14px);
+  }
+  .create-actions button {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .create-actions button:first-child {
+    margin-right: 0;
+  }
+  .create-character-card {
+    grid-template-columns: 60px minmax(0, 1fr);
+    gap: 10px;
+  }
+  .create-character-card .actions {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .create-character-card .actions button {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .create-character-actions > button {
+    flex: 1 1 auto;
+  }
+  .create-import-lore {
+    flex: 1 1 100%;
+  }
+  .create-confirm-cover {
+    min-height: 150px;
+  }
+}
+
+@media (max-width: 420px) {
+  .create-page-header h1 {
+    font-size: 28px;
+  }
+  .create-progress-item strong {
+    display: none;
+  }
+  .create-progress-item {
+    justify-content: center;
+  }
+  .create-actions button {
+    flex-basis: calc(50% - 5px);
+  }
+  .create-actions .primary {
+    flex-basis: 100%;
+  }
+}
+
+.create-source-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 2fr);
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-sm);
+  background: color-mix(in srgb, var(--df-surface-2) 60%, transparent);
+  font-size: 11px;
+}
+
+.create-source-summary__label {
+  color: var(--df-text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.create-source-summary strong {
+  overflow: hidden;
+  color: var(--df-accent-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.create-source-summary > span:last-child {
+  overflow: hidden;
+  color: var(--df-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.create-mode-segmented {
+  gap: 0;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-sm);
+  overflow: hidden;
+}
+
+.create-mode-segmented button {
+  min-height: 58px;
+  border: 0;
+  border-right: 1px solid var(--df-border-soft);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.create-mode-segmented button:last-child {
+  border-right: 0;
+}
+
+.create-mode-segmented button b, .create-mode-segmented button small {
+  display: none;
+}
+
+.create-launch-advanced {
+  display: grid;
+  gap: 12px;
+}
+
+.create-launch-advanced summary {
+  cursor: pointer;
+  color: var(--df-text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.create-launch-advanced[open] {
+  padding: 12px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-sm);
+  background: color-mix(in srgb, var(--df-surface-2) 40%, transparent);
+}
+
+@media (max-width: 800px) {
+  .create-wizard-shell {
+    display: block;
+  }
+  .create-step-rail {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    padding: 8px;
+    min-height: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--df-border-soft);
+  }
+  .create-step-rail__sigil, .create-step-rail__item::after {
+    display: none;
+  }
+  .create-step-rail__item {
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 5px;
+    padding: 5px;
+    min-height: 0;
+  }
+  .create-step-rail .create-progress-marker {
+    width: 22px;
+    height: 22px;
+  }
+  .create-step-rail__item small {
+    font-size: 9px;
+  }
+  .create-step-rail__item strong {
+    overflow: hidden;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .create-rail-summary {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 8px;
+    padding: 9px;
+  }
+  .create-rail-summary > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+  }
+  .create-source-summary {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .create-source-summary > span:last-child {
+    grid-column: 1 / -1;
+  }
+  .create-mode-segmented button {
+    min-height: 48px;
+    padding-inline: 8px;
+  }
+}
+
+@media (max-width: 420px) {
+  .create-step-rail__item strong {
+    display: block;
+    font-size: 10px;
+    text-align: center;
+  }
+  .create-step-rail__item {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+}
+
+@media (max-width: 620px) {
+  .create-step-card input:not([type="checkbox"]), .create-step-card select {
+    font-size: 16px;
+    min-height: 44px;
+  }
+  .create-step-card textarea {
+    font-size: 16px;
+    min-height: 100px;
+  }
+  .create-mode-segmented {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.create-page .create-mode-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+}
+
+.create-page .create-mode-segmented button {
+  min-height: 44px;
+  place-items: center;
+  align-content: center;
+  padding: 8px;
+}
+
+.create-page .create-mode-segmented button b, .create-page .create-mode-segmented button small {
+  display: none;
+}
+
+.create-page .create-recommended-rules summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--df-text-secondary);
+}
+
+.create-page .create-selected-adventure .content-launch-summary {
+  padding: 12px;
+  margin: 0;
+  gap: 10px;
+}
+
+.create-page .create-selected-adventure .content-launch-story h2 {
+  font-size: 18px;
+}
+
+.create-page .create-selected-adventure .content-launch-story p {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.create-page .create-selected-adventure-note, .create-page .create-selected-adventure + .create-source-summary {
+  display: none;
+}
+
+.create-page .create-content-stage > .create-config-surface {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  gap: 14px;
+}
+
+.create-page .create-field-title {
+  color: var(--df-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.create-page .create-play-mode {
+  display: grid;
+  gap: 9px;
+}
+
+.create-page .create-play-mode .narrative-perspective-cards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.create-page .create-play-mode .narrative-perspective-cards button {
+  min-height: 68px;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.create-page .create-play-mode .narrative-perspective-cards button strong {
+  font-size: 14px;
+}
+
+.create-page .create-world-source {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.create-page .create-world-source .create-mode-segmented {
+  width: min(100%, 400px);
+}
+
+.create-page .create-world-source .create-mode-segmented button {
+  min-height: 38px;
+  font-size: 12px;
+}
+
+.create-page .create-rule-settings {
+  min-width: 0;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-sm);
+  background: var(--df-control-bg);
+}
+
+.create-page .create-setup-summary {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  min-height: 54px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.create-page .create-setup-summary::-webkit-details-marker {
+  display: none;
+}
+
+.create-page details > .create-setup-summary::after {
+  content: none;
+  display: none;
+}
+
+.create-page .create-setup-summary > span:first-child {
+  color: var(--df-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.create-page .create-setup-summary strong {
+  color: var(--df-text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.create-page .create-setup-adjust {
+  color: var(--df-interactive-strong);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.create-page .create-setup-adjust > span {
+  display: inline-block;
+  margin-left: 5px;
+  transition: transform .15s;
+}
+
+.create-page details[open] > .create-setup-summary .create-setup-adjust > span {
+  transform: rotate(180deg);
+}
+
+.create-page .create-setup-summary:focus-visible {
+  outline: 2px solid var(--df-interactive-strong);
+  outline-offset: 2px;
+}
+
+.create-page .create-rule-settings-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.create-page .create-launch-advanced {
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-sm);
+  padding: 12px 14px;
+}
+
+@media (max-width: 620px) {
+  .create-page .create-world-source {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-content: stretch;
+    gap: 8px;
+  }
+  .create-page .create-world-source .create-mode-segmented {
+    width: 100%;
+  }
+  .create-page .create-setup-summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 5px 12px;
+  }
+  .create-page .create-setup-summary > span:first-child {
+    grid-column: 1;
+  }
+  .create-page .create-setup-summary strong {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .create-page .create-setup-adjust {
+    grid-column: 2;
+    grid-row: 1 / 3;
+  }
+  .create-page .create-play-mode .narrative-perspective-cards button {
+    padding: 10px;
+    min-height: 74px;
+  }
+}
+
+.create-game-settings-stage .narrative-perspective-field {
+  min-inline-size: 0;
+  width: 100%;
+  box-sizing: border-box;
+  display: block;
+}
+
+.create-game-settings-stage .narrative-perspective-field legend {
+  padding-inline: 0;
+}
+
+.create-game-settings-stage .narrative-perspective-cards {
+  width: 100%;
+  min-width: 0;
+  margin-block: 8px 12px;
+}
+
+.create-game-settings-stage .narrative-perspective-cards button {
+  min-width: 0;
+  align-content: start;
+  justify-items: start;
+  text-align: left;
+}
+
+@media (max-width: 900px) {
+  .create-wizard-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .create-journey-rail {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 13px;
+    border-right: 0;
+    border-bottom: 1px solid var(--df-border-soft);
+    background: linear-gradient(90deg, color-mix(in srgb, var(--df-canvas) 72%, transparent), var(--df-surface-1)),
+      var(--df-bg-ruins-image) center / cover no-repeat;
+  }
+  .create-rail-sigil {
+    align-self: center;
+    margin: 0 14px 0 0;
+  }
+  .create-step-nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .create-step-nav-item {
+    grid-template-columns: 31px minmax(0, 1fr);
+    min-height: 46px;
+  }
+  .create-step-nav-item::after {
+    top: 16px;
+    right: 5px;
+    bottom: auto;
+    left: 31px;
+    width: auto;
+    height: 1px;
+  }
+  .create-step-nav-item > span {
+    width: 31px;
+    height: 31px;
+  }
+}
+
+@media (max-width: 800px) {
+  .create-stage-panel {
+    padding: 19px 16px 14px;
+  }
+  .create-mode-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .create-mode-cards button {
+    min-height: 78px;
+    padding: 9px;
+  }
+  .create-confirm-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .create-page-header {
+    align-items: flex-start;
+  }
+  .create-journey-rail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .create-rail-sigil {
+    display: none;
+  }
+  .create-step-nav-item {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 3px;
+    text-align: center;
+  }
+  .create-step-nav-item::after {
+    top: 15px;
+    right: -50%;
+    left: 50%;
+  }
+  .create-step-nav-item > div small {
+    display: none;
+  }
+  .create-stage-panel {
+    padding-inline: 12px;
+  }
+  .create-field-grid, .create-config-surface, .create-mode-cards, .create-recommended-rules .rec-grid, .create-confirm-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .create-step-card .wide {
+    grid-column: auto;
+  }
+  .create-character-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .create-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .create-actions button:first-child {
+    margin: 0;
+  }
+}
+
+@media (max-width: 800px) {
+  .reference-create-page {
+    padding-bottom: calc(92px + env(safe-area-inset-bottom));
+  }
+}
+
+.create-advanced-settings {
+  padding: 9px 10px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: color-mix(in srgb, var(--df-control-bg) 82%, transparent);
+}
+
+.create-advanced-settings summary {
+  cursor: pointer;
+  color: var(--df-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.create-advanced-settings[open] summary {
+  margin-bottom: 10px;
+}
+
+.create-page details > summary {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  line-height: 1.25;
+}
+
+.create-page details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.create-page details > summary::after {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.2em;
+  margin-left: auto;
+  color: var(--df-text-muted);
+  content: '⌄';
+  line-height: 1;
+  transform: translateY(0);
+  transition: transform .18s ease;
+}
+
+.create-page details[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.create-wizard-shell {
+  align-items: stretch;
+}
+
+.create-step-rail {
+  align-self: stretch;
+  height: auto;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.create-stage-panel {
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 640px) {
+  .create-step-rail {
+    min-height: 0;
+  }
+}
+
+.view.reference-create-page {
+  width: min(var(--df-page-max), 100%);
+  max-width: var(--df-page-max);
+  box-sizing: border-box;
+  margin-inline: auto;
+  padding-inline: var(--df-page-gutter);
+  padding-top: var(--df-page-top);
+  padding-bottom: 42px;
+}
+
+.view.reference-create-page .content-page-heading {
+  box-sizing: border-box;
+  margin-top: 0 !important;
+  margin-bottom: 20px !important;
+  padding: 12px 0 18px !important;
+}
+
+@media (max-width: 800px) {
+  .view.reference-create-page {
+    width: 100%;
+    max-width: 100%;
+    padding-inline: 12px;
+    padding-top: var(--df-page-top-mobile);
+    padding-bottom: 32px;
+  }
+  .view.reference-create-page .content-page-heading {
+    margin-bottom: 16px !important;
+    padding-top: 10px !important;
+    padding-bottom: 14px !important;
+  }
+}

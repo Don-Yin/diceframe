@@ -18,6 +18,7 @@ from src.engine.currency import (
 )
 from src.engine.language import (
     DEFAULT_LANGUAGE,
+    content_locale_candidates,
     field_suffixes,
     lang_suffix,
     localized_field,
@@ -203,15 +204,15 @@ class RuleSystem:
         base = Path(rules_dir) / f"{rule_id}.json"
         suffix = lang_suffix(language) if language else ""
         if suffix:
-            v2_locale = Path(rules_dir) / "locales" / str(language).replace("_", "-") / f"{rule_id}.json"
-            if v2_locale.exists():
-                return v2_locale
-            v2_base = Path(rules_dir) / "locales" / str(language).replace("_", "-").split("-", 1)[0] / f"{rule_id}.json"
-            if v2_base.exists():
-                return v2_base
-            localized = Path(rules_dir) / f"{rule_id}_{suffix}.json"
-            if localized.exists():
-                return localized
+            candidates = content_locale_candidates(language)
+            for candidate in candidates:
+                v2_locale = Path(rules_dir) / "locales" / candidate / f"{rule_id}.json"
+                if v2_locale.exists():
+                    return v2_locale
+            for candidate in candidates:
+                localized = Path(rules_dir) / f"{rule_id}_{candidate}.json"
+                if localized.exists():
+                    return localized
         return base
 
     # ---- 检定意图（intents）----
@@ -523,7 +524,7 @@ class RuleSystem:
             return 0
         value = int(skill_value or 0)
         best = 0
-        for threshold, bonus in table.items():
+        for threshold, bonus in sorted(table.items(), key=lambda item: int(item[0])):
             if value >= int(threshold):
                 best = int(bonus)
         return best
@@ -934,6 +935,7 @@ def list_available_rules(rules_dir: str | Path) -> list[dict]:
                 "custom": bool(template.get("custom", False)),
                 "source_rule_id": template.get("source_rule_id", ""),
                 "scene_image": template.get("scene_image"),
+                "scene_images": template.get("scene_images") if isinstance(template.get("scene_images"), list) else [],
                 "file": str(f),
             })
         except Exception as exc:

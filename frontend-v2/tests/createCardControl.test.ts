@@ -136,6 +136,11 @@ describe('cycling a card control from the single button', () => {
 })
 
 describe('CreateView control placement contract', () => {
+  it('does not show the experimental profile template launcher in ordinary game creation', () => {
+    expect(createView).not.toContain('ProfileCreateLauncher')
+    expect(createView).not.toContain('profile-launcher')
+  })
+
   it('offers a single cycling control button in the character step', () => {
     // 角色步骤：每张角色卡一个按钮显示当前控制方式，点一下切下一个；不再有需要展开的
     // 下拉，也不是铺开成整块的 radio 表单。
@@ -169,14 +174,15 @@ describe('CreateView control placement contract', () => {
     expect(fn).toContain('removeCardControl(cardControl.value, idx)')
   })
 
-  it('Case G — the confirm step no longer repeats the per-character control', () => {
+  it('Case G — the confirm step summarizes saved per-character control without a second editor', () => {
     const confirmSection = createView.slice(createView.indexOf('create-confirm-stage'))
     const summary = confirmSection.slice(0, confirmSection.indexOf('</section>'))
-    // 角色名仍有胶囊展示，但「名字 + 控制方式」那条清单已按人类反馈拿掉：控制方式在
-    // 「角色」步骤的按钮上就是当前状态，确认页重复一遍没有信息量。
+    // 确认页展示角色与已保存的控制方式，避免用户无法核对将要进入本局的席位状态；
+    // 角色步骤的按钮仍是唯一配置入口。
     expect(summary).toContain('create-confirm-characters')
+    expect(summary).toContain('controlLabel(controlOf(i))')
+    expect(summary).toContain('Seat control is saved in the Characters step')
     expect(summary).not.toContain('create-confirm-controls')
-    expect(summary).not.toContain('controlLabel(')
     // 确认页始终只有只读摘要，不提供第二套配置入口。
     expect(summary).not.toContain('<select')
     expect(summary).not.toContain('type="radio"')

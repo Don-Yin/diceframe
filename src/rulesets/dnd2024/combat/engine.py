@@ -11,6 +11,7 @@ from src.engine.player_control import is_ai_controlled
 from src.engine.modules import ruleset_runtime
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.builder import ability_modifier
+from src.rulesets.dnd2024.character.reconciliation import merge_live_character_projection
 from src.rulesets.dnd2024.combat.catalog import Dnd2024CombatCatalog
 from src.rulesets.dnd2024.content.encounter import expand_encounter_enemies
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
@@ -29,15 +30,17 @@ from .primitives import (
     enemy_actor as _enemy_actor,
     player_actor as _player_actor,
 )
+from .readiness import required_encounter_player_ids
 from .reducer import CombatReducerMixin
 from .resolution import CombatResolutionMixin
 from .validation import CombatValidationMixin
 from .view import CombatViewMixin
+from .triggered_spells import CombatTriggeredSpellsMixin, HIT_SPELL_DECISION, hit_spell_decision
 
 
 @dataclass(slots=True)
 class Dnd2024CombatEngine(
-    CombatValidationMixin, CombatResolutionMixin, CombatReducerMixin, CombatViewMixin,
+    CombatValidationMixin, CombatResolutionMixin, CombatReducerMixin, CombatViewMixin, CombatTriggeredSpellsMixin,
 ):
     bundle: LoadedRulesetBundle
     encounter_access: EncounterAccess = field(default_factory=EncounterAccess.blocked)
@@ -86,11 +89,11 @@ class Dnd2024CombatEngine(
         if combat.get("status") != "active":
             actions: list[dict[str, Any]] = []
             request = state.get("encounter_request")
+            required_ids = set(required_encounter_player_ids(instance))
             if (
                 isinstance(request, dict)
                 and request.get("status") == "pending"
-                and actor_id in instance.players
-                and actor_id != gm_uid
+                and actor_id in required_ids
             ):
                 ready_ids = {
                     str(item) for item in request.get("ready_player_ids") or [] if str(item)
@@ -132,6 +135,16 @@ class Dnd2024CombatEngine(
             if item.get("assigned_to") == actor_id
         ]
         if pending:
+            if pending[0].get("kind") == HIT_SPELL_DECISION:
+                spells = self._available_spells(
+                    self._actor_view(instance, combat, current), combat.get("economy", {}), pending[0],
+                )
+                return [*communication, {"type": "decision.resolve", "expected_version": version,
+                        "decisions": deepcopy(pending)}, *([{
+                            "type": "cast_spell", "actor_id": current, "expected_version": version,
+                            "spells": [row for row in spells if row["mode"] == "triggered_damage"],
+                            "targets": self._all_targets(instance, combat),
+                        }] if any(row["mode"] == "triggered_damage" for row in spells) else [])]
             return [*communication, {
                 "type": "decision.resolve", "label": "Resolve reaction",
                 "expected_version": version, "decisions": deepcopy(pending),
@@ -174,7 +187,7 @@ class Dnd2024CombatEngine(
                     "type": "stabilize", "label": "Stabilize", "actor_id": current,
                     "expected_version": version, "targets": adjacent_downed,
                 })
-        spells = self._available_spells(actor, economy)
+        spells = self._available_spells(actor, economy, hit_spell_decision(combat, current))
         if spells:
             actions.append({
                 "type": "cast_spell", "label": "Cast a spell", "actor_id": current,
@@ -232,6 +245,8 @@ class Dnd2024CombatEngine(
         pending = list(combat.get("pending_decisions") or [])
         if pending:
             decision = pending[0]
+            if decision.get("kind") == HIT_SPELL_DECISION:
+                return self._automatic_hit_spell(instance, combat, decision, version)
             threats = [str(item) for item in decision.get("threat_actor_ids") or []]
             option = (
                 "resolve"
@@ -582,6 +597,9 @@ class Dnd2024CombatEngine(
         else:  # pragma: no cover - validation guards this
             raise CombatIntentError("unsupported intent")
         expected = int(intent["expected_version"])
+        if pending is None:
+            pending = next(({key: value for key, value in event.items() if key != "type"} for event in events
+                            if event.get("type") == "dnd2024.decision.pending"), None)
         batch = {
             "batch_id": stable_batch_id(intent, expected),
             "intent_id": intent_id,
@@ -715,7 +733,7 @@ class Dnd2024CombatEngine(
             ruleset_runtime.replace_state(instance, ruleset_state)
             for uid, canonical in updated["characters"].items():
                 existing = deepcopy(instance.get_character_sheet(uid))
-                projection = self._project_character(canonical)
+                projection = merge_live_character_projection(existing, self._project_character(canonical))
                 existing.update(projection)
                 instance.set_character_sheet(uid, existing)
             ruleset_runtime.replace_event_ledger(instance, ledger)
@@ -746,6 +764,7 @@ class Dnd2024CombatEngine(
                     # 真实条目，enemy 视图没有职业资源，就是空列表）。这里绝不能
                     # 退回 ``{}``：同一个字段出现两种形状会让客户端把对象当数组用。
                     "class_resources": deepcopy(view.get("class_resources") or []),
+                    "spells": self._spell_statuses(view, combat.get("economy", {}), hit_spell_decision(combat, view["actor_id"]), is_current=view["actor_id"] == self._current_actor(combat)),
                 })
         initiative = list(combat.get("initiative") or [])
         turn_index = int(combat.get("turn_index", 0) or 0)
@@ -962,17 +981,10 @@ class Dnd2024CombatEngine(
     def _attack_modes(
         actor: dict[str, Any], target: dict[str, Any], range_disadvantage: bool,
     ) -> tuple[bool, bool]:
-        advantage = "next_attack_advantage" in target["conditions"] or "faerie_fire" in target[
-            "conditions"
-        ]
-        disadvantage = (
-            range_disadvantage
-            or "dodging" in target["conditions"]
-            or "next_attack_disadvantage" in actor["conditions"]
-        )
-        if advantage and disadvantage:
-            return False, False
-        return advantage, disadvantage
+        from .check_modes import attack_sources, mode_from_sources
+
+        mode = mode_from_sources(attack_sources(actor, target, range_disadvantage))
+        return mode == "advantage", mode == "disadvantage"
 
     @staticmethod
     def _consume_attack_conditions(

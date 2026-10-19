@@ -5,6 +5,7 @@ from __future__ import annotations
 from aiohttp import web
 
 from src.webui.services.adventures import MAX_ADVENTURE_PACKAGE_BYTES
+from src.webui.routes._common import require_content_owner
 
 
 def _get_api(request: web.Request):
@@ -12,6 +13,8 @@ def _get_api(request: web.Request):
 
 
 async def api_adventures(request: web.Request) -> web.Response:
+    if (denied := require_content_owner(request)) is not None:
+        return denied
     result = _get_api(request).list_adventures(
         rule_id=request.query.get("rule_id", ""),
         world_id=request.query.get("world_id", ""),
@@ -27,6 +30,8 @@ def _status_for_error(exc: Exception) -> int:
 
 
 async def api_adventure_detail(request: web.Request) -> web.Response:
+    if (denied := require_content_owner(request)) is not None:
+        return denied
     try:
         result = _get_api(request).adventure_detail(
             request.match_info["adventure_id"], request.query.get("language", ""),
@@ -37,6 +42,8 @@ async def api_adventure_detail(request: web.Request) -> web.Response:
 
 
 async def api_adventure_copy(request: web.Request) -> web.Response:
+    if (denied := require_content_owner(request)) is not None:
+        return denied
     try:
         body = await request.json()
         if not isinstance(body, dict):
@@ -53,6 +60,8 @@ async def api_adventure_copy(request: web.Request) -> web.Response:
 
 
 async def api_adventure_create(request: web.Request) -> web.Response:
+    if (denied := require_content_owner(request)) is not None:
+        return denied
     try:
         body = await request.json()
         if not isinstance(body, dict):
@@ -68,6 +77,8 @@ async def api_adventure_create(request: web.Request) -> web.Response:
 
 
 async def api_adventure_update(request: web.Request) -> web.Response:
+    if (denied := require_content_owner(request)) is not None:
+        return denied
     try:
         body = await request.json()
         if not isinstance(body, dict):
@@ -84,6 +95,8 @@ async def api_adventure_update(request: web.Request) -> web.Response:
 
 
 async def api_adventure_delete(request: web.Request) -> web.Response:
+    if (denied := require_content_owner(request)) is not None:
+        return denied
     try:
         result = _get_api(request).delete_adventure(request.match_info["adventure_id"])
     except (ValueError, PermissionError) as exc:
@@ -94,6 +107,8 @@ async def api_adventure_delete(request: web.Request) -> web.Response:
 
 
 async def api_adventure_export(request: web.Request) -> web.Response:
+    if (denied := require_content_owner(request)) is not None:
+        return denied
     try:
         filename, payload = _get_api(request).export_adventure(
             request.match_info["adventure_id"],
@@ -108,6 +123,8 @@ async def api_adventure_export(request: web.Request) -> web.Response:
 
 
 async def api_adventure_import(request: web.Request) -> web.Response:
+    if (denied := require_content_owner(request)) is not None:
+        return denied
     if request.content_type != "multipart/form-data":
         return web.json_response(
             {"ok": False, "error": "adventure import requires multipart/form-data"},
@@ -137,6 +154,8 @@ async def api_adventure_import(request: web.Request) -> web.Response:
 
 
 def register_adventures(app: web.Application) -> None:
+    from src.webui.routes.adventure_script_import import register
+    register(app)
     app.router.add_get("/api/adventures", api_adventures)
     app.router.add_post("/api/adventures", api_adventure_create)
     app.router.add_post("/api/adventures/import", api_adventure_import)

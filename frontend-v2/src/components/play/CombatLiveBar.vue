@@ -5,6 +5,8 @@ import { ListOutline, OpenOutline, ShieldOutline } from '@vicons/ionicons5'
 import type { RulesetCombatEvent, RulesetGameplayView } from '@/api/types'
 import Modal from '@/components/ui/Modal.vue'
 import { useLocale } from '@/composables/useLocale'
+import { reportAssistantReaction } from '@/composables/useAssistantReactions'
+import { combatRollEvidence } from '@/features/play/check-modes/combatEvidence'
 
 const props = defineProps<{
   gameplay: RulesetGameplayView
@@ -134,11 +136,11 @@ function eventText(event?: RulesetCombatEvent): string {
         : `${actor} makes a death save: d20 ${event.natural ?? roll}, ${event.success ? 'success' : 'failure'}`
     }
     if (kind === 'attack' || kind === 'spell_attack' || kind === 'opportunity_attack') {
-      const natural = event.natural ?? event.roll ?? ''
+      const dice = combatRollEvidence(event, locale.value)
       const modifier = Number(event.modifier || 0) + Number(event.bless_bonus || 0)
       return zh.value
-        ? `${actor}攻击${target}：d20 ${natural} + ${modifier} = ${roll} vs AC ${dc}，${verdict}`
-        : `${actor} attacks ${target}: d20 ${natural} + ${modifier} = ${roll} vs AC ${dc}, ${verdict}`
+        ? `${actor}攻击${target}：${dice} + ${modifier} = ${roll} vs AC ${dc}，${verdict}`
+        : `${actor} attacks ${target}: ${dice} + ${modifier} = ${roll} vs AC ${dc}, ${verdict}`
     }
     return zh.value
       ? `${actor}攻击${target}：${roll} vs ${dc}，${verdict}`
@@ -243,6 +245,27 @@ function announceChange(duration = 2200): void {
   changedTimer = window.setTimeout(() => { changed.value = false }, duration)
 }
 
+// Tell the DF Agent avatar about the most notable thing in a live batch,
+// seen from this player's side of the table.
+function reportCombatReaction(batch: RulesetCombatEvent[]): void {
+  const own = `player:${props.actorId}`
+  const ally = (id?: string) => Boolean(id && id.startsWith('player:'))
+  for (const event of batch) {
+    if (event.type === 'dnd2024.combat.started') return reportAssistantReaction('combatStart')
+    if (event.type === 'dnd2024.combat.ended') return reportAssistantReaction('combatEnd')
+  }
+  const ownImpact = batch.find(event => event.type === 'resource.changed' && event.target_id === own && Number(event.amount ?? event.delta ?? 0) !== 0)
+  if (ownImpact) {
+    const delta = Number(ownImpact.amount ?? ownImpact.delta ?? 0)
+    if (delta < 0 && typeof ownImpact.hp === 'number' && ownImpact.hp <= 0) return reportAssistantReaction('downed')
+    return reportAssistantReaction(delta < 0 ? 'hurt' : 'heal', { amount: delta })
+  }
+  if (batch.some(event => event.type === 'dnd2024.death_save.resolved' && event.actor_id === own)) return reportAssistantReaction('deathSave')
+  const attack = batch.find(event => event.type === 'check.resolved' && ally(event.actor_id)
+    && ['attack', 'spell_attack', 'opportunity_attack'].includes(String(event.kind || '')))
+  if (attack) reportAssistantReaction(attack.critical ? 'attackCrit' : attack.success ? 'attackHit' : 'attackMiss')
+}
+
 function playNextBatch(): void {
   if (playbackTimer) window.clearTimeout(playbackTimer)
   playbackTimer = undefined
@@ -254,6 +277,7 @@ function playNextBatch(): void {
   }
   replaying.value = true
   presentedBatchId.value = next
+  reportCombatReaction(eventBatches.value.find(batch => batch.id === next)?.events || [])
   announceChange(1050)
   playbackTimer = window.setTimeout(playNextBatch, 1100)
 }
@@ -277,6 +301,9 @@ watch(
   { immediate: true },
 )
 
+watch(isOwnTurn, (own, wasOwn) => {
+  if (own && wasOwn === false && combat.value.status === 'active') reportAssistantReaction('yourTurn')
+})
 watch(
   () => `${combat.value.round}:${combat.value.current_actor_id}`,
   (next, previous) => {

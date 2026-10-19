@@ -22,6 +22,7 @@ from typing import Any
 SCHEMA_VERSION = 1
 LAUNCHER_SCHEMA = 1
 RUNTIME_API = 1
+VERSIONED_DATA_MODE = "versioned-copy-v1"
 PLATFORM = "linux-amd64"
 PYTHON_ABI = "cp311"
 MAX_ARCHIVE_MEMBERS = 20_000
@@ -30,6 +31,22 @@ DOCKER_ASSET_RE = re.compile(
     r"^DiceFrame-v(?P<version>[0-9A-Za-z][0-9A-Za-z._+-]{0,63})-"
     r"docker-update-linux-amd64\.zip$"
 )
+
+
+def version_key(
+    value: str,
+) -> tuple[tuple[int, int, int], int, tuple[tuple[int, int | str], ...]]:
+    text = str(value or "").strip().lstrip("vV")
+    core, separator, prerelease = text.partition("-")
+    chunks = core.split(".")
+    if len(chunks) != 3 or not all(chunk.isdigit() for chunk in chunks):
+        raise ValueError(f"unsupported version: {value}")
+    prerelease_key = tuple(
+        (0, int(part)) if part.isdigit() else (1, part)
+        for part in prerelease.split(".") if part
+    )
+    core_key = (int(chunks[0]), int(chunks[1]), int(chunks[2]))
+    return (core_key, 0 if separator else 1, prerelease_key)
 
 
 def file_sha256(path: Path) -> str:
@@ -171,6 +188,15 @@ def validate_manifest(
         raise ValueError("Docker update requires a newer base image launcher")
     if int(payload.get("runtime_api", 0) or 0) != runtime_api:
         raise ValueError("Docker update requires a different Docker base runtime")
+    data_mode = payload.get("data_mode")
+    if data_mode is not None:
+        if data_mode != VERSIONED_DATA_MODE:
+            raise ValueError("Docker update data mode is unsupported")
+        schemas = payload.get("data_schemas")
+        if not isinstance(schemas, dict) or set(schemas) != {"instance", "lorebook"}:
+            raise ValueError("Docker update data schema declaration is invalid")
+        if any(type(value) is not int or value < 1 for value in schemas.values()):
+            raise ValueError("Docker update data schema declaration is invalid")
     if payload.get("data_rollback_safe") is not True:
         raise ValueError(
             "Docker update cannot be auto-applied because its data migrations "
@@ -209,6 +235,9 @@ def validate_package_tree(
     version_match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', version_text)
     if not version_match or version_match.group(1).strip().lstrip("vV") != manifest["version"]:
         raise ValueError("Docker update application version does not match its manifest")
+    if manifest.get("data_mode") == VERSIONED_DATA_MODE:
+        if not (package_root / "app" / "src" / "docker_launcher" / "data_versions.py").is_file():
+            raise ValueError("Docker update is missing its versioned data bootstrap")
     site_packages = package_root / "runtime" / "site-packages"
     if not site_packages.is_dir() or not any(site_packages.iterdir()):
         raise ValueError("Docker update package is missing its Python runtime dependencies")

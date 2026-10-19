@@ -26,6 +26,7 @@ from src.rules.rule_system import RuleSystem
 from src.rulesets.contracts import (
     CharacterItemPreparationRuntime,
     CharacterStateReconciliationRuntime,
+    NarrativeHealthRuntime,
 )
 from src.engine.economy import queue_proposal
 from src.engine.modules import checks, progression_state
@@ -123,7 +124,11 @@ class StateUpdateApplier:
         rule = self._load_rule(instance)
         # 先解析 runtime：没有 reconciliation 能力的规则（legacy / freeform）完全
         # 不进入快照与 reconcile 分支，保持原有行为与开销。
-        reconciler = self._reconciliation_runtime(rule)
+        runtime = self._resolve_runtime(rule)
+        reconciler = runtime if isinstance(runtime, CharacterStateReconciliationRuntime) else None
+        health_runtime = runtime if isinstance(runtime, NarrativeHealthRuntime) else None
+        if health_runtime is not None:
+            health_runtime.preflight_narrative_health(instance)
         # 旧存档的装备行可能没有 canonical metadata：generic equip 会按"非武器一律
         # body"处理并把真正穿着的护甲顶回背包，而之后的 reconciliation 救不回来。
         # 因此先让绑定的规则集把这次要装备的行 canonical 化（只有实现了该能力的
@@ -146,6 +151,7 @@ class StateUpdateApplier:
                 update.get("players", {}),
                 rule=rule,
                 allowed_player_uids=allowed_player_uids,
+                health_runtime=health_runtime,
             ).items()
         }
 
@@ -252,7 +258,7 @@ class StateUpdateApplier:
             ))
         return queued_proposals
 
-    def _reconciliation_runtime(self, rule: RuleSystem | None) -> Any:
+    def _resolve_runtime(self, rule: RuleSystem | None) -> Any:
         """Resolve the bound runtime only when it opted into reconciliation.
 
         Generic code must not know which rule this is; the decision is made by
@@ -272,7 +278,7 @@ class StateUpdateApplier:
                 getattr(rule, "rule_id", ""), exc_info=True,
             )
             return None
-        return runtime if isinstance(runtime, CharacterStateReconciliationRuntime) else None
+        return runtime
 
     def _prepare_owned_items(
         self, preparer: Any, instance: GameInstance, players_update: Any,

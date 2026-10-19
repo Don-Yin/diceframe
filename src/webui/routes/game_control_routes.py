@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+from src.engine import module_hooks
+
 import logging
 
 from aiohttp import web
@@ -10,7 +13,7 @@ from src.webui.routes._common import (
     _get_api,
 )
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import table_settings
+
 from src.webui.services import room_password as room_password_svc
 from src.webui.services._common import is_game_gm
 from src.webui.viewer import viewer_for
@@ -54,7 +57,7 @@ def _system_log_allowed(request: web.Request, inst) -> bool:
     if is_game_gm(inst, uid, bool(request.get("owner_authenticated", False))):
         return True
     return bool(
-        table_settings.solo_mode(inst) and uid in getattr(inst, "players", {})
+        game_config.solo_mode(inst) and uid in getattr(inst, "players", {})
     )
 
 
@@ -172,7 +175,7 @@ async def api_set_dice_reveal_mode(request: web.Request) -> web.Response:
         await pool.broadcast(gk, {"type": "table_settings_changed"})
     return web.json_response({
         "ok": True,
-        "dice_reveal_mode": table_settings.dice_reveal_mode(inst),
+        "dice_reveal_mode": module_hooks.check_presentation(inst)["dice_reveal_mode"],
     })
 
 
@@ -198,7 +201,7 @@ async def api_set_luck_timeout(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
     await api.save_game_instance(inst)
     return web.json_response(
-        {"ok": True, "luck_timeout_seconds": table_settings.luck_timeout_seconds(inst)}
+        {"ok": True, "luck_timeout_seconds": module_hooks.check_presentation(inst)["luck_timeout_seconds"]}
     )
 
 

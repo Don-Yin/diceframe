@@ -1,0 +1,134 @@
+/* Overview surfaces, controls and responsive states. Edit this owner directly. */
+
+.game-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 15px 4px;
+  border-bottom: 1px solid var(--df-border-soft);
+}
+
+.game-row h2 {
+  font-size: 17px;
+  margin: 0;
+}
+
+.game-row p {
+  color: var(--df-text-muted);
+  margin: 5px 0;
+}
+
+.game-row h2 {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.game-row code {
+  font-family: var(--df-font-mono);
+  color: var(--df-accent-strong);
+  background: rgba(216,173,82,.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+@media (max-width:800px) {
+  .game-row {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width:480px) {
+  .game-row {
+    display: grid;
+  }
+  .game-row>div:last-child {
+    display: flex;
+  }
+}
+
+@media (max-width: 800px) {
+  .overview-page {
+    padding-inline: 12px;
+  }
+}
+
+.overview-assistant-drawer {
+  background: var(--df-surface-1) !important;
+  border-radius: 0 !important;
+  box-shadow: -18px 0 44px color-mix(in srgb, #000 24%, transparent) !important;
+}
+
+.overview-assistant-drawer .n-drawer-content {
+  padding: 0;
+  background: var(--df-surface-1);
+}
+
+.overview-assistant-drawer .n-drawer-header {
+  display: none !important;
+}
+
+.overview-assistant-drawer .assistant-panel {
+  height: 100%;
+}
+
+.overview-assistant-drawer .n-drawer-body, .overview-assistant-drawer .n-drawer-body-content-wrapper {
+  height: 100%;
+  padding: 0 !important;
+}
+
+.overview-page .overview-archive-tools > summary, .overview-page .overview-game-tools > summary {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  line-height: 1.25;
+}
+
+.overview-page .overview-archive-tools > summary::-webkit-details-marker, .overview-page .overview-game-tools > summary::-webkit-details-marker {
+  display: none;
+}
+
+.overview-page .overview-archive-tools > summary::after, .overview-page .overview-game-tools > summary::after {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  line-height: 1;
+  transform: translateY(0);
+}
+
+.view.overview-page {
+  width: min(var(--df-page-max), 100%);
+  max-width: var(--df-page-max);
+  box-sizing: border-box;
+  margin-inline: auto;
+  padding-inline: var(--df-page-gutter);
+  padding-top: var(--df-page-top);
+  padding-bottom: 42px;
+}
+
+.view.overview-page .overview-hero {
+  box-sizing: border-box;
+  margin-top: 0 !important;
+  margin-bottom: 20px !important;
+  padding: 12px 0 18px !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+@media (max-width: 800px) {
+  .view.overview-page {
+    width: 100%;
+    max-width: 100%;
+    padding-inline: 12px;
+    padding-top: var(--df-page-top-mobile);
+    padding-bottom: 32px;
+  }
+  .view.overview-page .overview-hero {
+    margin-bottom: 16px !important;
+    padding-top: 10px !important;
+    padding-bottom: 14px !important;
+  }
+}

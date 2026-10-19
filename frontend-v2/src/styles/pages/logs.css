@@ -1,0 +1,608 @@
+/* The log index and reading surface are independent columns. Sticky offsets
+   follow the measured application/section headers; the index must remain
+   scrollable in a short viewport while the document can contain long rounds. */
+
+.log-reader pre, .console-log {
+  scrollbar-gutter: stable;
+}
+
+.log-reader pre {
+  white-space: pre-wrap;
+  background: var(--df-control-bg);
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 6px;
+  color: var(--df-text);
+  font-family: var(--df-font-mono);
+}
+
+.log-action {
+  font-size: 13px;
+}
+
+.log-actor {
+  color: var(--df-accent-strong);
+  margin-right: 6px;
+}
+
+.console-log {
+  background: #0d1117;
+  border-radius: 8px;
+  padding: 12px;
+  font-family: ui-monospace,Consolas,monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  max-height: 60vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.proc-line {
+  margin: 0 0 8px;
+}
+
+.console-log .ok {
+  color: #56d364;
+}
+
+.console-log .warn {
+  color: #d29922;
+}
+
+.console-log .cmd {
+  color: #79c0ff;
+}
+
+.logs-page .lore-system {
+  border-radius: 8px;
+  background: linear-gradient(180deg,rgba(216,173,82,.08),rgba(35,27,20,.66));
+}
+
+.logs-page .mode-tabs {
+  margin: 16px 0 8px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.log-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 12px;
+  color: var(--df-text-muted);
+  font-size: 13px;
+}
+
+.log-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.log-toolbar select {
+  padding: 4px 8px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 6px;
+  background: var(--df-surface-1);
+  color: var(--df-text);
+}
+
+.log-reader {
+  display: grid;
+  gap: 12px;
+}
+
+.log-reader article {
+  padding: 14px;
+  border: 1px solid var(--df-border-soft);
+}
+
+.log-reader article h2 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+
+.log-entry-body {
+  position: relative;
+}
+
+.log-entry-body.collapsed {
+  max-height: 22em;
+  overflow: hidden;
+}
+
+.log-entry-body.collapsed:after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4.8em;
+  background: linear-gradient(180deg,rgba(25,23,20,0),rgba(25,23,20,.96));
+}
+
+.log-expand {
+  margin-top: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  background: rgba(216,173,82,.08);
+}
+
+.log-action {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--df-border-soft);
+  line-height: 1.6;
+}
+
+.log-action:last-of-type {
+  border-bottom: 0;
+}
+
+.console-log {
+  border: 1px solid var(--df-border-soft);
+  box-shadow: var(--df-shadow);
+}
+
+body.light .log-reader article {
+  background: linear-gradient(180deg,var(--df-surface-raised),var(--df-surface-1));
+}
+
+body.light .log-entry-body.collapsed:after {
+  background: linear-gradient(180deg,transparent,var(--df-surface-1));
+}
+
+.log-reader article {
+  border-color: var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  color: var(--df-text);
+  background: linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .035);
+}
+
+.logs-page .mode-tabs {
+  border-color: var(--df-border-soft);
+  background: color-mix(in srgb, var(--df-surface-2) 86%, transparent);
+}
+
+.logs-page {
+  width: min(1540px, 100%);
+}
+
+.logs-workspace {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.log-index {
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: calc(var(--section-header-height, 68px) + var(--section-navigation-height, 56px) + 12px);
+  align-self: start;
+  box-sizing: border-box;
+  min-height: 0;
+  max-height: calc(100dvh - var(--section-header-height, 68px) - var(--section-navigation-height, 56px) - 24px);
+  overflow-y: auto;
+  padding: 13px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-lg);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--df-canvas-glow) 28%, transparent), transparent 34%),
+    var(--df-surface-1);
+  box-shadow: var(--df-shadow);
+}
+
+.log-index > * {
+  flex-shrink: 0;
+}
+
+.log-campaign-card {
+  display: grid;
+  gap: 8px;
+  padding: 18px 13px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: linear-gradient(180deg, transparent 18%, var(--df-surface-2) 65%),
+    radial-gradient(circle at 70% 18%, color-mix(in srgb, var(--df-accent) 24%, transparent), transparent 24%),
+    linear-gradient(135deg, var(--df-canvas-glow), var(--df-surface-raised));
+}
+
+.log-index-kicker {
+  color: var(--df-accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.log-campaign-card h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.log-campaign-card p, .log-campaign-card small {
+  margin: 0;
+  overflow: hidden;
+  color: var(--df-text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-index-tabs {
+  display: grid;
+  gap: 5px;
+  margin: 14px 0 0;
+  border: 0;
+  background: transparent;
+}
+
+.log-index-tabs button {
+  justify-content: flex-start;
+  min-height: 44px;
+  padding-inline: 13px;
+  border: 1px solid transparent;
+  border-radius: var(--df-radius-md);
+  text-align: left;
+}
+
+.log-index-tabs button.active {
+  border-color: color-mix(in srgb, var(--df-interactive) 48%, transparent);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--df-interactive) 18%, var(--df-control-bg)), transparent);
+  box-shadow: inset 3px 0 0 var(--df-interactive);
+}
+
+.log-index-meta {
+  display: grid;
+  gap: 5px;
+  margin-top: 14px;
+  padding: 12px 5px;
+  border-top: 1px solid var(--df-border-soft);
+  color: var(--df-text-muted);
+  font-size: 10px;
+}
+
+.logs-document {
+  min-width: 0;
+  padding: 0 10px 20px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-lg);
+  background: radial-gradient(circle at 80% 0, color-mix(in srgb, var(--df-accent) 5%, transparent), transparent 34%),
+    linear-gradient(180deg, color-mix(in srgb, var(--df-surface-1) 34%, transparent), transparent);
+}
+
+.logs-document .lore-system {
+  margin-top: 0;
+}
+
+.logs-document .log-toolbar {
+  justify-content: flex-end;
+  margin: 0 0 10px;
+}
+
+.logs-page .log-reader {
+  gap: 11px;
+}
+
+.logs-page .log-reader article {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--df-accent) 28%, var(--df-border-soft));
+  background: color-mix(in srgb, var(--df-surface-1) 88%, transparent);
+}
+
+.logs-page .log-reader article h2 {
+  margin: 0;
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--df-border-soft);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--df-accent) 8%, transparent), transparent);
+  font-size: 15px;
+}
+
+.logs-page .log-entry-body {
+  padding: 13px 20px 18px;
+}
+
+.logs-page .log-expand {
+  margin: 0 20px 15px;
+}
+
+@media (max-width: 900px) {
+  .logs-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .log-index {
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(190px, 1fr);
+    gap: 10px;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+  }
+  .log-campaign-card {
+    min-height: 130px;
+    padding-top: 48px;
+    grid-row: 1 / 3;
+  }
+  .log-index-tabs, .log-index-meta {
+    margin: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .log-index {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .log-campaign-card {
+    grid-row: auto;
+    min-height: 122px;
+  }
+  .log-index-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .log-index-tabs button {
+    justify-content: center;
+  }
+  .logs-document {
+    padding-inline: 0;
+  }
+  .logs-page .log-entry-body {
+    padding-inline: 14px;
+  }
+}
+
+.reference-logs-page .log-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.reference-logs-page .log-toolbar select {
+  width: 82px;
+  min-width: 82px;
+  min-height: 34px;
+}
+
+.log-campaign-card {
+  background-image: linear-gradient(180deg, transparent 8%, color-mix(in srgb, var(--df-surface-2) 92%, transparent) 64%),
+    linear-gradient(90deg, color-mix(in srgb, var(--df-canvas) 32%, transparent), transparent),
+    var(--df-bg-ruins-image);
+  background-position: 68% center;
+  background-size: cover;
+}
+
+.reference-logs-page {
+  width: min(1480px, 100%);
+}
+
+.reference-logs-page .log-index-tabs button {
+  min-height: 46px;
+}
+
+.log-export {
+  width: 100%;
+  margin-top: auto;
+  border-color: color-mix(in srgb, var(--df-accent) 40%, var(--df-border-soft));
+  color: var(--df-accent-strong);
+}
+
+.log-mobile-tabs, .log-mobile-export {
+  display: none;
+}
+
+.reference-logs-page .logs-document {
+  padding: 0 18px 18px;
+}
+
+.logs-document-head {
+  min-height: 110px;
+  padding: 12px 0 17px;
+}
+
+.logs-document-head h1 {
+  font-size: clamp(26px, 2.8vw, 39px);
+}
+
+.reference-logs-page .log-toolbar {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--df-border-soft);
+}
+
+.reference-logs-page .log-reader {
+  position: relative;
+  padding-left: 28px;
+}
+
+.reference-logs-page .log-reader::before {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 8px;
+  width: 1px;
+  content: "";
+  background: linear-gradient(180deg, transparent, var(--df-accent) 5%, var(--df-border-soft) 90%, transparent);
+}
+
+.reference-logs-page .log-reader article::before {
+  position: absolute;
+  z-index: 2;
+  top: 17px;
+  left: -26px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--df-accent-strong);
+  border-radius: 50%;
+  content: "";
+  background: var(--df-canvas);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--df-accent) 10%, transparent);
+}
+
+.reference-logs-page .log-reader article h2 {
+  padding: 11px 17px;
+  font-size: 13px;
+}
+
+.reference-logs-page .log-entry-body {
+  padding: 14px 18px 17px;
+}
+
+@media (max-width: 900px) {
+  .reference-logs-page .logs-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reference-logs-page .log-index {
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(210px, .7fr) minmax(0, 1.3fr);
+    min-height: 0;
+    padding: 8px;
+    border: 0;
+    border-bottom: 1px solid var(--df-border-soft);
+  }
+  .reference-logs-page .log-campaign-card {
+    grid-row: 1 / 4;
+    min-height: 142px;
+    padding-top: 64px;
+  }
+  .reference-logs-page .log-export {
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .reference-logs-page .log-index {
+    display: none;
+  }
+  .reference-logs-page .logs-workspace {
+    display: block;
+    padding: 8px;
+  }
+  .reference-logs-page .log-mobile-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0 0 12px;
+    border: 1px solid var(--df-border-soft);
+    border-radius: var(--df-radius-md);
+    background: color-mix(in srgb, var(--df-surface-2) 72%, transparent);
+  }
+  .reference-logs-page .log-mobile-tabs button {
+    min-height: 42px;
+  }
+  .reference-logs-page .log-mobile-export {
+    display: inline-flex;
+  }
+  .reference-logs-page .logs-document {
+    padding-inline: 2px;
+  }
+  .reference-logs-page .log-reader {
+    padding-left: 18px;
+  }
+  .reference-logs-page .log-reader::before {
+    left: 4px;
+  }
+  .reference-logs-page .log-reader article::before {
+    left: -18px;
+  }
+}
+
+@media (max-width: 800px) {
+  .reference-logs-page {
+    padding-bottom: calc(92px + env(safe-area-inset-bottom));
+  }
+}
+
+.logs-page .content-page-heading-actions {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.logs-page .content-page-heading-actions .actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.logs-page .content-page-heading-actions button {
+  min-height: 40px;
+}
+
+.logs-page .logs-workspace {
+  scroll-margin-top: 82px;
+}
+
+.logs-page .logs-document-head {
+  margin-bottom: 16px;
+  padding-top: 0;
+}
+
+.logs-page .log-campaign-card {
+  border-color: color-mix(in srgb, var(--df-accent) 28%, var(--df-border-soft));
+}
+
+.logs-page .log-index-meta {
+  line-height: 1.5;
+}
+
+@media (max-width: 760px) {
+  .logs-page .content-page-heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
+    padding-top: 12px;
+  }
+  .logs-page .content-page-heading-actions {
+    width: 100%;
+  }
+  .logs-page .content-page-heading-actions .actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+    width: 100%;
+  }
+}
+
+@media (max-width: 440px) {
+  .logs-page .content-page-heading h1 {
+    font-size: 27px;
+  }
+}
+
+.view.logs-page {
+  width: min(var(--df-page-max), 100%);
+  max-width: var(--df-page-max);
+  box-sizing: border-box;
+  margin-inline: auto;
+  padding-inline: var(--df-page-gutter);
+  padding-top: var(--df-page-top);
+  padding-bottom: 42px;
+}
+
+.view.logs-page .logs-document-head {
+  box-sizing: border-box;
+  margin-top: 0 !important;
+  margin-bottom: 20px !important;
+  padding: 12px 0 18px !important;
+}
+
+@media (max-width: 800px) {
+  .view.logs-page {
+    width: 100%;
+    max-width: 100%;
+    padding-inline: 12px;
+    padding-top: var(--df-page-top-mobile);
+    padding-bottom: 32px;
+  }
+  .view.logs-page .logs-document-head {
+    margin-bottom: 16px !important;
+    padding-top: 10px !important;
+    padding-bottom: 14px !important;
+  }
+}

@@ -9,6 +9,8 @@ Combat Engine 权威结算。
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import copy
 import json
 import random
@@ -30,7 +32,7 @@ from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.rulesets.legacy_adapter import LegacyRulesetAdapter
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.webui.services import ruleset_gameplay
-from src.engine.modules import legacy_combat, narrative_notes, ruleset_runtime, table_settings
+from src.engine.modules import legacy_combat, narrative_notes, ruleset_runtime
 
 _RULE = RuleSystem({
     "rule_id": "test_dnd2024",
@@ -114,7 +116,7 @@ def _runtime_instance(
         package = runtime._adventure_loader.resolve("core:lanterns_of_greymoor", "en")
         assert instance.bind_adventure(package.binding("greymoor"))
     if walk_to_combat:
-        table_settings.replace_solo_mode(instance, True)
+        game_config.replace_solo_mode(instance, True)
         # quick_start 已直接进入教学第一步；只需连续推进到绑定遭遇的节点。
         _submit(runtime, instance, "session_zero.quick_start")
         for choice in ("inspect_cold_ash", "reassure_mira", "follow_small_tracks"):
@@ -282,7 +284,7 @@ async def test_generation_context_reads_dnd2024_canonical_party_fields() -> None
 @pytest.mark.asyncio
 async def test_gm_can_plan_and_generation_has_no_side_effects() -> None:
     runtime, instance = _runtime_instance(adventure=True)
-    table_settings.replace_solo_mode(instance, True)
+    game_config.replace_solo_mode(instance, True)
     _submit(runtime, instance, "session_zero.quick_start")
     apply_ruleset_combat_signal(instance, {"combat_command": "start"}, runtime)
     registry = _SaveRegistry()

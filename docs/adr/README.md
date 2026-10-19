@@ -1,8 +1,20 @@
 # Architecture Decision Records
 
-ADR 用来记录“为什么做出一个长期架构决定”，不是所有 PR 的审批流程。
+ADR 用来记录“为什么做出一个长期架构决定”，不是所有 PR 的审批流程。状态表示记录的决策状态；`Accepted` 不等于已经发布。
 
-## 架构方向提案
+## 已接受的长期决策
+
+已接受的剧情表现决策见 [ADR-0006：共享结构化剧情片段](0006-structured-story-presentation.md)。
+
+内核状态、可选对局偏好与 44→45 存档拆分见 [ADR-0007：运行时状态归属](0007-runtime-state-ownership.md)（本地实现，尚未发布）。
+
+自由计划、幕间成长、只读结团与 45→46 读者隔离见 [ADR-0008](0008-run-plans-and-finales.md)（本地实现，尚未发布）。
+
+资源恢复 authority 见 [ADR-0010：资源恢复的服务端 authority](0010-resource-recovery-authority.md)（本地实现，尚未发布）。
+
+DF Agent 的统一应用动作目录、动态 descriptor、有限服务端授权与领域 authority 边界见 [ADR-0011：应用动作与 Agent 委托](0011-application-actions-and-agent-delegation.md)（`Accepted`，本地实现，尚未发布）。当前实现范围和剩余边界见 [DF_AGENT_IMPLEMENTATION.md](../design/DF_AGENT_IMPLEMENTATION.md) 与 [DF_AGENT_CAPABILITY_EVOLUTION.md](../design/DF_AGENT_CAPABILITY_EVOLUTION.md)。
+
+以下记录仍是提案：
 
 - [ADR-0005：通用底座、玩法拼装与具体游戏](0005-composable-game-platform.md) — `Proposed`；记录跨玩法架构的目标边界、取舍与验证方式，尚未落地，不替代当前架构事实来源。
 

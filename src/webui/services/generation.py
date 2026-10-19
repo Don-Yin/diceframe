@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
 from src.generation import creator
+from src.llm.openai_transport import OpenAIChatTransport
 from src.rules.rule_system import RuleSystem
 from src.webui.config_update import connection_test_timeout
 
@@ -172,8 +173,8 @@ async def _test_openai_connection(
         session = await dependencies.llm_client._get_session()
         active_proxy = proxy_url or dependencies.llm_client.proxy_url
         request_kwargs = {"proxy": active_proxy} if active_proxy else {}
-        async with session.post(
-            url, json=body, headers=headers,
+        async with OpenAIChatTransport().post(
+            session, url, json=body, headers=headers,
             timeout=aiohttp.ClientTimeout(
                 total=connection_test_timeout(dependencies.config_state())
             ),

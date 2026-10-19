@@ -4,9 +4,13 @@
 不联网、不解析 markdown，秒检索。预建索引不存在时（开发环境）回退到运行时
 解析本地 docs。便携版 / 源码发布包通过预建索引获得文档，无需打包原始 docs。
 
-diceframe-content 仓库是用户文档的唯一来源：运行时后台从其 GitHub raw 拉取
+diceframe-content 仓库提供通用用户手册和部署文档；本仓库维护 README、
+更新、当前功能流程与翻译政策，作为版本相关的内置补充。运行时后台从其 GitHub raw 拉取
 docs/{lang}/*.md（TTL 缓存，失败静默回退内置索引），文档推送后无需发版，
 各实例的助手在 TTL 内自动跟进。README 属于主程序仓库，只走内置索引。
+
+DF Agent 使用 current_version_only 检索：只读当前本地版本说明或版本匹配的
+打包索引，不查询移动远程指南。其能力与操作以工具接口和实时观察为准。
 """
 
 from __future__ import annotations
@@ -24,18 +28,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from src.version import __version__
+
 logger = logging.getLogger("trpg")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 INDEX_FILE = Path(__file__).parent / "assistant_knowledge_index.json"
 _DOCUMENTS = {
     "zh": (
-        "README.md",
+        "README_zh-CN.md",
         "docs/zh/updates.md",
+        "docs/zh/content-and-play.md",
+        "docs/zh/translations.md",
     ),
     "en": (
-        "README_EN.md",
+        "README.md",
         "docs/en/updates.md",
+        "docs/en/content-and-play.md",
+        "docs/en/translations.md",
     ),
 }
 
@@ -173,7 +183,7 @@ def _parse_markdown(source: str, text: str) -> list[DocumentChunk]:
     return chunks
 
 
-def _load_built_index(lang_key: str) -> tuple[DocumentChunk, ...] | None:
+def _load_built_index(lang_key: str, *, current_version_only: bool = False) -> tuple[DocumentChunk, ...] | None:
     """加载预建索引包；不存在或损坏返回 None，由调用方回退到运行时解析。"""
     if not INDEX_FILE.exists():
         return None
@@ -181,6 +191,10 @@ def _load_built_index(lang_key: str) -> tuple[DocumentChunk, ...] | None:
         data = json.loads(INDEX_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    if current_version_only:
+        metadata = data.get("_meta") if isinstance(data, dict) else None
+        if not isinstance(metadata, dict) or metadata.get("schema") != 1 or metadata.get("application_version") != __version__:
+            return None
     items = data.get(lang_key) if isinstance(data, dict) else None
     if not isinstance(items, list):
         return None
@@ -200,6 +214,16 @@ def _load_built_index(lang_key: str) -> tuple[DocumentChunk, ...] | None:
             )
         )
     return tuple(chunks)
+
+
+def _current_version_index(language: str) -> tuple[DocumentChunk, ...]:
+    """Use current checkout files, or verified bundled files; never moving guides."""
+    lang_key = _language_key(language)
+    local = _build_index_from_local(lang_key)
+    available = {relative for relative in _DOCUMENTS[lang_key] if (PROJECT_ROOT / relative).is_file()}
+    bundled = _load_built_index(lang_key, current_version_only=True) or ()
+    return local + tuple(chunk for chunk in bundled
+                         if chunk.source in _DOCUMENTS[lang_key] and chunk.source not in available)
 
 
 def _build_index_from_local(lang_key: str) -> tuple[DocumentChunk, ...]:
@@ -358,13 +382,15 @@ async def search_knowledge(
     *,
     limit: int = 4,
     max_chars: int = _DEFAULT_CONTEXT_CHARS,
+    current_version_only: bool = False,
 ) -> KnowledgeResult:
     query_tokens = Counter(_tokens(query))
     if not query_tokens:
         return KnowledgeResult(context="", sources=[])
+    index = _current_version_index(language) if current_version_only else await _index(language)
     scored = [
         (_score(chunk, query_tokens, query), chunk)
-        for chunk in await _index(language)
+        for chunk in index
     ]
     scored = [(score, chunk) for score, chunk in scored if score >= 2.0]
     scored.sort(key=lambda item: (-item[0], item[1].source, item[1].heading))

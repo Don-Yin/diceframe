@@ -5,11 +5,34 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 
+
+@runtime_checkable
+class RunFinaleRuntime(Protocol):
+    """Optional final settlement boundary; never creates implicit rewards."""
+
+    def finale_preflight(self, instance: Any) -> list[str]: ...
+
+    def settle_finale(self, instance: Any, receipt_id: str) -> dict[str, Any]: ...
+
+
+@runtime_checkable
+class CurrentSceneRuntime(Protocol):
+    """Read-only current story view for formats owned by the rule runtime."""
+
+    def scene_objective_context(self, instance: Any, *, viewer_is_gm: bool) -> dict[str, Any]: ...
+
 from src.engine.combat_scheduler import SCHEDULER_KINDS
 
 
 CharacterBuilderMode = Literal["legacy", "guided", "professional"]
 CharacterLifecycleMode = Literal["legacy", "rules_aware"]
+
+
+@runtime_checkable
+class CheckModePolicyRuntime(Protocol):
+    """Runtime owns supported dice modes, their lifetime and public previews."""
+
+    def check_mode_policy(self, instance: Any, rule: Any, uid: str) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +157,20 @@ class AuthoritativeIntentHooks(Protocol):
     def memory_deltas_from_event_batch(
         self, batch: dict[str, Any], instance: Any,
     ) -> list[dict[str, Any]]: ...
+
+
+@runtime_checkable
+class NarrativeHealthRuntime(Protocol):
+    """Optional owner for HP changes proposed through generic narration.
+
+    Preflight runs before generic player mutations. Settlement receives the
+    bounded net HP delta, then repairs the legacy projection from authoritative
+    state and returns the delta actually accepted by the ruleset.
+    """
+
+    def preflight_narrative_health(self, instance: Any) -> None: ...
+
+    def apply_narrative_hp_delta(self, instance: Any, user_id: str, delta: int) -> int: ...
 
 
 @runtime_checkable
@@ -287,6 +324,15 @@ class AutomaticIntentRuntime(Protocol):
     """Optional server-owned turn automation for non-player actors."""
 
     def next_automatic_intent(self, instance: Any) -> dict[str, Any] | None: ...
+
+
+@runtime_checkable
+class HostedIntentChoiceRuntime(Protocol):
+    """Ruleset-owned finite, validated operations for a hosted player seat."""
+
+    def hosted_intent_choices(self, instance: Any, seat_uid: str) -> list[dict[str, Any]]: ...
+
+    def hosted_intent_context(self, instance: Any, seat_uid: str) -> dict[str, Any]: ...
 
 
 @runtime_checkable

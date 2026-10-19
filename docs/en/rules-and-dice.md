@@ -87,9 +87,15 @@ Combat is a traditional fixed turn order by default. If a rule needs **action sp
 - Every amount is a restricted JSON-AST formula: whitelisted nodes `constant` / `attribute` / `resource` / `dice` / `add` / `subtract` / `multiply` / `min` / `max` / `negate` (this adapter rejects `derived_stat` / `equipment_stat`), unknown references are rejected rather than guessed, and nothing is `eval`-ed.
 - Clients submit `action_id` plus targets only. Damage, speed, resources, and gauge values are always settled by the server; client-supplied numbers are ignored.
 
+## Check policy, Push and spell availability
+
+Check mode is a game policy constrained by the active rule runtime. Requested checks and GM grants use the authoritative check flow. CoC Push is linked to an eligible failed result and any required GM consent; it does not replace the original result or grant arbitrary rerolls.
+
+D&D 2024 spells appear only when prepared/granted and usable in the current combat state. Divine Smite follows a qualifying melee hit and consumes the declared bonus action and slot/free use. A level 2+ Paladin gains Paladin's Smite, including a Long Rest free use. These are 2024 semantics, not an automatic conversion of 2014 mechanics. See [content and play](content-and-play.md) for the player workflow.
+
 ## Existing saves
 
-Existing saves require no conversion. As long as their `rule_id` remains available, characters, lorebooks, and campaign logs stay intact and continue with the current dice and resolution implementation.
+Supported saves migrate automatically at load time. Keep their `rule_id` and pinned adventure version available; characters, book bindings and campaign logs are preserved through the supported migration chain. Unknown or future formats fail closed. Older programs cannot read the new save/database schemas: see [application updates](updates.md) before upgrading or downgrading.
 
 An external content pack that adds explicit advantage/disadvantage support must be updated and re-enabled. That update does not rewrite save narration or character sheets. Backing up `data/` before an application or pack update is still recommended.
 

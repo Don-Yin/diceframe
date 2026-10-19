@@ -165,6 +165,26 @@ def _rule() -> RuleSystem:
     return RuleSystem.load(ROOT / "templates" / "rules" / "base_d20.json")
 
 
+def test_explicit_skill_wins_over_model_guess_and_bonus_comes_from_server_sheet():
+    instance = _instance_with_effect(None)
+    instance.players["p1"]["character_sheet"]["skills"].append({"name": "急救", "value": 20})
+    instance.action_queue[0].update(text="我跨过裂缝", selected_skill="火焰球")
+    rule = _rule()
+    rule.template["skill_value_to_bonus"] = {"20": 1, "80": 5}
+    planned, errors = normalize_check_specs(instance, rule, [{
+        "player": "p1", "attribute": "str", "skill": "急救", "target": 15,
+        "skill_value": 9999,
+    }])
+    assert errors == []
+    request = planned[0][1]
+    assert request["skill"] == "火焰球"
+    result = resolve_check_request(instance, {
+        **instance.action_queue[0], "check_request": request, "dice_value": 10, "dice_rolls": [10],
+    }, rule)
+    assert result["modifier"] == 8  # STR16: +3; server-owned skill80: +5.
+    assert result["total"] == 18
+
+
 def _instance_with_effect(effect: str | None) -> GameInstance:
     skill: dict = {"name": "火焰球", "value": 80}
     if effect is not None:

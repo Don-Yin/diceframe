@@ -214,6 +214,9 @@ async def api_plugin_export(request: web.Request) -> web.Response:
               body.get("map_background"),
               body.get("map_icons") or [],
               body.get("language", ""),
+              body.get("adventure_ids") or [],
+              body.get("lorebook_ids") or [],
+              body.get("adventure_refs") or [],
           )
     except ValueError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=400)

@@ -1,10 +1,67 @@
 import { mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import CheckRevealCard from '../src/components/play/CheckRevealCard.vue'
 import { i18n } from '../src/i18n'
 
 describe('CheckRevealCard', () => {
   beforeEach(() => { i18n.global.locale.value = 'zh-CN' })
+  afterEach(() => { vi.useRealTimers() })
+
+  const clickCheck = {
+    check_id: 'shared', actor_uid: 'p1', actor_name: '阿岚', label: '力量检定',
+    dice: 'd20', roll: 14, rolls: [14], modifier: 3, total: 17, verdict: '成功',
+  }
+
+  it('keeps unclicked results masked indefinitely and across remounts without a countdown', async () => {
+    vi.useFakeTimers()
+    const options = { global: { plugins: [i18n] }, props: { check: clickCheck, clickMode: true, canReveal: true } }
+    const first = mount(CheckRevealCard, options)
+    expect(first.find('.check-reveal-countdown').exists()).toBe(false)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(first.find('.check-math').exists()).toBe(false)
+    expect(first.emitted('reveal')).toBeUndefined()
+    first.unmount()
+    const refreshed = mount(CheckRevealCard, options)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(refreshed.find('.check-math').exists()).toBe(false)
+    refreshed.unmount()
+  })
+
+  it('reveals all clients only after the server shared marker arrives', async () => {
+    vi.useFakeTimers()
+    const actor = mount(CheckRevealCard, { global: { plugins: [i18n] }, props: { check: clickCheck, clickMode: true, canReveal: true } })
+    const spectator = mount(CheckRevealCard, { global: { plugins: [i18n] }, props: { check: clickCheck, clickMode: true, canReveal: false } })
+    await actor.get('.check-reveal-actions button').trigger('click')
+    expect(actor.emitted('reveal')?.[0]).toEqual([clickCheck])
+    expect(actor.find('.check-math').exists()).toBe(false)
+    expect(spectator.find('.check-reveal-actions button').exists()).toBe(false)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(spectator.find('.check-math').exists()).toBe(false)
+    const reveal = { by: 'p1', at: '2026-10-07T00:00:00Z' }
+    await actor.setProps({ reveal })
+    await spectator.setProps({ reveal })
+    expect(actor.get('.check-math').text()).toBe(spectator.get('.check-math').text())
+    const refreshed = mount(CheckRevealCard, { global: { plugins: [i18n] }, props: { check: clickCheck, clickMode: true, reveal } })
+    expect(refreshed.get('.check-math').text()).toBe(actor.get('.check-math').text())
+    actor.unmount(); spectator.unmount(); refreshed.unmount()
+  })
+
+  it('keeps the automatic presentation mode available independently', () => {
+    const wrapper = mount(CheckRevealCard, { global: { plugins: [i18n] }, props: { check: clickCheck, clickMode: false } })
+    expect(wrapper.get('.check-math').text()).toContain('d20=14 + 3 = 17')
+    expect(wrapper.find('.check-reveal-actions').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('cancels an automatic animation when the room switches to click mode', async () => {
+    vi.useFakeTimers()
+    const wrapper = mount(CheckRevealCard, { global: { plugins: [i18n] }, props: { check: clickCheck, animate: true, clickMode: false } })
+    await wrapper.setProps({ clickMode: true })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(wrapper.find('.check-math').exists()).toBe(false)
+    expect(wrapper.get('article').classes()).not.toContain('rolling')
+    wrapper.unmount()
+  })
 
   it('renders a rule-aware d20 result and details', () => {
     const wrapper = mount(CheckRevealCard, {
@@ -120,6 +177,28 @@ describe('CheckRevealCard', () => {
     await vi.advanceTimersByTimeAsync(720)
     expect(wrapper.text()).toContain('d100=1 / 65')
     expect(wrapper.text()).toContain('大成功')
+    vi.useRealTimers()
+  })
+
+  it('animates the revealed dice once, but does not replay historical results', async () => {
+    vi.useFakeTimers()
+    const active = mount(CheckRevealCard, {
+      global: { plugins: [i18n] },
+      props: { animate: true, check: { ...clickCheck, check_id: 'new-roll' } },
+    })
+    expect(active.find('.dice-tray-reveal').exists()).toBe(false)
+    await vi.advanceTimersByTimeAsync(720)
+    expect(active.find('.dice-tray-reveal').exists()).toBe(true)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(active.find('.dice-tray-reveal').exists()).toBe(false)
+    active.unmount()
+
+    const historical = mount(CheckRevealCard, {
+      global: { plugins: [i18n] },
+      props: { check: { ...clickCheck, check_id: 'old-roll' } },
+    })
+    expect(historical.find('.dice-tray-reveal').exists()).toBe(false)
+    historical.unmount()
     vi.useRealTimers()
   })
 })

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.engine.module_state import ModuleStateSpec, get_module_state, register_module_state
+from src.engine.module_state import ModuleStateError, ModuleStateSpec, get_module_state, register_module_state
 
 MODULE_NAME = "economy"
 SCHEMA_VERSION = 1
@@ -42,7 +42,7 @@ def ensure_economy_state(raw: Any, run_id: str | None = None) -> dict[str, Any]:
 
 
 def fresh() -> dict[str, Any]:
-    return {"schema_version": SCHEMA_VERSION, "state": fresh_economy_state("")}
+    return {"schema_version": SCHEMA_VERSION, "state": fresh_economy_state(""), "reward_policy": {}}
 
 
 def ensure(raw: Any) -> dict[str, Any]:
@@ -51,6 +51,8 @@ def ensure(raw: Any) -> dict[str, Any]:
     if raw.get("schema_version") != SCHEMA_VERSION:
         return raw
     raw["state"] = ensure_economy_state(raw.get("state"))
+    if not isinstance(raw.get("reward_policy"), dict):
+        raw["reward_policy"] = {}
     return raw
 
 
@@ -68,6 +70,15 @@ def state(instance: Any) -> dict[str, Any]:
     return get_module_state(instance, MODULE_NAME)["state"]
 
 
+def require_writable(instance: Any) -> None:
+    modules = getattr(instance, "modules", None)
+    if not isinstance(modules, dict):
+        raise ModuleStateError("instance has no module state container")
+    slot = modules.get(MODULE_NAME)
+    if isinstance(slot, dict) and slot.get("schema_version") != SCHEMA_VERSION:
+        raise ModuleStateError(f"unsupported economy module schema: {slot.get('schema_version')!r}")
+
+
 def replace_state(instance: Any, value: Any) -> None:
     """Replace exactly, as field assignment did for run reset and rollback.
 
@@ -79,3 +90,11 @@ def replace_state(instance: Any, value: Any) -> None:
 
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)
 register_module_state(SPEC)
+
+
+def reward_policy(instance: Any) -> dict:
+    return get_module_state(instance, MODULE_NAME)["reward_policy"]
+
+
+def replace_reward_policy(instance: Any, value: dict) -> None:
+    get_module_state(instance, MODULE_NAME)["reward_policy"] = value

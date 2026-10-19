@@ -26,11 +26,12 @@ def _make_module(plugin_dir: Path, *, declared: list[str] | None, plugin_type: s
         "name": "Castle Module",
         "version": "1.0.0",
         "plugin_type": plugin_type,
-        "entrypoint": ["python", "-c", "pass"],
         "content_profile": "adventure-module",
         "content_delivery_mode": "catalog",
         "contributes": {},
     }
+    if plugin_type != "content-pack":
+        manifest["entrypoint"] = ["python", "-c", "pass"]
     if declared is not None:
         manifest["adventure_packages"] = declared
     (plugin_dir / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")

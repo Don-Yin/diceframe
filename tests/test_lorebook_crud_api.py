@@ -188,6 +188,9 @@ def test_book_list_reports_scope_primary_and_enabled(tmp_path: Path) -> None:
         assert books["world:w1"]["enabled"] in (1, True)
         assert books["book:global"]["scope"] == "global"
         assert books["book:global"]["primary"] is False
+        store.add_book_entry("book:global", {"id": "global-entry", "name": "Global entry"})
+        books = {row["id"]: row for row in _managed_api(store).list_lorebooks("w1")["books"]}
+        assert books["book:global"]["entry_count"] == 1
     finally:
         store.close()
 

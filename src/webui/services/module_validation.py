@@ -222,7 +222,8 @@ def _validate_declared_adventures(
             continue
         runtime_id = str(bundle.manifest.required_runtime_id or "")
         minimum = int(bundle.manifest.required_runtime_version or 1)
-        if not _runtime_available(deps, runtime_id, minimum):
+        from src.adventures.compatibility import narrative_requirement_supported
+        if not narrative_requirement_supported(runtime_id, minimum) and not _runtime_available(deps, runtime_id, minimum):
             blockers.append(
                 f"adventure_runtime_missing:{name}:{runtime_id}>={minimum}"
             )

@@ -260,6 +260,10 @@ class Dnd2024ClassFeatureResolver:
             if self.feature_is_active(character, definition)
         )
         return {
+            "spell_grants": [
+                {"spell_ref": f"spell:{definition.parameters['granted_spell_id']}", "resource_id": definition.resource_id}
+                for definition in active if definition.parameters.get("granted_spell_id")
+            ],
             "class_resources": [
                 definition.to_dict()
                 for definition in self._resource_definitions(owned, character)
@@ -527,6 +531,13 @@ class Dnd2024ClassFeatureResolver:
         if progression_catalog is None:  # pragma: no cover - guarded by ``available``
             return
         for definition in self.catalog.features.values():
+            spell_ref = definition.parameters.get("granted_spell_id")
+            if spell_ref is not None:
+                spells = (self.bundle.get("spell_catalog", "srd_spells") or {}).get("spells", [])
+                if not isinstance(spell_ref, str) or not spell_ref or ":" in spell_ref or not any(
+                    row.get("id") == spell_ref for row in spells
+                ):
+                    raise ClassFeatureError(f"{definition.id} grants an unknown spell")
             progression = progression_catalog.classes.get(definition.class_id)
             if progression is None:
                 raise ClassFeatureError(

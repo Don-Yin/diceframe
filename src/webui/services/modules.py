@@ -15,19 +15,23 @@ lifecycle**。本模块只做三件事：
 
 - 只读：不安装、不启停、不改文件（生命周期在 LIFE 组，走既有 PluginHost API）。
 - 不把插件类型混淆：provider / tool / bot-extension 等不进入模块库（§51）。
-- 性能（母方案 §165）：列表只返回元数据计数，不读取全部 JSON body。
+- 性能（母方案 §165）：列表只返回元数据计数；为区分 disabled 与真实零值，
+  会读取声明目录的 manifest / 静态贡献元数据，但不会把资源正文放入响应。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from src.plugin_host.support import (
     content_delivery_mode,
     content_profile,
 )
+from src.adventures import AdventureBundleLoader
+from src.plugin_host.registry import ContributionRegistry
 from src.version import version_below
 from src.webui.services.module_validation import (
     MODULE_PLUGIN_TYPE,
@@ -39,6 +43,14 @@ from src.webui.services.module_validation import (
 _MODULE_CONTENT_KINDS = (
     "npc", "item", "spell", "class", "character_template", "world_template",
 )
+_MARKETPLACE_CONTENT_PROFILES = frozenset({"adventure-module", "content-pack"})
+_RULESET_FILTER_ALIASES = {
+    # Generic module code matches the registry's stable short id, without
+    # importing or hard-coding a concrete ruleset runtime identifier.
+    "dnd2024": "dnd2024",
+    "coc": "coc7",
+    "freeform": "freeform",
+}
 
 
 @dataclass(frozen=True)
@@ -59,7 +71,7 @@ class ModuleDependencies:
     list_save_metadata: Callable[[], list[dict[str, Any]]] | None = None
     refresh_adventure_sources: Callable[[], None] | None = None
     # 组合根声明的默认 runtime：模块声明了 ruleset_catalogs 但没写 requires 时，
-    # 用它判断 catalog 契约归属（与 Adventure 绑定同一默认，不猜字段）。
+    # 用它判断 catalog 契约归属；不使用独立的通用剧情包默认要求。
     default_runtime_requirement: Callable[[], dict[str, Any]] | None = None
     # FIX-06 §8：ModulesView 的"在线模组"区块复用既有插件市场索引（不新建市场）。
     # 组合根注入 ``PluginHost.marketplace_plugins``（已带 installed / 版本信息）。
@@ -78,25 +90,53 @@ def _installed_content_packs(plugin_host: Any) -> list[Any]:
     )
 
 
-def _adventure_count(adventure_registry: Any, plugin_id: str) -> int:
-    if adventure_registry is None:
-        return 0
-    source = adventure_registry.source_for("plugin", plugin_id)
-    if source is None:
-        return 0
+def _declared_contributions(runtime: Any) -> list[Any] | None:
     try:
-        return len(source.loader.list(""))
-    except Exception:  # noqa: BLE001 - 诊断列表绝不因单个坏包失败
-        return 0
+        registry = ContributionRegistry()
+        return registry.register_static_plugin(runtime.manifest, runtime.directory)
+    except Exception:  # noqa: BLE001 - unreadable inventory is explicitly unknown
+        return None
 
 
-def _contribution_counts(contributions: Any, plugin_id: str) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for item in contributions.list():
-        if item.plugin_id != plugin_id:
-            continue
-        counts[item.kind] = counts.get(item.kind, 0) + 1
-    return counts
+def _inventory_projection(runtime: Any, adventure_registry: Any) -> tuple[int | None, dict[str, int] | None, str]:
+    """Count installed declarations without confusing disabled with empty."""
+    root = getattr(runtime, "adventure_packages_root", None)
+    directories = tuple(getattr(runtime, "adventure_package_directories", ()) or ())
+    adventure_count: int | None
+    try:
+        if root is not None:
+            root_path = Path(root)
+            if (
+                not root_path.is_dir()
+                or any(
+                    not (root_path / directory).is_dir()
+                    or not (root_path / directory / "manifest.json").is_file()
+                    for directory in directories
+                )
+            ):
+                adventure_count = None
+            else:
+                adventure_count = len(AdventureBundleLoader(root, allowed_directory_ids=directories).list(""))
+        else:
+            source = adventure_registry.source_for(
+                "plugin", str(runtime.manifest.get("id") or ""),
+            ) if adventure_registry is not None else None
+            adventure_count = len(source.loader.list("")) if source is not None else 0
+    except Exception:  # noqa: BLE001 - unreadable inventory is explicitly unknown
+        adventure_count = None
+    try:
+        contributions = _declared_contributions(runtime)
+        if contributions is None:
+            raise ValueError("declared contributions unavailable")
+        counts: dict[str, int] | None = {}
+        for item in contributions:
+            counts[item.kind] = counts.get(item.kind, 0) + 1
+    except Exception:  # noqa: BLE001 - unreadable inventory is explicitly unknown
+        counts = None
+    status = "unknown" if adventure_count is None or counts is None else (
+        "disabled" if str(getattr(runtime, "status", "")) == "disabled" else "available"
+    )
+    return adventure_count, counts, status
 
 
 def _module_lorebooks(deps: ModuleDependencies, module_id: str) -> list[dict[str, Any]]:
@@ -133,7 +173,7 @@ def list_modules(deps: ModuleDependencies) -> dict[str, Any]:
     for runtime in _installed_content_packs(deps.plugin_host):
         plugin_id = str(runtime.manifest.get("id") or "")
         profile = content_profile(runtime.manifest)
-        counts = _contribution_counts(deps.plugin_host.contributions, plugin_id)
+        adventure_count, counts, inventory_status = _inventory_projection(runtime, deps.adventure_registry)
         lorebooks = _module_lorebooks(deps, plugin_id)
         modules.append({
             "id": plugin_id,
@@ -144,8 +184,9 @@ def list_modules(deps: ModuleDependencies) -> dict[str, Any]:
             "content_delivery_mode": content_delivery_mode(runtime.manifest),
             "is_module": profile == "adventure-module",
             "status": str(runtime.status or ""),
-            "adventure_count": _adventure_count(deps.adventure_registry, plugin_id),
+            "adventure_count": adventure_count,
             "content_counts": counts,
+            "inventory_status": inventory_status,
             "lorebook_count": len(lorebooks),
         })
     return {"ok": True, "modules": modules}
@@ -168,7 +209,7 @@ def _refresh_adventure_sources(deps: ModuleDependencies) -> None:
 
 
 async def module_marketplace(
-    deps: ModuleDependencies, *, keyword: str = "",
+    deps: ModuleDependencies, *, keyword: str = "", ruleset: str = "",
 ) -> dict[str, Any]:
     """在线模组库（FIX-06 §8：ModulesView 的 Online / Marketplace 区块）。
 
@@ -200,9 +241,21 @@ async def module_marketplace(
             "error": str(listing.get("error") or ""), "modules": [],
         }
     needle = str(keyword or "").strip().lower()
+    ruleset_filter = str(ruleset or "").strip().lower()
+    if ruleset_filter in {"", "all"}:
+        ruleset_filter = ""
+    else:
+        ruleset_filter = _RULESET_FILTER_ALIASES.get(ruleset_filter, ruleset_filter)
     modules: list[dict[str, Any]] = []
     for item in listing.get("plugins") or []:
         if str(item.get("plugin_type") or "") != MODULE_PLUGIN_TYPE:
+            continue
+        profile = str(item.get("content_profile") or "content-pack")
+        if profile not in _MARKETPLACE_CONTENT_PROFILES:
+            continue
+        targets = [str(target) for target in (item.get("ruleset_targets") or [])]
+        target_ids = {target.rsplit(":", 1)[-1].lower() for target in targets}
+        if ruleset_filter and ruleset_filter not in targets and ruleset_filter not in target_ids:
             continue
         if needle and needle not in _market_search_text(item):
             continue
@@ -215,10 +268,10 @@ async def module_marketplace(
             "version": str(item.get("version") or ""),
             "latest_version": latest_version,
             "description": str(item.get("description") or ""),
-            "content_profile": str(item.get("content_profile") or ""),
+            "content_profile": profile,
             "content_delivery_mode": str(item.get("content_delivery_mode") or ""),
             "adventure_count": int(item.get("adventure_count") or 0),
-            "ruleset_targets": list(item.get("ruleset_targets") or []),
+            "ruleset_targets": targets,
             "languages": list(item.get("languages") or []),
             "tags": list(item.get("tags") or []),
             "trust_level": str(item.get("trust_level") or ""),
@@ -265,10 +318,10 @@ def module_detail(deps: ModuleDependencies, module_id: str) -> dict[str, Any]:
     bound_games = list(guard.get("bound_games") or [])
     actions = guard.get("actions") or {}
     plugin_id = str(runtime.manifest.get("id") or "")
+    adventure_count, content_counts, inventory_status = _inventory_projection(runtime, deps.adventure_registry)
     grouped: dict[str, list[dict[str, Any]]] = {}
-    for item in deps.plugin_host.contributions.list():
-        if item.plugin_id != plugin_id:
-            continue
+    contributions = _declared_contributions(runtime) or []
+    for item in contributions:
         grouped.setdefault(item.kind, []).append({
             "key": item.key,
             "title": item.title,
@@ -285,7 +338,9 @@ def module_detail(deps: ModuleDependencies, module_id: str) -> dict[str, Any]:
             "content_profile": content_profile(runtime.manifest),
             "content_delivery_mode": content_delivery_mode(runtime.manifest),
             "status": str(runtime.status or ""),
-            "content_counts": _contribution_counts(deps.plugin_host.contributions, plugin_id),
+            "adventure_count": adventure_count,
+            "content_counts": content_counts,
+            "inventory_status": inventory_status,
             "content": grouped,
             "adventures": adventures,
             "lorebooks": lorebooks,
@@ -449,6 +504,8 @@ def _module_adventure_rows(deps: ModuleDependencies, module_id: str) -> list[dic
             "version": bundle.manifest.version,
             "format": bundle.manifest.format,
             "directory_id": bundle.root.name,
+            "name": str(bundle.adventure.get("tutorial", {}).get("name") or bundle.adventure.get("name") or bundle.manifest.adventure_id),
+            "summary": str(bundle.adventure.get("tutorial", {}).get("summary") or bundle.adventure.get("summary") or ""),
         }
         for bundle in bundles
     ]

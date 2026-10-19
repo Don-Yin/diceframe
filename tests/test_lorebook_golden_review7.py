@@ -296,7 +296,7 @@ def test_golden_successful_swipe_staged_path_commits_exactly_once(tmp_path):
 def test_golden_successful_swipe_consumes_timers_exactly_once(tmp_path):
     """timed state 不重复消费。
 
-    swipe 是**改写历史轮**，不是新回合：权威 tick 由 `update_lorebook_timed_state()`
+    swipe 是**改写历史轮**，不是新回合：权威 tick 由 `lorebook_runtime.tick()`
     按 round 推进，swipe 自己不推进它。所以同一轮反复生成 swipe 时，计时状态必须
     稳定在「激活一次」的结果上，而不是每生成一次就再扣一次。
     """
@@ -331,7 +331,7 @@ def test_golden_successful_swipe_consumes_timers_exactly_once(tmp_path):
         assert len(saved) == 3, "每次成功 swipe 恰好提交一次"
 
         # 只有权威 tick 才推进计时：模拟下一回合。
-        instance.update_lorebook_timed_state()
+        lorebook_runtime.tick(instance)
         assert lorebook_runtime.timers(instance)["seed"]["sticky_remaining"] == 2, (
             "权威 round tick 应把 sticky 3 → 2"
         )

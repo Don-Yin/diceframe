@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "harbor-route",
+  "name": "Harbor route",
+  "mode": "graph",
+  "worlds": [
+    "lantern_harbor"
+  ],
+  "default": true,
+  "nodes": [
+    {
+      "location_ref": "pier",
+      "x": -15,
+      "y": 0
+    },
+    {
+      "location_ref": "beacon",
+      "x": 15,
+      "y": 0
+    }
+  ],
+  "default_view": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}

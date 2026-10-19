@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
@@ -14,7 +16,8 @@ from types import SimpleNamespace
 
 import web_server
 from src.engine.modules import room_access
-from src.webui.access_password import hash_access_password
+from src.webui.access_password import hash_access_password, verify_access_password
+from src.webui.routes.games import api_verify_room_password
 from src.webui.sse_ticket import SseTicketStore
 
 
@@ -157,6 +160,9 @@ class FakeAPI:
     def bot_actor_allowed(self, game_key: str, user_id: str) -> bool:
         return user_id in self._players
 
+    def bot_surface(self, game_key: str) -> str:
+        return "full"
+
     def game_detail(self, game_key: str) -> dict:
         return {"player_access_open": True, "gm_uid": "actor-1"} if self.exists else None
 
@@ -272,6 +278,139 @@ async def test_bot_game_action_with_valid_actor_allowed(bot_enabled):
 
 
 @pytest.mark.asyncio
+async def test_bot_read_only_surface_rejects_action_before_handler(bot_enabled):
+    api = FakeAPI()
+    api.bot_surface = lambda game_key: "read_only"
+    app = _make_app(api)
+    async with TestClient(TestServer(app)) as client:
+        r = await client.post(
+            "/api/games/web%7Cx%7Cy/action",
+            headers={"X-Bot-Token": "tok", "X-Bot-Actor": "actor-1"},
+            json={"text": "look"},
+        )
+        assert r.status == 403
+        body = await r.json()
+        assert body["error_code"] == "BOT_READ_ONLY"
+
+
+@pytest.mark.asyncio
+async def test_bot_read_only_surface_keeps_read_and_kp_question_access(bot_enabled):
+    api = FakeAPI()
+    api.bot_surface = lambda game_key: "read_only"
+    app = _make_app(api)
+    app.router.add_get("/api/games/{game_key}", _identity)
+    app.router.add_post("/api/games/{game_key}/kp-question", _identity)
+    async with TestClient(TestServer(app)) as client:
+        read = await client.get(
+            "/api/games/web%7Cx%7Cy",
+            headers={"X-Bot-Token": "tok", "X-Bot-Actor": "actor-1"},
+        )
+        question = await client.post(
+            "/api/games/web%7Cx%7Cy/kp-question",
+            headers={"X-Bot-Token": "tok", "X-Bot-Actor": "actor-1"},
+            json={"question": "where?"},
+        )
+        assert read.status == 200
+        assert question.status == 200
+
+
+class _RoomPasswordAPI(FakeAPI):
+    """FakeAPI with the room-password route's instance/save surface."""
+
+    def __init__(self, instance, surface: str) -> None:
+        super().__init__()
+        self.instance = instance
+        self.surface = surface
+        self.saved = 0
+
+    def bot_surface(self, game_key: str) -> str:
+        return self.surface
+
+    def get_game_instance(self, game_key: str):
+        return self.instance
+
+    async def save_game_instance(self, instance) -> None:
+        self.saved += 1
+
+
+def _room_instance():
+    instance = SimpleNamespace(
+        modules={}, gm_uid="actor-1", players={"actor-1": {}},
+    )
+    room_access.set_room_password(instance, "correct horse")
+    room_access.issue_room_token(instance, token="seeded-room-token")
+    return instance
+
+
+def _room_password_app(api) -> web.Application:
+    app = _make_app(api)
+    app.router.add_post(
+        "/api/games/{game_key}/verify-room-password", api_verify_room_password,
+    )
+    return app
+
+
+@pytest.mark.asyncio
+async def test_bot_read_only_surface_cannot_issue_a_room_token(bot_enabled):
+    """read_only must not mint/persist a room token, even with the right password."""
+
+    instance = _room_instance()
+    before = deepcopy(instance.modules["room_access"])
+    api = _RoomPasswordAPI(instance, "read_only")
+    app = _room_password_app(api)
+    async with TestClient(TestServer(app)) as client:
+        response = await client.post(
+            "/api/games/web%7Cx%7Cy/verify-room-password",
+            headers={"X-Bot-Token": "tok", "X-Bot-Actor": "actor-1"},
+            json={"password": "correct horse"},
+        )
+        body = await response.json()
+
+    assert response.status == 403
+    assert body["error_code"] == "BOT_READ_ONLY"
+    assert api.saved == 0
+    # No token was minted, nothing was persisted, and the existing token still
+    # verifies: the blocked call left no side effect behind.
+    assert instance.modules["room_access"] == before
+    assert len(instance.modules["room_access"]["room_tokens"]) == 1
+    assert room_access.verify_room_token(instance, "seeded-room-token")
+
+
+@pytest.mark.asyncio
+async def test_bot_with_write_surface_can_still_issue_a_room_token(bot_enabled):
+    instance = _room_instance()
+    api = _RoomPasswordAPI(instance, "full")
+    app = _room_password_app(api)
+    async with TestClient(TestServer(app)) as client:
+        response = await client.post(
+            "/api/games/web%7Cx%7Cy/verify-room-password",
+            headers={"X-Bot-Token": "tok", "X-Bot-Actor": "actor-1"},
+            json={"password": "correct horse"},
+        )
+        body = await response.json()
+
+    assert response.status == 200
+    assert body["ok"] is True
+    assert api.saved == 1
+    assert len(instance.modules["room_access"]["room_tokens"]) == 2
+    assert room_access.verify_room_token(instance, body["room_token"])
+
+
+@pytest.mark.asyncio
+async def test_unknown_bot_surface_fails_closed(bot_enabled):
+    api = FakeAPI()
+    api.bot_surface = lambda game_key: "future"
+    app = _make_app(api)
+    async with TestClient(TestServer(app)) as client:
+        r = await client.get(
+            "/api/games/web%7Cx%7Cy",
+            headers={"X-Bot-Token": "tok", "X-Bot-Actor": "actor-1"},
+        )
+        assert r.status == 403
+        assert (await r.json())["error_code"] == "BOT_SURFACE_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
 async def test_bot_deleted_game_returns_machine_readable_not_found(bot_enabled):
     api = FakeAPI()
     api.exists = False
@@ -330,6 +469,27 @@ def test_ensure_bot_token_migrates_legacy_qq_secret(tmp_path, monkeypatch):
 
     assert web_server._ensure_bot_token() == "legacy-token"
     assert web_server.STATE["bot_token"] == "legacy-token"
+
+
+def test_versioned_data_keeps_password_reset_shared_and_reads_active_plugin_token(tmp_path, monkeypatch):
+    host = tmp_path / "host"
+    active = tmp_path / "active"
+    host.mkdir()
+    plugin = active / "plugins" / "qq-napcat"
+    plugin.mkdir(parents=True)
+    (plugin / "secrets.json").write_text('{"bot_token":"active-plugin-token"}')
+    (host / "reset_access_password.txt").write_text("new-host-password")
+    monkeypatch.setattr(web_server, "DATA_DIR", active)
+    monkeypatch.setattr(web_server, "CONFIG_FILE", host / "config.json")
+    monkeypatch.setattr(web_server, "ACCESS_TOKEN_FILE", host / "access_token.txt")
+    monkeypatch.setattr(web_server, "save_config", lambda: None)
+    monkeypatch.setitem(web_server.STATE, "bot_token", "")
+    monkeypatch.setitem(web_server.STATE, "access_token", "")
+    credentials = web_server._host_credentials()
+    credentials.initialize_access_password()
+    assert verify_access_password("new-host-password", web_server.STATE["access_token"])
+    assert not (host / "reset_access_password.txt").exists()
+    assert credentials.ensure_bot_token() == "active-plugin-token"
 
 
 @pytest.mark.asyncio
@@ -397,6 +557,19 @@ async def test_share_link_player_can_use_ruleset_gameplay_endpoints(monkeypatch)
 
     assert [response.status for response in responses] == [200] * 3
     assert all(body["user_id"] == "player-1" for body in bodies)
+
+
+@pytest.mark.asyncio
+async def test_share_check_endpoints_carry_player_identity_including_keeper_operations(monkeypatch):
+    monkeypatch.setitem(web_server.STATE, "access_token", hash_access_password("owner-secret"))
+    app = _make_sse_auth_app()
+    app.router.add_post("/api/games/{game_key}/checks/{check_id}/{action:luck|reveal}", _identity)
+    app.router.add_post("/api/games/{game_key}/checks/{check_id}/push/{operation}", _identity)
+    async with TestClient(TestServer(app)) as client:
+        for suffix in ("luck", "reveal", "push/request", "push/offer", "push/reject", "push/confirm", "push/decline"):
+            response = await client.post("/api/games/web%7Croom%7Cbot/checks/c1/" + suffix, params={"user": "player-1", "share": "1"}, headers=_seat(app))
+            assert response.status == 200
+            assert (await response.json())["user_id"] == "player-1"
 
 
 @pytest.mark.asyncio

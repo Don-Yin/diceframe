@@ -5,8 +5,8 @@ import router from './router'
 import { i18n } from './i18n'
 import { installRuntimeRecovery } from './runtimeRecovery'
 import './styles/tokens.css'
-import './styles.css'
-import './styles/v2.css'
+import './styles/tailwind.css'
+import './styles/index.css'
 import './styles/markdown.css'
 
 // 视口高度兜底：部分 App 壳（如 Eagle）的工具栏显示/隐藏不会更新动态视口单位

@@ -216,7 +216,7 @@ def test_legacy_v5_rows_migrate_to_explicit_hybrid(tmp_path: Path) -> None:
 
         modes = dict(conn.execute("SELECT id, vector_activation FROM lorebook_entries"))
         assert modes == {"legacy-default": "hybrid", "legacy-vectorized": "hybrid"}
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
     finally:
         conn.close()
 

@@ -85,3 +85,35 @@ async def test_player_share_cannot_use_asr_test():
 
     assert response.status == 403
     assert "分享页" in json.loads(response.text)["error"]
+
+
+class _OwnerRequest(_Request):
+    def __init__(self, api, *, owner=True):
+        super().__init__(api, user_id="owner")
+        self._owner = owner
+
+    def get(self, key, default=None):
+        if key == "owner_authenticated":
+            return self._owner
+        return super().get(key, default)
+
+
+@pytest.mark.asyncio
+async def test_assistant_transcription_uses_configured_asr_for_owner():
+    api = _FakeApi()
+
+    response = await asr.api_assistant_transcription(_OwnerRequest(api))
+
+    assert response.status == 200
+    assert json.loads(response.text)["text"] == "测试识别"
+    assert api.calls == [("", b"clip", "audio/webm", "zh-CN")]
+
+
+@pytest.mark.asyncio
+async def test_assistant_transcription_requires_owner():
+    api = _FakeApi()
+
+    response = await asr.api_assistant_transcription(_OwnerRequest(api, owner=False))
+
+    assert response.status == 401
+    assert api.calls == []

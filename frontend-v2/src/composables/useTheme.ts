@@ -21,8 +21,8 @@ export const builtinSkins: readonly BuiltinSkin[] = [
   {
     id: 'midnight',
     name: '星海秘典',
-    description: '深海蓝、旧金与青色交互光。',
-    swatches: ['#070b11', '#caa65f', '#55b9bd'],
+    description: '深海蓝、古铜金与星光蓝交互光。',
+    swatches: ['#0d1520', '#c7a362', '#4d9bc9'],
   },
   {
     id: 'royal',

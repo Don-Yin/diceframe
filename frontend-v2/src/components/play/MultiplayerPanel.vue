@@ -1,18 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NIcon } from 'naive-ui'
-import { LinkOutline, CreateOutline, CloseCircleOutline, BedOutline } from '@vicons/ionicons5'
+import { BedOutline } from '@vicons/ionicons5'
 import type { GameDetail, Player } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
 import { playerColor } from '@/utils/play'
 
-const props = defineProps<{ players: Player[]; detail: GameDetail; isGm: boolean; currentUserId?: string; hostingUid?: string }>()
+const props = defineProps<{ players: Player[]; detail: GameDetail; currentUserId?: string; hostingUid?: string }>()
 const emit = defineEmits<{
-  kick: [uid: string]
-  'copy-link': [uid: string]
-  edit: [uid: string]
-  'set-away': [uid: string, away: boolean]
-  'set-control': [uid: string, mode: 'ai' | 'human']
   'open-character-center': []
 }>()
 const { t } = useLocale()
@@ -20,9 +15,10 @@ const { t } = useLocale()
 const actedSet = computed(() => new Set((props.detail.multiplayer?.submitted_actions || []).map(a => a.user_id)))
 const actionByUser = computed(() => new Map((props.detail.multiplayer?.submitted_actions || []).map(a => [a.user_id, a])))
 const awaySet = computed(() => new Set((props.detail.multiplayer?.away_players || []).map(p => p.user_id)))
-const canKick = computed(() => props.isGm && props.players.length > 1)
 const restSession = computed(() => props.detail.rest_session)
 const myRestStatus = computed(() => restSession.value?.participants.find(row => row.user_id === props.currentUserId)?.status || '')
+const currentPlayer = computed(() => props.players.find(player => player.user_id === props.currentUserId))
+const currentPlayerUnclaimed = computed(() => currentPlayer.value?.control?.mode === 'unclaimed')
 function hasActed(p: Player) { return actedSet.value.has(p.user_id) }
 function needsDice(p: Player) { return Boolean(actionByUser.value.get(p.user_id)?.dice_pending) }
 function isAway(p: Player) { return awaySet.value.has(p.user_id) }
@@ -49,6 +45,10 @@ function isHosting(p: Player) { return Boolean(props.hostingUid) && p.user_id ==
 <template>
   <section class="multiplayer panel">
     <h2>{{ t('playerList') }}（{{ players.length }}）</h2>
+    <p v-if="currentPlayerUnclaimed" class="multiplayer-unclaimed-help" role="note">
+      <strong>{{ t('claimUnclaimedTitle') }}</strong>
+      <span>{{ t('claimUnclaimedHint') }}</span>
+    </p>
     <div v-if="restSession?.active" class="party-rest-alert" role="status">
       <div class="party-rest-alert-head">
         <NIcon :component="BedOutline" size="18" />
@@ -79,15 +79,23 @@ function isHosting(p: Player) { return Boolean(props.hostingUid) && p.user_id ==
             {{ isHosting(p) ? t('controlAiTakingOver') : isAway(p) ? t('awayFollowing') : needsDice(p) ? t('needsRoll') : hasActed(p) ? t('acted') : t('waitingAction') }}
           </span>
         </div>
-        <div v-if="isGm" class="player-actions">
-          <button @click="emit('copy-link', p.user_id)"><NIcon :component="LinkOutline" size="14" /> {{ t('operationLink') }}</button>
-          <button @click="emit('edit', p.user_id)"><NIcon :component="CreateOutline" size="14" /> {{ t('edit') }}</button>
-          <button v-if="p.user_id !== currentUserId" @click="emit('set-away', p.user_id, !isAway(p))">{{ isAway(p) ? t('back') : t('away') }}</button>
-          <button v-if="controlMode(p) === 'ai' && !isTemporaryHost(p)" @click="emit('set-control', p.user_id, 'human')">{{ t('controlStopAi') }}</button>
-          <button v-else-if="controlMode(p) !== 'ai'" @click="emit('set-control', p.user_id, 'ai')">{{ t('controlSetAi') }}</button>
-          <button v-if="canKick && p.user_id !== currentUserId && p.user_id !== detail.gm_uid" class="danger" @click="emit('kick', p.user_id)"><NIcon :component="CloseCircleOutline" size="14" /> {{ t('kick') }}</button>
-        </div>
       </li>
     </ul>
   </section>
 </template>
+
+<style scoped>
+.multiplayer-unclaimed-help {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 10px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--df-accent) 35%, var(--df-border-soft));
+  border-radius: var(--df-radius-sm);
+  background: color-mix(in srgb, var(--df-accent) 8%, var(--df-surface-1));
+  color: var(--df-text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.multiplayer-unclaimed-help strong { color: var(--df-accent-strong); }
+</style>

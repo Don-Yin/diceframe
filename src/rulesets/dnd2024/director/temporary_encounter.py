@@ -7,11 +7,13 @@ encounter catalog、不改任何游戏状态；失败时完全无副作用。
 
 from __future__ import annotations
 
+from src.engine import module_hooks
+
 import json
 import re
 from typing import Any
 
-from src.engine.modules import narrative_notes
+
 from src.rulesets.dnd2024.combat.validation import validate_enemy_profiles
 
 TEMPORARY_ENCOUNTER_TOOL_NAME = "dnd2024_temporary_encounter"
@@ -204,7 +206,7 @@ def _generation_context(instance: Any, campaign: dict[str, Any]) -> dict[str, An
             "gm": str(entry.get("gm_response") or "")[:800],
         })
     return {
-        "scene": str(narrative_notes.scene(instance) or "")[:500],
+        "scene": str(module_hooks.narrative_view(instance)["scene"] or "")[:500],
         "recent_narration": [
             str(item.get("gm_response") or "")[:800]
             for item in (getattr(instance, "log", []) or [])[-2:]

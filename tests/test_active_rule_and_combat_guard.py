@@ -5,7 +5,7 @@ from pathlib import Path
 from src.commands.combat_resolver import CombatResolver
 from src.commands.check_planner import (
     _apply_d20_assistance,
-    _apply_explicit_advantage_modes,
+    _apply_granted_advantage_modes,
     _is_non_combat_declaration,
     _merge_safety_net_checks,
 )
@@ -14,6 +14,7 @@ from src.commands.prompt_composer import PromptComposer
 from src.commands.progression_resolver import ProgressionResolver
 from src.engine.game_instance import GameInstance
 from src.engine.checks import build_check_request, resolve_check_request, roll_check_request
+from src.engine.modules.check_modes import change
 from src.rules.rule_system import RuleSystem
 from src.engine.modules import checks
 from src.engine.modules import round_presentation
@@ -207,6 +208,7 @@ def test_coc_bonus_die_in_round_pipeline_shares_units(monkeypatch) -> None:
     }
     action = {"user_id": "a", "text": "我用侦查搜索，并获得一个奖励骰。"}
     rule = RuleSystem.load(ROOT / "templates" / "rules" / "freeform_coc.json")
+    change(instance, "a", "grant", f"round:{instance.round_number}", mode="advantage", reason="GM approves")
     request = build_check_request(instance, action, rule)
     assert request is not None
     assert request["advantage_mode"] == "advantage"
@@ -225,7 +227,7 @@ def test_coc_bonus_die_in_round_pipeline_shares_units(monkeypatch) -> None:
     assert checks.last_check(instance)["advantage_mode"] == "advantage"
 
 
-def test_explicit_coc_penalty_die_overrides_percent_modifier() -> None:
+def test_granted_coc_penalty_die_preserves_independent_percent_modifier() -> None:
     rule = RuleSystem.load(ROOT / "templates" / "rules" / "freeform_coc.json")
     action = {"user_id": "a", "text": "在黑暗中用侦查搜索，承受一个惩罚骰。"}
     request = {
@@ -234,10 +236,12 @@ def test_explicit_coc_penalty_die_overrides_percent_modifier() -> None:
         "circumstance_modifier": -20,
     }
 
-    result = _apply_explicit_advantage_modes(rule, [(action, request)])
+    instance = _combat_instance()
+    change(instance, "a", "grant", f"round:{instance.round_number}", mode="disadvantage", reason="GM approves")
+    result = _apply_granted_advantage_modes(instance, rule, [(action, request)])
 
     assert result[0][1]["advantage_mode"] == "disadvantage"
-    assert result[0][1]["circumstance_modifier"] == 0
+    assert result[0][1]["circumstance_modifier"] == -20
 
 
 def test_avoiding_combat_does_not_force_a_safety_net_roll() -> None:
@@ -268,6 +272,8 @@ def test_cyberpunk_weapon_check_without_attack_does_not_force_combat_roll() -> N
 
 
 def test_cyberpunk_inherits_rule_declared_d20_advantage(monkeypatch) -> None:
+    from src.engine.modules.check_modes import change
+
     instance = _combat_instance()
     rule = RuleSystem.load(ROOT / "templates" / "rules" / "freeform_cyberpunk.json")
     action = {
@@ -275,6 +281,7 @@ def test_cyberpunk_inherits_rule_declared_d20_advantage(monkeypatch) -> None:
         "text": "我占据高地，以优势射击目标。",
         "selected_attribute": "str",
     }
+    change(instance, "a", "grant", f"round:{instance.round_number}", mode="advantage", reason="GM high ground")
     request = build_check_request(instance, action, rule)
     assert request is not None
     assert rule.advantage_mechanic["type"] == "d20_keep_high_low"
@@ -330,10 +337,12 @@ def test_coc_bonus_die_is_selected_by_capability_not_mechanics_name() -> None:
     action = {"text": "我获得一个奖励骰", "advantage_mode": ""}
     request = {"actor_uid": "a", "advantage_mode": "", "circumstance_modifier": 10}
 
-    result = _apply_explicit_advantage_modes(rule, [(action, request)])
+    instance = _combat_instance()
+    change(instance, "a", "grant", f"round:{instance.round_number}", mode="advantage", reason="GM approves")
+    result = _apply_granted_advantage_modes(instance, rule, [(action, request)])
 
     assert result[0][1]["advantage_mode"] == "advantage"
-    assert result[0][1]["circumstance_modifier"] == 0
+    assert result[0][1]["circumstance_modifier"] == 10
 
 
 def test_cyberpunk_assistance_uses_rule_declared_advantage() -> None:

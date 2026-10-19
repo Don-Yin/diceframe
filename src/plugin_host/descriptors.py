@@ -23,6 +23,7 @@ _BRIDGE_EXTENSION_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _PROVIDER_CAPABILITY_KIND_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 _PROVIDER_METHOD_NAME_RE = re.compile(r"^provider\.[a-z][a-z0-9_.-]{0,63}$")
 PROVIDER_METHOD_ALIASES = frozenset({"generate"})
+_TOOL_AGENT_EFFECTS = frozenset({"read_only", "mutation", "destructive"})
 
 
 def validate_tool_descriptors(initialized: object) -> list[ToolDescriptor]:
@@ -51,12 +52,20 @@ def validate_tool_descriptors(initialized: object) -> list[ToolDescriptor]:
             json.dumps(input_schema, ensure_ascii=False)
         except (TypeError, ValueError) as exc:
             raise PluginProtocolError(f"工具 {name} 的 input_schema 不是有效 JSON") from exc
-        tools.append({
+        descriptor: ToolDescriptor = {
             "name": name,
             "title": str(raw.get("title") or name).strip()[:120],
             "description": str(raw.get("description") or "").strip()[:1000],
             "input_schema": input_schema,
-        })
+        }
+        if "agent_effect" in raw:
+            agent_effect = raw["agent_effect"]
+            if not isinstance(agent_effect, str) or agent_effect not in _TOOL_AGENT_EFFECTS:
+                raise PluginProtocolError(
+                    f"工具 {name} 的 agent_effect 必须是 read_only、mutation 或 destructive"
+                )
+            descriptor["agent_effect"] = agent_effect
+        tools.append(descriptor)
     return tools
 
 

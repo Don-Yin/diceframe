@@ -76,11 +76,12 @@ async function mountView() {
     routes: [
       { path: '/modules', name: 'modules', component: emptyView },
       { path: '/modules/:moduleId', name: 'module-detail', component: ModuleDetailView },
+      { path: '/create', name: 'create', component: emptyView },
     ],
   })
   await router.push({ name: 'module-detail', params: { moduleId: 'castle-module' } })
   await router.isReady()
-  const wrapper = mount(ModuleDetailView, { global: { plugins: [i18n, router] } })
+  const wrapper = mount(ModuleDetailView, { global: { plugins: [i18n, router], stubs: { ModuleResourceBrowser: true } } })
   await flushPromises()
   return { wrapper, router }
 }
@@ -122,11 +123,55 @@ describe('ModuleDetailView', () => {
     const { wrapper } = await mountView()
 
     expect(wrapper.get('[data-testid="module-metadata"]').text()).toContain('castle-module')
+    expect(wrapper.get('[data-testid="module-metadata"]').text()).toContain('adventure-module')
     expect(wrapper.get('[data-testid="module-metadata"]').text()).toContain('catalog')
     expect(wrapper.get('[data-testid="module-compatibility"]').text()).toContain('兼容')
     expect(wrapper.get('[data-testid="module-adventures"]').text()).toContain('plugin:castle-quest')
-    expect(wrapper.get('[data-testid="module-content"]').text()).toContain('npc · 1')
+    expect(wrapper.get('[data-testid="module-content"]').text()).toContain('NPC · 1')
     expect(wrapper.get('[data-testid="module-usage"]').text()).toContain('web|room|bot')
+  })
+
+  it('labels a module without adventures as a resource pack and keeps the canonical profile', async () => {
+    mocks.detail.mockResolvedValue(detailPayload({
+      adventure_count: 0,
+      content_profile: 'content-pack',
+      adventures: [],
+      content: { npc: [] },
+    }))
+
+    const { wrapper } = await mountView()
+
+    expect(wrapper.text()).toContain('资源包')
+    expect(wrapper.text()).toContain('不含固定剧情')
+    expect(wrapper.get('[data-testid="module-metadata"]').text()).toContain('content-pack')
+    expect(wrapper.get('[data-testid="module-adventures"]').text()).not.toContain('用此冒险创建游戏')
+  })
+
+  it('shows installed adventures in a disabled package without promising playability', async () => {
+    mocks.detail.mockResolvedValue(detailPayload({ status: 'disabled', inventory_status: 'disabled' }))
+    const { wrapper } = await mountView()
+    const adventures = wrapper.get('[data-testid="module-adventures"]')
+    expect(adventures.text()).toContain('已安装冒险')
+    expect(adventures.text()).toContain('启用后')
+    expect(adventures.find('button').attributes('disabled')).toBeDefined()
+    expect(adventures.text()).not.toContain('可玩冒险')
+  })
+
+  it('does not describe unreadable installed content as an empty resource pack', async () => {
+    mocks.detail.mockResolvedValue(detailPayload({ adventure_count: null, content_counts: null, inventory_status: 'unknown', adventures: [] }))
+    const { wrapper } = await mountView()
+    expect(wrapper.get('[data-testid="module-adventures"]').text()).toContain('内容清单暂不可读')
+    expect(wrapper.text()).not.toContain('不含固定剧情')
+  })
+
+  it('keeps content pack and library exits visible when detail loading fails', async () => {
+    mocks.detail.mockRejectedValue(new Error('detail unavailable'))
+    const { wrapper } = await mountView()
+
+    const navigation = wrapper.get('[data-testid="module-fallback-navigation"]')
+    expect(navigation.find('a[href="#/library"]').exists()).toBe(true)
+    expect(navigation.find('a[href="#/modules"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('detail unavailable')
   })
 
   it('disables destructive buttons when the server guard blocks them', async () => {
@@ -167,6 +212,31 @@ describe('ModuleDetailView', () => {
     await flushPromises()
 
     expect(mocks.enable).toHaveBeenCalledWith('castle-module')
+  })
+
+  it('launches an adventure with the exact module and adventure identity', async () => {
+    const { wrapper, router } = await mountView()
+    await buttonByText(wrapper, '用此冒险创建游戏').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.name).toBe('create')
+    expect(router.currentRoute.value.query).toEqual({ module_id: 'castle-module', adventure_id: 'plugin:castle-quest' })
+  })
+
+  it('blocks adventure launch for disabled or incompatible modules', async () => {
+    mocks.detail.mockResolvedValue(detailPayload({ status: 'disabled' }))
+    const { wrapper } = await mountView()
+    expect(buttonByText(wrapper, '用此冒险创建游戏').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('启用模组并解决兼容性问题后再创建游戏')
+  })
+
+  it('shows compatibility blockers before technical details and keeps resource copy browsing mounted', async () => {
+    mocks.compatibility.mockResolvedValue({ ok: false, module_id: 'castle-module', blockers: ['runtime missing'], warnings: [] })
+    const { wrapper } = await mountView()
+    const compatibility = wrapper.get('[data-testid="module-compatibility"]')
+    expect(compatibility.attributes('open')).toBeDefined()
+    expect(wrapper.get('[data-testid="module-adventures"]')).toBeTruthy()
+    expect(wrapper.findComponent({ name: 'ModuleResourceBrowser' }).exists()).toBe(true)
+    expect(wrapper.get('[data-testid="module-metadata"]').element.tagName).toBe('DETAILS')
   })
 
   it('surfaces the server MODULE_IN_USE verdict when a save appears after loading', async () => {

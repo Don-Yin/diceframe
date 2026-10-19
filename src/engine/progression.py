@@ -19,6 +19,11 @@ from src.engine.modules import progression_state
 NARRATIVE_ROUND = "narrative_round"
 
 
+def accepts_narrative(instance: Any) -> bool:
+    from src.engine.modules import profile_progression
+    return profile_progression.accepts_narrative(instance)
+
+
 def require_writable(instance: Any) -> None:
     """Preflight progression before any enclosing transaction mutates state.
 
@@ -60,6 +65,8 @@ def current_era(instance: Any) -> int:
 def open_next_round(instance: Any) -> int:
     """W1: open the next narrative round without normalizing the counter."""
     require_writable(instance)
+    if not accepts_narrative(instance):
+        raise ValueError('phase/calendar games do not advance narrative rounds')
     _write(instance, _read(instance) + 1)
     return _read(instance)
 

@@ -78,7 +78,7 @@ def build(output: Path | None = None, *, local_only: bool | None = None) -> Path
     allow_remote = not _local_only_requested(local_only)
     if not allow_remote:
         print("  · 仅使用本地 diceframe-content 检出（跳过远程文档）")
-    index: dict[str, list[dict]] = {}
+    index: dict = {"_meta": {"schema": 1, "application_version": ak.__version__}}
     for lang_key in ("zh", "en"):
         chunks: list[dict] = []
         for relative in ak._DOCUMENTS[lang_key]:
@@ -98,7 +98,7 @@ def build(output: Path | None = None, *, local_only: bool | None = None) -> Path
         index[lang_key] = chunks
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
-    total = sum(len(v) for v in index.values())
+    total = sum(len(index[lang]) for lang in ("zh", "en"))
     size_kb = target.stat().st_size / 1024
     print(
         f"assistant knowledge index: {total} chunks "

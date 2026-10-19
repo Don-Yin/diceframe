@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import hmac
 import io
 import json
@@ -1067,6 +1068,31 @@ class PluginHost:
                 if runtime and "diceframe.http" in self._plugin_permissions(runtime):
                     return {"plugin_id": plugin_id, "permissions": self._plugin_permissions(runtime)}
         return None
+
+    def api_token_active(self, plugin_id: str, token_digest: str) -> bool:
+        """Whether an open stream admitted with ``plugin_id``'s API token may continue.
+
+        ``token_digest`` is the SHA-256 hex digest of the token the stream was
+        admitted with; the plaintext is not kept. The plugin must still be
+        installed, still hold a token with that digest and still have
+        ``diceframe.http`` (as :meth:`authenticate_api_token` requires).
+
+        This is stricter than admission: a plugin that is disabled and has no
+        running process is treated as turned off, even though its token would
+        still authenticate a new request. An enabled plugin between restarts,
+        or one started from the UI switch without being enabled, stays active.
+        """
+        expected = self._api_tokens.get(plugin_id)
+        runtime = self.plugins.get(plugin_id)
+        if not expected or not token_digest or runtime is None:
+            return False
+        expected_digest = hashlib.sha256(expected.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(expected_digest, str(token_digest)):
+            return False
+        if "diceframe.http" not in self._plugin_permissions(runtime):
+            return False
+        process_running = bool(runtime.process and runtime.process.returncode is None)
+        return bool(runtime.config.get("enabled") or process_running)
 
     async def stop(self, plugin_id: str, *, keep_enabled: bool = False) -> None:
         runtime = self._require(plugin_id)

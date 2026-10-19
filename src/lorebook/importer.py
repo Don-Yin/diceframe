@@ -14,6 +14,7 @@ from src.lorebook.domain import LorebookDraft
 from src.content_modules.refs import (
     ContentDraft,
     build_commit_plan,
+    commit_plan_digest,
     collect_content_refs,
 )
 from src.content_modules.plan import (  # noqa: F401 - re-exported for import callers
@@ -172,7 +173,7 @@ def preview_lorebook_import(
         duplicate_policy=duplicate_policy,  # type: ignore[arg-type]
     )
     unsupported = sum(1 for warning in draft.warnings if "unsupported" in warning.lower())
-    return {"format": fmt, "book": draft, "counts": {"entries": len(draft.entries), "mapped": len(draft.entries), "warnings": len(draft.warnings), "unsupported": unsupported}, "warnings": draft.warnings, "features": {"timed": any(bool(e.timed) for e in draft.entries), "recursive": any(bool(e.recursion_flags) for e in draft.entries)}, "character": character_card_identity(payload), "content_draft": content_draft, "commit_plan": plan}
+    return {"format": fmt, "book": draft, "counts": {"entries": len(draft.entries), "mapped": len(draft.entries), "warnings": len(draft.warnings), "unsupported": unsupported}, "warnings": draft.warnings, "features": {"timed": any(bool(e.timed) for e in draft.entries), "recursive": any(bool(e.recursion_flags) for e in draft.entries)}, "character": character_card_identity(payload), "content_draft": content_draft, "commit_plan": plan, "plan_digest": commit_plan_digest(plan)}
 
 
 def legacy_book_id(draft: LorebookDraft) -> str:

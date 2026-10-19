@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from src.commands.adventure_tag_handlers import parse_adventure_tag
 from src.commands.player_tag_handlers import parse_player_tag
 from src.commands.world_tag_handlers import parse_action_tag, parse_loot_tag, parse_world_tag
 from src.llm.protocol import KNOWN_PROTOCOL_TAGS
@@ -24,15 +25,18 @@ WORLD_TAGS = frozenset({
 })
 LOOT_TAGS = frozenset({"LOOT", "KEY_ITEM", "FREE_GRANT"})
 ACTION_TAGS = frozenset({"PUZZLE", "SPELL", "QUICK_ACTIONS", "COMBAT"})
+ADVENTURE_TAGS = frozenset({"ADVENTURE_COMPLETE"})
 
 __all__ = [
     "ACTION_TAGS",
+    "ADVENTURE_TAGS",
     "KNOWN_TAGS",
     "LIMITS_BY_COMBAT_MODEL",
     "LOOT_TAGS",
     "PLAYER_TAGS",
     "WORLD_TAGS",
     "parse_action_tag",
+    "parse_adventure_tag",
     "parse_loot_tag",
     "parse_player_tag",
     "parse_world_tag",

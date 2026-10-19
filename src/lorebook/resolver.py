@@ -22,6 +22,8 @@ def resolve_active_books(instance: Any, viewer_kind: str = "gm", viewer_uid: str
     if not store:
         return []
     bindings = store.list_bindings()
+    content = (getattr(instance, "modules", {}) or {}).get("content_binding", {})
+    explicit = isinstance(content, dict) and content.get("book_selection") == "explicit"
     actors = set(str(uid) for uid in action_actor_uids or [])
     game_scopes = {str(getattr(instance, "game_id", "") or "")}
     raw_game_key = getattr(instance, "game_key", "")
@@ -67,9 +69,9 @@ def resolve_active_books(instance: Any, viewer_kind: str = "gm", viewer_uid: str
             updated_at=str(book.get("updated_at") or ""),
             revision=int(book.get("revision", 0) or 0),
         )
-        if kind == "global":
+        if kind == "global" and not explicit:
             refs.append(BookRef(str(binding["book_id"]), int(binding.get("order", 100)), str(binding.get("id", "")), str(binding.get("role", "")), **common))
-        elif kind == "world" and scope == world_id:
+        elif kind == "world" and scope == world_id and not explicit:
             refs.append(BookRef(str(binding["book_id"]), int(binding.get("order", 100)), str(binding.get("id", "")), str(binding.get("role", "")), **common))
         elif kind == "game" and scope in game_scopes:
             refs.append(BookRef(str(binding["book_id"]), int(binding.get("order", 100)), str(binding.get("id", "")), str(binding.get("role", "")), **common))

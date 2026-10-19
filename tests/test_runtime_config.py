@@ -14,6 +14,23 @@ def _store(tmp_path, environ=None):
     return ConfigStore(paths, environment), paths
 
 
+def test_agent_token_budget_is_independent_and_roundtrips(tmp_path):
+    from src.webui.config_update import prepare_config_update
+
+    store, _ = _store(tmp_path)
+    initial = store.load()
+    assert initial.state["assistant_agent_max_tokens"] == 4096
+    prepared = prepare_config_update(initial.state, {
+        "text_gen_max_tokens": 2048, "assistant_agent_max_tokens": 8192,
+    })
+    assert not prepared.error
+    store.save(prepared.state)
+    restored = store.load()
+    assert restored.state["text_gen_max_tokens"] == 2048
+    assert restored.state["assistant_agent_max_tokens"] == 8192
+    assert store.public_view(restored)["assistant_agent_max_tokens"] == 8192
+
+
 def test_image_prompt_reuse_defaults_on_but_preserves_explicit_off(tmp_path):
     default_store, _ = _store(tmp_path / "default")
     assert default_store.load().state["imagegen_auto_use_manual_prompt"] is True

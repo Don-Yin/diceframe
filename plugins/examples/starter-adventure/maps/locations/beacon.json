@@ -1,0 +1,13 @@
+{
+  "id": "beacon",
+  "name": "Beacon",
+  "world_id": "lantern_harbor",
+  "connected_to": [
+    "pier"
+  ],
+  "content": "An unlit beacon above the harbor.",
+  "keywords": [
+    "beacon"
+  ],
+  "tier": "background"
+}

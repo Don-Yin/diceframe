@@ -32,6 +32,9 @@ export const useSettingsStore = defineStore('settings', () => {
   const secrets = ref<SecretInput>({})
   const loading = ref(false)
   const error = ref('')
+  let loadSequence = 0
+  let lastLoaded: Record<string, unknown> = {}
+  const fieldRevisions = new Map<string, number>()
 
   // AppConfig has a [key:string]:unknown index signature, but Partial<AppConfig>
   // still needs assertions for dynamic keys. Keep them centralized here.
@@ -40,17 +43,36 @@ export const useSettingsStore = defineStore('settings', () => {
   }
   function setConfigField(key: keyof AppConfig, value: unknown): void {
     ;(config.value as Record<string, unknown>)[key] = value
+    fieldRevisions.set(String(key), (fieldRevisions.get(String(key)) || 0) + 1)
   }
 
-  async function load() {
+  function applyLoaded(fresh: AppConfig, savedKeys: string[] | undefined, revisions: Map<string, number>) {
+    const next: Record<string, unknown> = { ...fresh }
+    for (const [key, value] of Object.entries(config.value)) {
+      const editedDuringRequest = fieldRevisions.get(key) !== revisions.get(key)
+      // A section save may refresh server-normalized fields. Keep an unrelated
+      // draft only when the server did not change that field (e.g. clear a
+      // dangling provider reference); otherwise the authoritative update wins.
+      const unrelatedDraft = savedKeys && !savedKeys.includes(key)
+        && JSON.stringify(value) !== JSON.stringify(lastLoaded[key])
+        && JSON.stringify(fresh[key]) === JSON.stringify(lastLoaded[key])
+      if (editedDuringRequest || unrelatedDraft) next[key] = value
+    }
+    lastLoaded = JSON.parse(JSON.stringify(fresh)) as Record<string, unknown>
+    config.value = next as Partial<AppConfig>
+  }
+
+  async function load(savedKeys?: string[], revisions = new Map(fieldRevisions)) {
+    const sequence = ++loadSequence
     loading.value = true
     error.value = ''
     try {
-      config.value = await api<AppConfig>('/config')
+      const fresh = await api<AppConfig>('/config')
+      if (sequence === loadSequence) applyLoaded(fresh, savedKeys, revisions)
     } catch (e: unknown) {
-      error.value = errorMessage(e)
+      if (sequence === loadSequence) error.value = errorMessage(e)
     } finally {
-      loading.value = false
+      if (sequence === loadSequence) loading.value = false
     }
   }
 
@@ -64,12 +86,13 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function saveSection(keys: string[], secretKeys: string[] = []) {
+    const revisions = new Map(fieldRevisions)
     const payload: Record<string, unknown> = {}
     for (const k of keys) if (k in config.value) payload[k] = getConfigField(k as keyof AppConfig)
     Object.assign(payload, collectSecrets(secretKeys))
     const result = await api<{ warnings?: string[] }>('/config', { method: 'POST', body: JSON.stringify(payload) })
     for (const k of secretKeys) secrets.value[k] = ''
-    await load()
+    await load(keys, revisions)
     return result.warnings || []
   }
 

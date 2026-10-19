@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -7,7 +9,7 @@ import pytest
 
 from src.commands.round_processor import RoundNotProcessed
 from src.engine.game_instance import GameState
-from src.engine.modules import economy_state, table_settings
+from src.engine.modules import economy_state
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.webui.services.turns import (
     TurnDependencies,
@@ -32,7 +34,7 @@ class FakeInstance:
         self.run_id = "run-test"
         round_presentation.replace_quick_actions(self, ["观察"])
         round_presentation.replace_last_state_update(self, {"scene": "门厅"})
-        table_settings.replace_solo_mode(self, False)
+        game_config.replace_solo_mode(self, False)
         self.dead: set[str] = set()
         self.pending_luck: list[dict] = []
         self.pending_dice = False
@@ -88,6 +90,8 @@ class FakeInstance:
 
     def pending_luck_checks(self) -> list[dict]:
         return list(self.pending_luck)
+
+    round_checks_prepared = False
 
     def multiplayer_status(self) -> dict:
         acted = {action.get("user_id") for action in self.action_queue}

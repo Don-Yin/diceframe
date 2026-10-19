@@ -11,6 +11,9 @@ from typing import Any
 
 import aiohttp
 
+from src.llm.openai_transport import OpenAIChatTransport
+from src.llm.generation_options import apply_anthropic_options, validate_generation_options
+
 logger = logging.getLogger("trpg")
 
 MAX_RETRIES = 3          # 总共尝试次数（含首次）
@@ -115,6 +118,7 @@ class LLMResponse:
     token_budget_initial: int = 0  # 本次调用最初配置的最大输出 token
     token_budget_used: int = 0     # 成功响应实际使用的最大输出 token 档位
     system_notices: list[str] = field(default_factory=list)  # 不属于 GM 正文的系统提示
+    story: dict[str, Any] | None = None  # Validated public presentation, independent of rule effects.
 
 
 @dataclass
@@ -125,6 +129,15 @@ class LLMToolResponse:
     total_tokens: int
     provider_used: str
     native_tools: bool = True
+    content: str = ""
+
+
+class LLMToolCallError(RuntimeError):
+    """Provider failure with HTTP facts preserved for application feedback."""
+
+    def __init__(self, message: str, status_codes: frozenset[int]):
+        super().__init__(message)
+        self.status_codes = status_codes
 
 
 class LLMClient:
@@ -139,6 +152,7 @@ class LLMClient:
         default: str,
         proxy_url: str = "",
         request_timeout_seconds: float = 120,
+        generation_options: dict[str, Any] | None = None,
     ):
         if not providers:
             raise ValueError("至少需要配置一个模型供应商")
@@ -153,6 +167,12 @@ class LLMClient:
         self._native_tool_unsupported: set[str] = set()
         # 强制 tool_choice 被拒但 tool_choice=auto 可用的供应商（如思考模式模型）
         self._native_tool_auto: set[str] = set()
+        self.generation_options = validate_generation_options({} if generation_options is None else generation_options)
+        self._openai_transport = OpenAIChatTransport(self.generation_options)
+
+    def _anthropic_body(self, body: dict[str, Any]) -> dict[str, Any]:
+        apply_anthropic_options(body, self.generation_options)
+        return body
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """获取或懒创建复用的 HTTP session。"""
@@ -173,6 +193,7 @@ class LLMClient:
         tools: list[dict[str, Any]],
         max_tokens: int = 4096,
         temperature: float = 0.1,
+        force_tool_choice: bool = True,
     ) -> LLMToolResponse:
         """调用模型工具；不支持原生 tools 的供应商自动回退严格 JSON。
 
@@ -181,7 +202,8 @@ class LLMClient:
 
         思考模式模型常拒绝强制 tool_choice 但接受 tool_choice=auto：此类供应商
         先用 auto 重试原生调用，仍失败才走 JSON 回退；JSON 回退截断时按
-        length_retry_budgets 放大 max_tokens 重试。
+        length_retry_budgets 放大 max_tokens 重试。显式 ``force_tool_choice=False``
+        时始终请求原生 auto；该选择本身不会把供应商记为不支持强制调用。
         """
         primary = self.providers[self.default]
         ordered = [primary] + [
@@ -189,11 +211,12 @@ class LLMClient:
             if provider.fallback and provider.provider_name != primary.provider_name
         ]
         errors: list[str] = []
+        status_codes: set[int] = set()
         for provider in ordered:
-            forced = provider.provider_name not in self._native_tool_unsupported
-            if forced or provider.provider_name in self._native_tool_auto:
+            forced = force_tool_choice and provider.provider_name not in self._native_tool_unsupported
+            if not force_tool_choice or forced or provider.provider_name in self._native_tool_auto:
                 try:
-                    return await self._call_tools_one(
+                    native_result = await self._call_tools_one(
                         provider,
                         system_prompt,
                         user_message,
@@ -202,7 +225,12 @@ class LLMClient:
                         max_tokens,
                         force_tool_choice=forced,
                     )
+                    if force_tool_choice and not native_result.tool_calls:
+                        raise ValueError("供应商未返回必需的工具调用")
+                    return native_result
                 except Exception as exc:
+                    if isinstance(exc, aiohttp.ClientResponseError):
+                        status_codes.add(exc.status)
                     errors.append(f"{provider.provider_name}: {exc}")
                     if forced and "does not support this tool_choice" in str(exc):
                         self._native_tool_unsupported.add(provider.provider_name)
@@ -216,18 +244,34 @@ class LLMClient:
                                 max_tokens,
                                 force_tool_choice=False,
                             )
+                            if not result.tool_calls:
+                                raise ValueError("供应商未返回必需的工具调用")
                             self._native_tool_auto.add(provider.provider_name)
                             return result
                         except Exception as auto_exc:
+                            if isinstance(auto_exc, aiohttp.ClientResponseError):
+                                status_codes.add(auto_exc.status)
                             errors.append(f"{provider.provider_name} (tool_choice=auto): {auto_exc}")
                     logger.warning("模型原生工具调用失败，尝试 JSON 回退 (%s): %s", provider.provider_name, exc)
             try:
-                tool_name = str(tools[0].get("function", {}).get("name") or "tool")
+                tool_names = [
+                    str(tool.get("function", {}).get("name") or "tool")
+                    for tool in tools
+                ]
+                if force_tool_choice:
+                    tool_instruction = (
+                        f"name={tool_names[0]} and arguments matching that tool's schema."
+                    )
+                else:
+                    tool_instruction = (
+                        "name matching one of the available tools "
+                        f"({', '.join(tool_names)}) and arguments matching that tool's schema."
+                    )
                 fallback_prompt = (
                     system_prompt
                     + "\n\nNative function calling is unavailable. Adjudicate the supplied actions first, "
                     + "then return only one JSON object with a tool_calls array. Each item must contain "
-                    + f"name={tool_name} and arguments matching that tool's schema. "
+                    + tool_instruction + " "
                     + "Never copy an empty structural example when the supplied context supports a concrete result. "
                     + "Required tool schema: "
                     + json.dumps(tools, ensure_ascii=False, separators=(",", ":"))
@@ -253,7 +297,9 @@ class LLMClient:
                             provider.provider_name, budget, budgets[attempt],
                         )
                         await asyncio.sleep(BASE_DELAY * 0.5)
-                calls = _parse_json_tool_calls(response.content)
+                calls = _parse_json_tool_calls(response.content, allow_legacy=force_tool_choice)
+                if not force_tool_choice:
+                    calls = _validate_tool_calls(calls, tools)
                 if not calls:
                     raise ValueError("模型未返回必需的工具调用")
                 return LLMToolResponse(
@@ -263,9 +309,11 @@ class LLMClient:
                     native_tools=False,
                 )
             except Exception as exc:
+                if isinstance(exc, aiohttp.ClientResponseError):
+                    status_codes.add(exc.status)
                 errors.append(f"{provider.provider_name} JSON fallback: {exc}")
                 logger.warning("模型 JSON 工具回退失败 (%s): %s", provider.provider_name, exc)
-        raise RuntimeError("所有模型工具调用均失败: " + "; ".join(errors))
+        raise LLMToolCallError("所有模型工具调用均失败: " + "; ".join(errors), frozenset(status_codes))
 
     async def _call_tools_one(
         self,
@@ -323,10 +371,11 @@ class LLMClient:
             }
         else:
             body["tool_choice"] = "auto"
+            body["parallel_tool_calls"] = False
         session = await self._get_session()
         request_kwargs = {"proxy": self.proxy_url} if self.proxy_url else {}
-        async with session.post(
-            url,
+        async with self._openai_transport.post(
+            session, url,
             json=body,
             headers=headers,
             timeout=self.request_timeout,
@@ -344,8 +393,26 @@ class LLMClient:
             data = await resp.json()
         message = data.get("choices", [{}])[0].get("message", {})
         calls = _normalize_openai_tool_calls(message.get("tool_calls") or [])
-        if not calls and str(message.get("content") or "").strip():
-            calls = _parse_json_tool_calls(str(message.get("content") or ""))
+        content = _openai_text_content(message.get("content"))
+        if not calls and content:
+            if not force_tool_choice:
+                explicit_calls = _parse_explicit_json_tool_calls(content)
+                if explicit_calls is not None:
+                    return LLMToolResponse(
+                        tool_calls=explicit_calls,
+                        total_tokens=int(data.get("usage", {}).get("total_tokens", 0) or 0),
+                        provider_used=provider.provider_name,
+                        native_tools=True,
+                        content=content,
+                    )
+                return LLMToolResponse(
+                    tool_calls=[],
+                    total_tokens=int(data.get("usage", {}).get("total_tokens", 0) or 0),
+                    provider_used=provider.provider_name,
+                    native_tools=True,
+                    content=content,
+                )
+            calls = _parse_json_tool_calls(content)
         if not calls:
             raise ValueError("供应商未返回强制工具调用")
         return LLMToolResponse(
@@ -353,6 +420,7 @@ class LLMClient:
             total_tokens=int(data.get("usage", {}).get("total_tokens", 0) or 0),
             provider_used=provider.provider_name,
             native_tools=True,
+            content=content,
         )
 
     async def _call_tools_anthropic(
@@ -397,7 +465,7 @@ class LLMClient:
         request_kwargs = {"proxy": self.proxy_url} if self.proxy_url else {}
         async with session.post(
             _anthropic_messages_url(provider.base_url),
-            json=body,
+            json=self._anthropic_body(body),
             headers=headers,
             timeout=self.request_timeout,
             **request_kwargs,
@@ -417,11 +485,23 @@ class LLMClient:
             for block in data.get("content", [])
             if isinstance(block, dict) and block.get("type") == "tool_use"
         ]
+        content = _anthropic_text_content(data)
+        if not calls and content and not force_tool_choice:
+            return LLMToolResponse(
+                tool_calls=[],
+                total_tokens=(
+                    int(data.get("usage", {}).get("input_tokens", 0) or 0)
+                    + int(data.get("usage", {}).get("output_tokens", 0) or 0)
+                ),
+                provider_used=provider.provider_name,
+                native_tools=True,
+                content=content,
+            )
         if not calls:
             raise ValueError("供应商未返回强制工具调用")
         usage = data.get("usage", {})
         total_tokens = int(usage.get("input_tokens", 0) or 0) + int(usage.get("output_tokens", 0) or 0)
-        return LLMToolResponse(calls, total_tokens, provider.provider_name, True)
+        return LLMToolResponse(calls, total_tokens, provider.provider_name, True, content)
 
     async def call(
         self,
@@ -653,7 +733,7 @@ class LLMClient:
 
         session = await self._get_session()
         request_kwargs = {"proxy": self.proxy_url} if self.proxy_url else {}
-        async with session.post(url, json=body, headers=headers,
+        async with self._openai_transport.post(session, url, json=body, headers=headers,
                                 timeout=self.request_timeout,
                                 **request_kwargs) as resp:
             if resp.status != 200:
@@ -704,7 +784,7 @@ class LLMClient:
 
         session = await self._get_session()
         request_kwargs = {"proxy": self.proxy_url} if self.proxy_url else {}
-        async with session.post(url, json=body, headers=headers,
+        async with session.post(url, json=self._anthropic_body(body), headers=headers,
                                 timeout=self.request_timeout,
                                 **request_kwargs) as resp:
             if resp.status != 200:
@@ -788,7 +868,7 @@ class LLMClient:
         content_parts: list[str] = []
         finish_reason = "stop"
         total_tokens = 0
-        async with session.post(url, json=body, headers=headers,
+        async with self._openai_transport.post(session, url, json=body, headers=headers,
                                 timeout=self.request_timeout,
                                 **request_kwargs) as resp:
             if resp.status != 200:
@@ -870,7 +950,7 @@ class LLMClient:
         stop_reason = "end_turn"
         input_tokens = 0
         output_tokens = 0
-        async with session.post(url, json=body, headers=headers,
+        async with session.post(url, json=self._anthropic_body(body), headers=headers,
                                 timeout=self.request_timeout,
                                 **request_kwargs) as resp:
             if resp.status != 200:
@@ -956,6 +1036,21 @@ def _anthropic_text_content(data: dict) -> str:
     return "\n".join(part for part in parts if part).strip()
 
 
+def _openai_text_content(value: Any) -> str:
+    """Extract text from string or content-part OpenAI message payloads."""
+    if isinstance(value, str):
+        return value.strip()
+    if not isinstance(value, list):
+        return ""
+    parts: list[str] = []
+    for block in value:
+        if isinstance(block, dict) and block.get("type") in {"text", "output_text"}:
+            text = str(block.get("text") or "").strip()
+            if text:
+                parts.append(text)
+    return "\n".join(parts).strip()
+
+
 def _tool_arguments(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -979,15 +1074,62 @@ def _normalize_openai_tool_calls(raw_calls: list[Any]) -> list[dict[str, Any]]:
     return calls
 
 
-def _parse_json_tool_calls(content: str) -> list[dict[str, Any]]:
+def _parse_json_tool_calls(content: str, *, allow_legacy: bool = True) -> list[dict[str, Any]]:
     text = str(content or "").strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[-1]
         text = text.rsplit("```", 1)[0].strip()
     payload = json.loads(text)
     raw_calls = payload.get("tool_calls") if isinstance(payload, dict) else None
-    if raw_calls is None and isinstance(payload, dict) and "checks" in payload:
+    if allow_legacy and raw_calls is None and isinstance(payload, dict) and "checks" in payload:
         raw_calls = [{"name": "dice_checks", "arguments": payload}]
     if not isinstance(raw_calls, list):
         raise ValueError("JSON 回退缺少 tool_calls")
     return _normalize_openai_tool_calls(raw_calls)
+
+
+def _parse_explicit_json_tool_calls(content: str) -> list[dict[str, Any]] | None:
+    """Parse only JSON content with an explicit top-level ``tool_calls`` field."""
+    text = str(content or "").strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        text = text.rsplit("```", 1)[0].strip()
+    try:
+        payload = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or "tool_calls" not in payload:
+        return None
+    raw_calls = payload.get("tool_calls")
+    if not isinstance(raw_calls, list):
+        raise ValueError("JSON 工具调用的 tool_calls 必须是 array")
+    calls = _normalize_openai_tool_calls(raw_calls)
+    if not calls:
+        raise ValueError("JSON 工具调用缺少有效调用")
+    return calls
+
+
+def _validate_tool_calls(
+    calls: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Validate fallback calls against the registered tool names and required fields."""
+    schemas: dict[str, dict[str, Any]] = {}
+    for tool in tools:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        if not isinstance(function, dict):
+            continue
+        name = str(function.get("name") or "").strip()
+        if name:
+            schema = function.get("parameters")
+            schemas[name] = schema if isinstance(schema, dict) else {}
+    if not calls:
+        raise ValueError("JSON 回退缺少 tool_calls")
+    for call in calls:
+        name = str(call.get("name") or "").strip()
+        if name not in schemas:
+            raise ValueError(f"JSON 回退调用了未注册工具: {name or '<empty>'}")
+        arguments = call.get("arguments")
+        if not isinstance(arguments, dict):
+            raise ValueError(f"JSON 回退工具参数不是 object: {name}")
+    return calls

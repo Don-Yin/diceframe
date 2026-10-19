@@ -1,6 +1,6 @@
 {
   "extends": "intents_base",
-  "rule_version": "1.3",
+  "rule_version": "1.4",
   "rule_id": "freeform_coc",
   "scene_image": {
     "kind": "builtin",
@@ -92,7 +92,22 @@
   },
   "combat_model": "lethal_narrative",
   "growth_system": "skill_improvement",
+  "skill_improvement": {
+    "version": 1,
+    "success": "above_skill_or_96",
+    "gain": "d10",
+    "cap": 99,
+    "excluded_skill_ids": ["cthulhu_mythos"],
+    "identity_aliases": {
+      "cthulhu_mythos": ["cthulhu_mythos", "克苏鲁神话", "Cthulhu Mythos", "クトゥルフ神話", "Cthulhu-Mythos", "Мифы Ктулху", "Mitos de Cthulhu"]
+    }
+  },
   "bonus_dice": true,
+  "resource_recovery": {
+    "version": 1,
+    "policy": "coc_light",
+    "luck_recovery": "check"
+  },
   "pushed_rolls": true,
   "hp_formula": "max((con + siz) // 10, 1)",
   "valid_qualities": [
@@ -383,7 +398,7 @@
       "spot_hidden"
     ]
   },
-  "gm_prompt_appendix": "你是1920年代调查恐怖故事的GM。玩家面对的是无法理解的存在，战斗往往致命；鼓励玩家搜集线索、推理真相，而非正面冲突。CoC属性与技能使用 d100 百分制：普通成功≤阈值，困难成功≤阈值/2，极难成功≤阈值/5。失败可以推动剧情但必须带来代价。每次遭遇超自然事物时，要求玩家进行理智检定（只在 `---` 后使用 SAN_CHECK:玩家ID:损失骰 标签，如 SAN_CHECK:玩家ID:1d6；正文不得展示标签、玩家ID或骰子协议）。\n\n理智值变化规则：\n- 直接修改使用 SAN:玩家ID:变化量（如 SAN:玩家ID:-5）\n- 休息恢复：游戏内过夜休息可用 SAN:玩家ID:+1d6 恢复少量理智\n- 心理治疗：成功心理学或精神分析检定后可用 SAN:玩家ID:+1d3 恢复\n- 理智值归零可能永久疯狂，角色不一定可继续操作\n- 推动检定使用 PUSH:玩家ID:技能名 标签\n- 幸运消耗使用 LUCK:玩家ID:-消耗量 降低检定后果",
+  "gm_prompt_appendix": "你是1920年代调查恐怖故事的GM。玩家面对的是无法理解的存在，战斗往往致命；鼓励玩家搜集线索、推理真相，而非正面冲突。CoC属性与技能使用 d100 百分制：普通成功≤阈值，困难成功≤阈值/2，极难成功≤阈值/5。失败可以推动剧情但必须带来代价。每次遭遇超自然事物时，要求玩家进行理智检定（只在 `---` 后使用 SAN_CHECK:玩家ID:损失骰 标签，如 SAN_CHECK:玩家ID:1d6；正文不得展示标签、玩家ID或骰子协议）。\n\n理智与幸运恢复规则：\n- SAN:玩家ID:负变化量只表达理智损失（如 SAN:玩家ID:-5）；正向 SAN、LUCK 或 STAT 标签不能发放恢复\n- 本规则明确采用 DiceFrame 轻量房规：经 GM 确认的安全过夜可恢复 1d6 SAN，治疗行动可恢复 1d3 SAN；这不是 CoC 标准治疗周期的复刻\n- 恢复必须进入服务端恢复/休整流程，由 GM 批准可信来源并由服务端掷骰、校验资格和次数；叙事或标签不构成授权\n- 治疗须绑定治疗者、接受者和专用治疗检定；普通心理学成功不是标准精神分析治疗，也不能凭任意成功检定领奖\n- 幸运恢复采用可选检定策略：经 GM 确认的场次来源只能结算一次，服务端 d100 高于当前幸运才增加 1d10；不得按章节无条件发放\n- 剧情 SAN/Luck 奖励须使用 GM 批准的一次性事件来源；幕间和结团不会凭空奖励\n- 理智归零造成的永久疯狂不能靠普通恢复重新获得角色行动权\n- 孤注一掷由玩家申请、GM 告知失败风险、玩家确认后由服务端重掷；禁止通过 PUSH 标签自行重掷\n- 幸运改判由服务端的检定选择处理，禁止通过 LUCK 标签自行改判或重复扣除幸运",
   "difficulty_instructions": {
     "轻松": "调查线索充足，战斗可避免，理智损失减半。",
     "标准": "线索需要拼凑，战斗有风险，理智损失正常。",

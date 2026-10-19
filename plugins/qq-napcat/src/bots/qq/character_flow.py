@@ -51,15 +51,18 @@ class QQCharacterFlowMixin:
                                                game_key: str, link: str, guide_lines: list[str],
                                                language: str = "zh-CN") -> None:
         english = bridge_is_english(language)
-        self.character_wizards[platform_user_id] = {
+        wizard = {
             "group_id": group_id,
             "game_key": game_key,
             "link": link,
             "guide_lines": guide_lines,
             "state": "awaiting_prompt",
+            "generation": 0,
+            "draft_version": 0,
             "updated_at": time.time(),
             "language": language,
         }
+        self.character_wizards[platform_user_id] = wizard
         try:
             if english:
                 await self._send_private_text(
@@ -78,7 +81,8 @@ class QQCharacterFlowMixin:
                 + self._link_suffix("网页建卡入口", link),
             )
         except Exception:
-            self.character_wizards.pop(platform_user_id, None)
+            if self.character_wizards.get(platform_user_id) is wizard:
+                self.character_wizards.pop(platform_user_id, None)
             self.logger.warning("QQ 主动私聊 AI 车卡失败", exc_info=True)
             await self._send_group_text(
                 group_id,
@@ -97,13 +101,38 @@ class QQCharacterFlowMixin:
         language = str(wizard.get("language") or "zh-CN")
         english = bridge_is_english(language)
         normalized = re.sub(r"\s+", "", text.strip().lower())
+        if wizard.get("state") == "publishing":
+            # The group send is already in flight. Do not start another revision
+            # or claim it was canceled after the public delivery boundary.
+            return
         if normalized in {"取消", "退出", "不车了", "停止", "cancel", "stop"}:
             self.character_wizards.pop(platform_user_id, None)
             await self._send_private_text(platform_user_id, "AI character creation canceled. You can restart it in the group with @me AI character." if english else "已取消 AI 辅助车卡。你也可以随时在群里重新发送 @我 车卡。")
             return
-        if wizard.get("state") == "draft" and normalized in {"确认", "提交", "就这个", "可以", "发群里", "公示", "ok", "yes", "confirm", "submit"}:
-            await self._publish_character_draft(platform_user_id, wizard)
-            self.character_wizards.pop(platform_user_id, None)
+        confirm_words = {"确认", "提交", "就这个", "可以", "发群里", "公示", "ok", "yes", "confirm", "submit"}
+        if wizard.get("state") == "generating" and normalized in confirm_words:
+            await self._send_private_text(platform_user_id, "The latest draft is still being generated. Confirm after its preview arrives." if english else "最新草稿还在生成，请收到预览后再确认。")
+            return
+        if wizard.get("state") == "draft" and normalized in confirm_words:
+            draft_version = int(wizard.get("draft_version") or 0)
+            wizard["state"] = "publishing"
+            try:
+                await self._publish_character_draft(platform_user_id, wizard)
+            except Exception:
+                if self.character_wizards.get(platform_user_id) is wizard:
+                    wizard["state"] = "draft"
+                    await self._send_private_text(
+                        platform_user_id,
+                        "Could not post the draft. Reply “confirm” to retry." if english else "公开草稿发送失败。回复“确认”可重试。",
+                    )
+                self.logger.warning("QQ AI 角色草稿公示失败", exc_info=True)
+                return
+            if (
+                self.character_wizards.get(platform_user_id) is wizard
+                and wizard.get("state") == "publishing"
+                and int(wizard.get("draft_version") or 0) == draft_version
+            ):
+                self.character_wizards.pop(platform_user_id, None)
             return
 
         prompt = text.strip()
@@ -111,7 +140,7 @@ class QQCharacterFlowMixin:
             await self._send_private_text(platform_user_id, "Describe the character you want to play—for example: a disgraced knight who hides their kindness and specializes in defense and medicine." if english else "直接描述你想玩的角色就行，例如：落魄剑修，嘴硬心软，擅长御剑和医毒。")
             return
 
-        if wizard.get("state") == "draft":
+        if wizard.get("draft"):
             previous = json.dumps(wizard.get("draft") or {}, ensure_ascii=False)
             prompt = (
                 f"Revise the character draft using the player’s feedback.\nPrevious draft: {previous}\nFeedback: {prompt}"
@@ -119,8 +148,23 @@ class QQCharacterFlowMixin:
                 f"请根据玩家修改意见重做角色草稿。\n上一版草稿：{previous}\n修改意见：{prompt}"
             )
 
-        await self._send_private_text(platform_user_id, "Got it. AI is generating a character draft…" if english else "收到，AI 正在生成角色草稿中，请稍等…")
-        result = await self.api.generate_character(prompt, game_key=str(wizard.get("game_key") or ""))
+        generation = int(wizard.get("generation") or 0) + 1
+        wizard["generation"] = generation
+        wizard["state"] = "generating"
+        try:
+            await self._send_private_text(platform_user_id, "Got it. AI is generating a character draft…" if english else "收到，AI 正在生成角色草稿中，请稍等…")
+            if self.character_wizards.get(platform_user_id) is not wizard or wizard["generation"] != generation:
+                return
+            result = await self.api.generate_character(prompt, game_key=str(wizard.get("game_key") or ""))
+        except Exception:
+            self.logger.warning("QQ AI 角色草稿生成失败", exc_info=True)
+            result = {"ok": False, "error": "Connection failed; please retry." if english else "连接失败，请重试。"}
+        if (
+            self.character_wizards.get(platform_user_id) is not wizard
+            or int(wizard.get("generation") or 0) != generation
+        ):
+            return
+        wizard["state"] = "draft" if wizard.get("draft") else "awaiting_prompt"
         if not result.get("ok"):
             await self._send_private_text(platform_user_id, f"AI character generation failed: {result.get('error') or 'unusable response'}\nTry a different description or use the web character creator." if english else f"AI 车卡失败：{result.get('error') or '返回内容不可用'}\n你可以换个描述再试，或直接打开网页建卡。")
             return
@@ -130,6 +174,7 @@ class QQCharacterFlowMixin:
             return
         wizard["state"] = "draft"
         wizard["draft"] = draft
+        wizard["draft_version"] = int(wizard.get("draft_version") or 0) + 1
         lines = self._character_draft_lines(draft, language)
         link = str(wizard.get("link") or "")
         await self._send_private_card(
@@ -172,7 +217,12 @@ class QQCharacterFlowMixin:
             lines=lines,
             fallback=self._character_draft_text("New character draft" if english else "新角色草稿", lines, language=language),
         )
-        await self._send_private_text(platform_user_id, "The public draft was posted in the group. Continue editing it in the web character creator." if english else "已把公开版发到群里。你可以按网页建卡入口继续填写或微调。")
+        # A failed private acknowledgement must not turn a successful group send
+        # into a retryable publication (and post the same draft twice).
+        try:
+            await self._send_private_text(platform_user_id, "The public draft was posted in the group. Continue editing it in the web character creator." if english else "已把公开版发到群里。你可以按网页建卡入口继续填写或微调。")
+        except Exception:
+            self.logger.warning("QQ 角色已公示，但私聊确认发送失败", exc_info=True)
 
     async def _send_invite_link(
         self,

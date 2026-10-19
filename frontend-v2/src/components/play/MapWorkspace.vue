@@ -6,7 +6,7 @@ import type { MapData, MapLocation } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
 import MapGraph from './MapGraph.vue'
 
-const props = defineProps<{ map?: MapData | null; currentScene?: string }>()
+const props = withDefaults(defineProps<{ map?: MapData | null; currentScene?: string; embedded?: boolean }>(), { embedded: false })
 const emit = defineEmits<{ close: [] }>()
 const { t } = useLocale()
 
@@ -64,11 +64,11 @@ function onKeydown(event: KeyboardEvent) {
 let previousBodyOverflow = ''
 onMounted(() => {
   previousBodyOverflow = document.body.style.overflow
-  document.body.style.overflow = 'hidden'
-  window.addEventListener('keydown', onKeydown)
+  if (!props.embedded) document.body.style.overflow = 'hidden'
+  if (!props.embedded) window.addEventListener('keydown', onKeydown)
 })
 onBeforeUnmount(() => {
-  document.body.style.overflow = previousBodyOverflow
+  if (!props.embedded) document.body.style.overflow = previousBodyOverflow
   window.removeEventListener('keydown', onKeydown)
 })
 
@@ -85,9 +85,9 @@ watch(
 </script>
 
 <template>
-  <Teleport to="body">
-    <div class="map-workspace-overlay" @click.self="close">
-      <section class="map-workspace-shell" role="dialog" aria-modal="true" :aria-label="mapTitle">
+  <Teleport to="body" :disabled="embedded">
+    <div class="map-workspace-overlay" :class="{ 'map-workspace-embedded': embedded }" @click.self="close">
+      <section class="map-workspace-shell" :role="embedded ? 'region' : 'dialog'" :aria-modal="embedded ? undefined : 'true'" :aria-label="mapTitle">
         <header class="map-workspace-header">
           <div class="map-workspace-title">
             <span class="map-workspace-title-icon" aria-hidden="true">

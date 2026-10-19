@@ -1,4 +1,4 @@
-"""优劣势判定职责：明确声明走 deterministic 识别，情境裁量走 LLM 规划器。
+"""优劣势判定职责：玩家声明不授予权限，情境裁量走 GM 规划器。
 
 情境词（高地/黑暗/偷袭/负伤等）不得由 deterministic 代码机械改判；
 LLM 经 dice_checks.advantage 下发的情境判断需通过规则能力校验；
@@ -12,7 +12,7 @@ from pathlib import Path
 
 from src.commands.check_planner import (
     _apply_d20_assistance,
-    _apply_explicit_advantage_modes,
+    _apply_granted_advantage_modes,
     normalize_check_specs,
 )
 from src.engine.checks import (
@@ -84,7 +84,7 @@ def test_explicit_declarations_still_recognized() -> None:
     assert mode == "" and "抵消" in note
 
 
-def test_explicit_declaration_overrides_llm_but_context_does_not() -> None:
+def test_explicit_declaration_does_not_grant_mode() -> None:
     rule = _rule("dnd5e.json")
     instance = _instance()
     instance.action_queue = [
@@ -96,10 +96,10 @@ def test_explicit_declaration_overrides_llm_but_context_does_not() -> None:
         (instance.action_queue[1], {"actor_uid": "b", "advantage_mode": "", "assist": []}),
     ]
 
-    _apply_explicit_advantage_modes(rule, planned)
+    _apply_granted_advantage_modes(instance, rule, planned)
 
     assert planned[0][1]["advantage_mode"] == ""
-    assert planned[1][1]["advantage_mode"] == "disadvantage"
+    assert planned[1][1]["advantage_mode"] == ""
 
 
 def test_llm_advantage_rolls_two_d20_keep_high(monkeypatch) -> None:

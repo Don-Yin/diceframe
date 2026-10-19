@@ -117,6 +117,15 @@ async function applyUpdate(): Promise<UpdateApplyResponse> {
   return result
 }
 
+async function rollbackUpdate(): Promise<UpdateApplyResponse> {
+  const result = await api<UpdateApplyResponse>('/system/update/rollback', { method: 'POST' })
+  if (result.ok) {
+    reloadAfterLauncherUpdate = true
+    await refreshStatus()
+  }
+  return result
+}
+
 async function restartApplication(): Promise<ApplicationRestartResponse> {
   return api<ApplicationRestartResponse>('/system/restart', { method: 'POST' })
 }
@@ -145,6 +154,7 @@ export function useUpdater() {
     refreshStatus,
     startDownload,
     applyUpdate,
+    rollbackUpdate,
     restartApplication,
     waitForApplicationRestart,
   }

@@ -13,7 +13,7 @@
  9. encounter 解析 module monster                     → combat preset 来自模组 catalog
 10. Combat Runtime 正常战斗                           → combat.start 事件批
 11. 完成 node                                        → 进度推进 + 后继开放
-12. item reward 走权威奖励路径                        → **待用户决策**（见文件末尾说明）
+12. item reward 走权威奖励路径                        → 既有奖励提案与明确确认
 13. 启动 hidden ritual process                        → node on_complete 的 world_op
 14. advance logical time                             → real RoundProcessor planning path
 15. process settlement                               → 进程 completed
@@ -30,12 +30,8 @@
 26. module uninstall 被阻断                           → ModuleInUse
 ```
 
-第 12 步是**唯一未完成项**：既有经济权威（``queue_proposal`` 要求
-``0 < amount``，``is_auto_settleable_reward`` 明确排除 item 奖励）没有任何
-"免费发放物品"的路径，所以 Adventure 的 item_reward 现在 fail closed。
-补齐它需要改奖励结算语义（授权决策），不能由修复侧自行决定；
-``test_golden_e2e_step12_item_reward_is_fail_closed_until_decided`` 冻结当前
-行为：世界不改、进度不回退半格、inventory 不动。
+第 12 步通过 reward intent 和既有提案权威完成：玩家/GM 明确确认后才发放物品，
+拒绝、重复确认和回合回退沿用经济事务契约。这里的黄金链路不是绕过确认的自动奖励。
 """
 
 from __future__ import annotations

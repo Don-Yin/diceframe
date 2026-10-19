@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from src.engine import module_hooks
+
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
@@ -10,6 +12,7 @@ from typing import Any
 from src.engine import progression
 from src.rulesets.contracts import (
     AutomaticIntentRuntime,
+    HostedIntentChoiceRuntime,
     NarrativeDirectorAutomationRuntime,
     PublicTimelineProjectionRuntime,
 )
@@ -100,17 +103,42 @@ def advance_automatic_intents(
         intent = runtime.next_automatic_intent(instance)
         if intent is None:
             return batches, results
-        resolved = runtime.resolve_intent(instance, intent, rng)
-        if not resolved.get("ok"):
-            raise ValueError(
-                str(resolved.get("error") or "automatic intent was rejected")
-            )
-        batch = resolved.get("event_batch")
-        if not isinstance(batch, dict):
-            raise ValueError("automatic intent returned no event batch")
-        applied = runtime.apply_event_batch(instance, batch)
-        if not applied.get("applied"):
-            raise ValueError("automatic intent did not advance state")
+        batch, applied = _apply_automatic_intent(runtime, instance, intent, rng)
+        batches.append(deepcopy(batch))
+        results.append(deepcopy(applied))
+        if on_applied is not None:
+            on_applied(batch, applied)
+    raise ValueError("automatic turn exceeded the safety limit")
+
+
+def _apply_automatic_intent(runtime: Any, instance: Any, intent: dict, rng: Any) -> tuple[dict, dict]:
+    resolved = runtime.resolve_intent(instance, intent, rng)
+    if not resolved.get("ok"):
+        raise ValueError(str(resolved.get("error") or "automatic intent was rejected"))
+    batch = resolved.get("event_batch")
+    if not isinstance(batch, dict):
+        raise ValueError("automatic intent returned no event batch")
+    applied = runtime.apply_event_batch(instance, batch)
+    if not applied.get("applied"):
+        raise ValueError("automatic intent did not advance state")
+    return batch, applied
+
+
+async def advance_automatic_intents_with_choice(
+    runtime: AutomaticIntentRuntime, instance: Any, rng: Any, *,
+    choose: Callable[[Any, dict], Awaitable[dict]], limit: int = 256,
+    on_applied: Callable[[dict, dict], None] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """The same authority ladder against an isolated stage, with an injected chooser."""
+    if on_applied is not None:
+        progression.require_writable(instance)
+    batches, results = [], []
+    for _ in range(limit):
+        fallback = runtime.next_automatic_intent(instance)
+        if fallback is None:
+            return batches, results
+        intent = await choose(instance, fallback)
+        batch, applied = _apply_automatic_intent(runtime, instance, intent, rng)
         batches.append(deepcopy(batch))
         results.append(deepcopy(applied))
         if on_applied is not None:
@@ -129,7 +157,7 @@ def is_public_story_milestone(runtime: Any, batch: dict[str, Any]) -> bool:
 
 def apply_director_automation(
     runtime: Any, instance: Any, proposal: dict[str, Any], rng: Any,
-    *, limit: int = 256,
+    *, limit: int = 256, defer_hosted_players: bool = False,
 ) -> list[dict[str, Any]]:
     """Apply one Director intent and bounded follow-up automatic intents atomically."""
 
@@ -141,20 +169,21 @@ def apply_director_automation(
     initial_intents = initial if isinstance(initial, list) else [initial]
     if not initial_intents:
         return []
-    from src.engine.modules import legacy_combat, narrative_notes, ruleset_runtime
+    from src.engine import module_hooks
+    from src.engine.modules import ruleset_runtime
 
     # The snapshot below includes the scene; reject an unsupported notes slot
     # before any batch runs so the rollback never has to touch it.
-    narrative_notes.require_writable(instance)
+    module_hooks.preflight(instance, module_hooks.NARRATIVE_VIEW)
     before = {
         "ruleset_state": deepcopy(ruleset_runtime.state(instance)),
         "event_ledger": deepcopy(ruleset_runtime.event_ledger(instance)),
         "players": deepcopy(instance.players),
-        "combat_state": legacy_combat.combat_state(instance),
-        "combat_active": legacy_combat.combat_active(instance),
-        "initiative_order": deepcopy(legacy_combat.initiative_order(instance)),
-        "initiative_current": legacy_combat.initiative_current(instance),
-        "scene": narrative_notes.scene(instance),
+        "combat_state": module_hooks.combat_view(instance)["combat_state"],
+        "combat_active": module_hooks.combat_view(instance)["combat_active"],
+        "initiative_order": deepcopy(module_hooks.combat_view(instance)["initiative_order"]),
+        "initiative_current": module_hooks.combat_view(instance)["initiative_current"],
+        "scene": module_hooks.narrative_view(instance)["scene"],
     }
     batches: list[dict[str, Any]] = []
     try:
@@ -181,6 +210,10 @@ def apply_director_automation(
                     if isinstance(runtime, AutomaticIntentRuntime)
                     else None
                 )
+                if defer_hosted_players and pending and isinstance(runtime, HostedIntentChoiceRuntime):
+                    actor = str(pending.get("actor_id") or "")
+                    if actor.startswith("player:") and runtime.hosted_intent_choices(instance, actor.removeprefix("player:")):
+                        return batches
         raise ValueError("Director automation exceeded the safety limit")
     except Exception:
         instance.restore_ruleset_transaction(before)

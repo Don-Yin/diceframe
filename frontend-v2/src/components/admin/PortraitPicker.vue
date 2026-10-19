@@ -171,6 +171,7 @@ async function generatePortrait() {
         :key="choice.id"
         type="button"
         class="portrait-option"
+        :aria-pressed="modelValue?.kind === 'builtin' ? modelValue.id === choice.id : resolvedId === choice.id"
         :class="{ selected: modelValue?.kind === 'builtin' ? modelValue.id === choice.id : resolvedId === choice.id }"
         :title="t('builtinAvatarOption', { index: choice.index + 1 })"
         @click="choose(choice.id)"
@@ -201,6 +202,7 @@ async function generatePortrait() {
             :key="p.id"
             type="button"
             class="portrait-option"
+            :aria-pressed="modelValue?.kind === 'builtin' ? modelValue.id === p.id : resolvedId === p.id"
             :class="{ selected: modelValue?.kind === 'builtin' ? modelValue.id === p.id : resolvedId === p.id }"
             :title="group.label + ' · ' + t('builtinAvatarOption', { index: p.index + 1 })"
             @click="chooseAll(group.ruleId, p.index)"
@@ -219,6 +221,7 @@ async function generatePortrait() {
           <button
             type="button"
             class="portrait-option"
+            :aria-pressed="modelValue?.kind === 'upload' && modelValue.asset_id === a.asset_id"
             :class="{ selected: modelValue?.kind === 'upload' && modelValue.asset_id === a.asset_id }"
             :title="t('clickToChangeAvatar')"
             @click="chooseUser(a.asset_id)"
@@ -237,3 +240,8 @@ async function generatePortrait() {
     </Modal>
   </section>
 </template>
+
+<style scoped>
+.portrait-option { display: inline-flex; padding: 0; overflow: hidden; }
+.portrait-option :deep(.portrait-image) { border: 0; border-radius: inherit; box-shadow: none; }
+</style>

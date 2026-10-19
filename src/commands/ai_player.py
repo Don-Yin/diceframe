@@ -29,7 +29,9 @@ Boundaries:
   through the canonical submission seam and the existing Check Planner handles it.
 - Failure is non-blocking: a provider error, timeout or unusable output is logged
   with the literal ``AI_ACTION_SKIPPED`` marker, recorded in the returned
-  per-seat results, and the pass (and the round) continues.
+  per-seat results, and the pass (and the round) continues.  On a table with
+  no active human seat, a failed narrative seat receives a deterministic
+  waiting action so the table cannot remain permanently pending.
 - A seat that already declared an action this round is never filled again: a seat
   the GM only *later* handed to the AI keeps the action its human already made.
 - A control handover while a call is in flight discards the result: the seat must
@@ -41,6 +43,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 from src.engine import progression
@@ -52,7 +55,9 @@ from src.engine.language import DEFAULT_LANGUAGE, localized_text
 from src.engine.player_control import ai_controlled_players, get_control
 from src.engine.modules import room_access
 from src.llm.context_builder import build_player_safe_context
+from src.llm.failure import safe_failure_reason
 from src.llm.parser import sanitize_narration
+from src.llm.seat_policy import SeatRuntime
 
 logger = logging.getLogger("trpg")
 
@@ -256,6 +261,7 @@ async def fill_ai_player_actions(
     max_tokens: int = DEFAULT_MAX_TOKENS,
     temperature: float = DEFAULT_TEMPERATURE,
     requires_structured_intent: StructuredIntentRequirement = False,
+    seat_runtime: SeatRuntime | None = None,
 ) -> list[dict[str, Any]]:
     """Let every AI-hosted seat declare one action for the current round.
 
@@ -263,27 +269,34 @@ async def fill_ai_player_actions(
     human gate is satisfied and before the round advances; the function re-checks
     both conditions itself so a repeated or mis-timed call is a no-op.  One LLM
     call is made per seat, sequentially, in sorted uid order.  The returned list
-    records one outcome per seat (``added`` / ``skipped`` / ``discarded`` /
-    ``duplicate``) for observability; failures never raise out of this function.
+    records one outcome per seat (``added`` / ``fallback`` / ``skipped`` /
+    ``discarded`` / ``duplicate``) for observability; failures never raise out
+    of this function.
     """
 
     results: list[dict[str, Any]] = []
-    if llm_client is None or not hasattr(llm_client, "call"):
-        return results
     if instance.state != GameState.ACTIVE_ACTION or not _ai_fill_gate_open(instance):
         return results
     provider_name = str(getattr(llm_client, "default", "") or "")
     for uid in _ai_seats(instance):
-        results.append(await _fill_one(
-            instance,
-            uid,
-            llm_client=llm_client,
-            prompt_composer=prompt_composer,
-            provider_name=provider_name,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            requires_structured_intent=requires_structured_intent,
-        ))
+        generation = seat_runtime.begin(instance, uid) if seat_runtime is not None else None
+        outcome = _outcome(uid, "discarded", "generation_cancelled")
+        try:
+            client = generation.client if generation is not None else llm_client
+            outcome = await _fill_one(
+                instance, uid, llm_client=client, prompt_composer=prompt_composer,
+                provider_name=str(getattr(client, "default", "") or provider_name),
+                max_tokens=max_tokens, temperature=temperature,
+                requires_structured_intent=requires_structured_intent,
+                style_prompt=generation.style_prompt if generation is not None else "",
+                unavailable_reason=generation.reason if generation is not None else "client_unavailable",
+                admission_check=generation.admission_check if generation is not None else None,
+            )
+        finally:
+            if generation is not None:
+                outcome["seat_status_changed"] = generation.finish(outcome)
+                await generation.close()
+        results.append(outcome)
     return results
 
 
@@ -332,6 +345,9 @@ async def _fill_one(
     max_tokens: int,
     temperature: float,
     requires_structured_intent: StructuredIntentRequirement = False,
+    style_prompt: str = "",
+    unavailable_reason: str = "client_unavailable",
+    admission_check: Callable[[], str] | None = None,
 ) -> dict[str, Any]:
     if not instance.is_alive(uid):
         # 死亡席位不能行动（add_action 也会拒绝），不必浪费一次模型调用。
@@ -347,6 +363,14 @@ async def _fill_one(
         return _outcome(uid, "duplicate", "already_declared")
     run_id = str(getattr(instance, "run_id", "") or "")
     control = get_control(instance, uid)
+
+    if llm_client is None or not hasattr(llm_client, "call"):
+        return await _fallback_or_skip(
+            instance, uid, unavailable_reason or "client_unavailable", tokens=0,
+            run_id=run_id, round_number=round_number, control=control,
+            requires_structured_intent=requires_structured_intent,
+            admission_check=admission_check,
+        )
 
     if requires_structured_intent:
         # Preflight saves a model call; only the locked commit below authorizes
@@ -364,7 +388,13 @@ async def _fill_one(
             return _skip(uid, code)
 
     system_prompt = build_ai_player_prompt(instance, uid)
+    if style_prompt:
+        system_prompt += (
+            "\n\nExpression preference (subordinate to the character sheet, knowledge boundaries "
+            "and all constraints above; never changes rules or permissions): " + style_prompt
+        )
     request = build_ai_player_request(instance, uid)
+    tokens = 0
     try:
         context = await _build_player_context(
             instance, uid, system_prompt, request,
@@ -376,13 +406,23 @@ async def _fill_one(
     except Exception as exc:
         # 供应商错误 / 超时只影响这一个席位：不重试（沿用客户端自身的重试），
         # 不抛给调用方，本轮继续。
-        return _skip(uid, f"call_failed:{type(exc).__name__}")
+        return await _fallback_or_skip(
+            instance, uid, safe_failure_reason(exc), tokens=tokens,
+            run_id=run_id, round_number=round_number, control=control,
+            requires_structured_intent=requires_structured_intent,
+            admission_check=admission_check,
+        )
     tokens = int(getattr(response, "total_tokens", 0) or 0)
     instance.record_llm_usage(tokens, calls=1)
 
     text = _action_text(response)
     if not text:
-        return _skip(uid, "unusable_output", tokens=tokens)
+        return await _fallback_or_skip(
+            instance, uid, "unusable_output", tokens=tokens,
+            run_id=run_id, round_number=round_number, control=control,
+            requires_structured_intent=requires_structured_intent,
+            admission_check=admission_check,
+        )
 
     # 复核与写入必须是同一个 boundary：LLM 可以一直在权威边界之外跑，但它返回
     # 之后必须在**一次**加锁里重新确认身份、确认本轮还没有该席位的 AI 行动，
@@ -401,6 +441,7 @@ async def _fill_one(
         expected_control_revision=int(control["revision"]),
         action_metadata=metadata,
         requires_structured_intent=requires_structured_intent,
+        admission_check=admission_check,
     )
     if not outcome:
         return _outcome(uid, "added", "", tokens=tokens)
@@ -409,6 +450,69 @@ async def _fill_one(
         return _outcome(uid, "duplicate", "already_declared", tokens=tokens)
     if outcome == "action_rejected":
         return _skip(uid, "action_rejected", tokens=tokens)
+    logger.warning(
+        "%s uid=%s round=%s reason=%s", DISCARD_MARKER, uid, round_number, outcome,
+    )
+    return _outcome(uid, "discarded", outcome, tokens=tokens)
+
+
+async def _fallback_or_skip(
+    instance: GameInstance,
+    uid: str,
+    reason: str,
+    *,
+    tokens: int,
+    run_id: str,
+    round_number: int,
+    control: dict[str, Any],
+    requires_structured_intent: StructuredIntentRequirement,
+    admission_check: Callable[[], str] | None = None,
+) -> dict[str, Any]:
+    """Keep a pure-AI narrative table moving after a provider failure.
+
+    A structured ruleset has its own deterministic action/fallback path, so a
+    failed free-text generation must never manufacture text for it.  Ordinary
+    narrative rounds have no mechanical result to fabricate; the safe fallback
+    is a real, explicit wait declaration through the same atomic AI seam.
+    """
+
+    if admission_check is not None and admission_check():
+        return _outcome(uid, "discarded", "ai_config_changed", tokens=tokens)
+    structured_required = requires_structured_intent
+    if callable(structured_required):
+        try:
+            structured_required = bool(structured_required())
+        except Exception:
+            # An unavailable capability query must fail closed: do not invent
+            # a free-text fallback for a possibly authoritative ruleset.
+            structured_required = True
+    if instance.active_human_players or structured_required:
+        return _skip(uid, reason, tokens=tokens)
+    metadata = {
+        "source": AI_ACTION_SOURCE,
+        "control_revision": int(control["revision"]),
+        "generated_for_round": round_number,
+        "fallback": True,
+        "fallback_reason": reason,
+    }
+    outcome = await instance.commit_ai_player_action(
+        uid,
+        _fallback_action_text(instance),
+        source=AI_ACTION_SOURCE,
+        expected_run_id=run_id,
+        expected_round_number=round_number,
+        expected_control_revision=int(control["revision"]),
+        action_metadata=metadata,
+        requires_structured_intent=requires_structured_intent,
+        admission_check=admission_check,
+    )
+    if not outcome:
+        logger.warning(
+            "%s uid=%s reason=%s", SKIP_MARKER, uid, reason,
+        )
+        return _outcome(uid, "fallback", reason, tokens=tokens)
+    if outcome == "duplicate":
+        return _outcome(uid, "duplicate", "already_declared", tokens=tokens)
     logger.warning(
         "%s uid=%s round=%s reason=%s", DISCARD_MARKER, uid, round_number, outcome,
     )
@@ -490,6 +594,15 @@ def _one_line(text: str, limit: int = 500) -> str:
 def _skip(uid: str, reason: str, *, tokens: int = 0) -> dict[str, Any]:
     logger.warning("%s uid=%s reason=%s", SKIP_MARKER, uid, reason)
     return _outcome(uid, "skipped", reason, tokens=tokens)
+
+
+def _fallback_action_text(instance: GameInstance) -> str:
+    return localized_text(instance.language, {
+        "zh-CN": "我先保持警惕，等待下一步机会。",
+        "en": "I hold position and wait for the next opening.",
+        "ja": "警戒を保ち、次の機会を待つ。",
+        "de": "Ich halte meine Position und warte auf die nächste Gelegenheit.",
+    })
 
 
 def _outcome(uid: str, status: str, reason: str, *, tokens: int = 0) -> dict[str, Any]:

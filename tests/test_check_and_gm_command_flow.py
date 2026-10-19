@@ -186,6 +186,8 @@ def test_d100_resolver_ignores_model_target_and_uses_character_skill_value():
 
 
 def test_d20_advantage_reuses_both_confirmed_rolls():
+    from src.engine.modules.check_modes import change
+
     instance = GameInstance(("web", "room", "bot"))
     instance.state = GameState.ACTIVE_ACTION
     instance.round_number = 1
@@ -198,6 +200,7 @@ def test_d20_advantage_reuses_both_confirmed_rolls():
         },
     }
     rule = RuleSystem.load(Path("templates/rules/dnd5e.json"))
+    change(instance, "p1", "grant", "round:1", mode="advantage", reason="GM adjudication")
     request = build_check_request(
         instance,
         {

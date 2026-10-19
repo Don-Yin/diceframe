@@ -53,7 +53,9 @@ class SeatTokenService:
         if not inst:
             return {"ok": False, "error": "游戏不存在", "status": 404}
         uid = str(uid or "")
-        async with inst.authoritative_write() as entered:
+        # Credential delivery stays possible on a frozen or ended run: players
+        # still need to reach their settled characters and the archive.
+        async with inst.authoritative_write(administrative=True) as entered:
             if not entered:
                 return {"ok": False, "error_code": "REWRITE_IN_PROGRESS", "error": "GM 正在重写历史回合，请等待完成后重试", "status": 409}
             if self.d.get_instance(key) is not inst:
@@ -86,7 +88,7 @@ class SeatTokenService:
         if not inst:
             return {"ok": False, "error": "游戏不存在", "status": 404}
         session_uid = str(session_uid or "")
-        async with inst.authoritative_write() as entered:
+        async with inst.authoritative_write(administrative=True) as entered:
             if not entered:
                 return {"ok": False, "error_code": "REWRITE_IN_PROGRESS", "error": "GM 正在重写历史回合，请等待完成后重试", "status": 409}
             if self.d.get_instance(key) is not inst:

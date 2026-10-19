@@ -27,12 +27,47 @@ test('all required viewport widths remain contained', async ({ page }) => {
   }
 })
 
+test('core section pages share the narrow mobile frame', async ({ page }) => {
+  const token = accessToken()
+  await page.addInitScript(value => {
+    localStorage.setItem('trpg_access_token', value)
+    localStorage.setItem('diceframe_locale', 'zh-CN')
+  }, token)
+  const width = 390
+  await page.setViewportSize({ width, height: 844 })
+
+  for (const [route, selector] of [
+    ['overview', '.overview-page'],
+    ['characters', '.characters-page'],
+    ['modules', '.modules-page'],
+    ['settings', '.settings-page'],
+  ] as const) {
+    await page.goto(`/#/${route}`)
+    const frame = page.locator(selector).first()
+    await expect(frame).toBeVisible()
+    const geometry = await page.evaluate((target) => {
+      const element = document.querySelector<HTMLElement>(target)
+      if (!element) return null
+      const rect = element.getBoundingClientRect()
+      return {
+        left: rect.left,
+        right: rect.right,
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      }
+    }, selector)
+    expect(geometry).not.toBeNull()
+    expect(geometry!.left).toBeGreaterThanOrEqual(-1)
+    expect(geometry!.right).toBeLessThanOrEqual(width + 1)
+    expect(geometry!.overflow, `${route} overflow at ${width}px`).toBe(0)
+  }
+})
+
 test('phone module recovery stays contained and exposes local import', async ({ page }) => {
   const token = accessToken()
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/#/modules?adventure=core%3Acastle&version=1.0.0')
-  await expect(page.getByRole('heading', { name: '模组', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '内容来源管理', exact: true })).toBeVisible()
   await expect(page.getByText('恢复本局冒险')).toBeVisible()
   await expect(page.locator('.module-import input[type="file"]')).toBeVisible()
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
@@ -55,7 +90,7 @@ test('module detail renders metadata and server-guarded actions', async ({ page 
   const token = accessToken()
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
   await page.goto('/#/modules/e2e-module')
-
+  await page.getByTestId('module-metadata').locator('summary').click()
   await expect(page.getByTestId('module-metadata').getByText('e2e-module')).toBeVisible()
   await expect(page.getByTestId('module-metadata').getByText('catalog')).toBeVisible()
   await expect(page.getByTestId('module-adventures').getByText('plugin:module_quest')).toBeVisible()
@@ -189,6 +224,55 @@ test('long admin pages keep the workspace background through all content', async
   expect(geometry.workspaceBottom).toBeGreaterThanOrEqual(Math.max(geometry.pageBottom, geometry.viewportHeight) - 1)
 })
 
+test('lorebook context controls and editor stay usable from phone through desktop', async ({ page }) => {
+  const token = accessToken()
+  await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
+  await page.addInitScript(() => localStorage.setItem('currentGame', 'web|e2e-lore-golden|web_bot'))
+
+  for (const width of [390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/#/lorebook')
+    await page.evaluate(() => localStorage.removeItem('lore_inspector_open'))
+    await page.reload()
+    await expect(page.locator('.lorebook-page')).toBeVisible()
+
+    const context = page.locator('.lore-context-bar')
+    await expect(context.getByRole('combobox', { name: '当前浏览世界', exact: true })).toBeVisible()
+    // A fresh database has one primary book, shown directly. A prior Golden
+    // import can leave several books; both forms must stay usable at each width.
+    await expect(context.locator('.lore-context-row--book .lore-context-select, .lore-context-row--book .lore-book-static')).toBeVisible()
+
+    const menu = context.locator('details.lore-menu').nth(1)
+    await menu.locator('summary').click()
+    const geometry = await page.evaluate(() => {
+      const list = document.querySelectorAll<HTMLElement>('.lore-context-bar .lore-menu-list')[1]
+      const bounds = list.getBoundingClientRect()
+      return {
+        left: bounds.left,
+        right: bounds.right,
+        viewport: document.documentElement.clientWidth,
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      }
+    })
+    expect(geometry.left, `menu left at ${width}px`).toBeGreaterThanOrEqual(0)
+    expect(geometry.right, `menu right at ${width}px`).toBeLessThanOrEqual(geometry.viewport)
+    expect(geometry.overflow, `overflow at ${width}px`).toBe(0)
+    await menu.locator('summary').click()
+
+    await expect(page.locator('.lore-perspective-inspector')).toBeHidden()
+    await page.getByRole('button', { name: '视角', exact: true }).click()
+    await expect(page.locator('.lore-perspective-inspector')).toBeVisible()
+    if (width <= 1100) await page.locator('.lore-inspector-close').click()
+    else await page.getByRole('button', { name: '视角', exact: true }).click()
+    await expect(page.locator('.lore-perspective-inspector')).toBeHidden()
+
+    await page.getByRole('button', { name: '新增条目', exact: true }).click()
+    const editor = page.locator('.dialog', { has: page.getByRole('heading', { name: '新增资料条目' }) })
+    await expect(editor).toBeVisible()
+    await editor.getByRole('button', { name: '取消', exact: true }).click()
+  }
+})
+
 test('phone play side panels open as drawers without entering document flow', async ({ page }) => {
   const token = accessToken()
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
@@ -201,7 +285,7 @@ test('phone play side panels open as drawers without entering document flow', as
   await expect(sidebar).toBeHidden()
   await expect(controls).toBeHidden()
 
-  await page.getByRole('button', { name: '状态' }).click()
+  await page.getByTestId('play-quick-status').click()
   await expect(sidebar).toBeVisible()
   const sidebarBounds = await sidebar.evaluate(element => {
     const bounds = element.getBoundingClientRect()
@@ -209,10 +293,13 @@ test('phone play side panels open as drawers without entering document flow', as
   })
   expect(Math.abs(sidebarBounds.top)).toBeLessThanOrEqual(1)
   expect(Math.abs(sidebarBounds.viewportHeight - sidebarBounds.bottom)).toBeLessThanOrEqual(1)
-  await sidebar.getByRole('button', { name: '收起侧栏' }).click()
+  await sidebar.getByRole('button', { name: '关闭', exact: true }).click()
   await expect(sidebar).toBeHidden()
 
-  await page.getByRole('button', { name: '控台' }).click()
+  const gmToggle = page.getByTestId('play-gm-toggle')
+  await expect(gmToggle).toHaveAttribute('aria-expanded', 'false')
+  await gmToggle.click()
+  await expect(gmToggle).toHaveAttribute('aria-expanded', 'true')
   await expect(controls).toBeVisible()
   const controlBounds = await controls.evaluate(element => {
     const bounds = element.getBoundingClientRect()
@@ -220,9 +307,11 @@ test('phone play side panels open as drawers without entering document flow', as
   })
   expect(Math.abs(controlBounds.top)).toBeLessThanOrEqual(1)
   expect(Math.abs(controlBounds.viewportHeight - controlBounds.bottom)).toBeLessThanOrEqual(1)
+  await expect(page.getByTestId('gm-workspace')).toBeVisible()
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow).toBe(0)
   await controls.locator('.rail-toggle').click()
+  await expect(gmToggle).toHaveAttribute('aria-expanded', 'false')
   await expect(controls).toBeHidden()
 })
 
@@ -233,7 +322,7 @@ test('equipment details modal stays above the open phone character drawer', asyn
   await page.goto('/#/play?game=web%7Ce2e-room%7Cweb_bot')
   await expect(page.getByRole('heading', { name: 'E2E Adventure' })).toBeVisible({ timeout: PLAY_READY_TIMEOUT })
 
-  await page.getByRole('button', { name: '状态' }).click()
+  await page.getByTestId('play-quick-status').click()
   const sidebar = page.locator('.game-sidebar')
   await expect(sidebar).toBeVisible()
   await sidebar.locator('summary').filter({ hasText: '装备与背包' }).click()
@@ -242,6 +331,16 @@ test('equipment details modal stays above the open phone character drawer', asyn
   const modal = page.locator('body > .modal')
   await expect(modal).toBeVisible()
   await expect(modal.getByRole('heading', { name: '装备与背包' })).toBeVisible()
+  const detailRows = modal.locator('.item-detail-row')
+  await expect(detailRows.first()).toBeVisible()
+  const detailRowStyle = await detailRows.first().evaluate(element => ({
+    display: getComputedStyle(element).display,
+    radius: parseFloat(getComputedStyle(element).borderRadius),
+  }))
+  // Item details are readable information rows, rather than the old capsule
+  // cloud that made long effects look like unrelated tags.
+  expect(detailRowStyle.display).toBe('grid')
+  expect(detailRowStyle.radius).toBeLessThanOrEqual(8)
   const layers = await page.evaluate(() => ({
     modal: Number.parseInt(getComputedStyle(document.querySelector<HTMLElement>('body > .modal')!).zIndex, 10),
     drawer: Number.parseInt(getComputedStyle(document.querySelector<HTMLElement>('.game-sidebar')!).zIndex, 10),
@@ -318,7 +417,8 @@ test('phone play opens the scene map as a full-screen workspace', async ({ page 
   await page.goto('/#/play?game=web%7Ce2e-room%7Cweb_bot')
   await expect(page.locator('.composer')).toBeVisible({ timeout: PLAY_READY_TIMEOUT })
 
-  await page.getByRole('button', { name: '地图', exact: true }).click()
+  await page.getByTestId('play-tools-toggle').click()
+  await page.getByTestId('play-tools-panel').getByRole('button', { name: '场景地图', exact: true }).click()
   const workspace = page.locator('.map-workspace-shell')
   await expect(workspace).toBeVisible()
   await expect(workspace.getByPlaceholder('搜索地点或关键词')).toBeVisible()
@@ -436,6 +536,7 @@ test('character management remains contained on narrow phones', async ({ page })
     await page.setViewportSize({ width, height: 844 })
     await page.goto('/#/characters')
     await expect(page.locator('.characters-page')).toBeVisible()
+    await page.locator('#character-current-tab').click()
     await expect(page.locator('.current-character-card').first()).toBeVisible()
     const geometry = await page.evaluate(() => {
       const pageView = document.querySelector<HTMLElement>('.characters-page')!.getBoundingClientRect()
@@ -467,6 +568,7 @@ test('character management stays contained with German locale', async ({ page })
     await page.setViewportSize({ width, height: 844 })
     await page.goto('/#/characters')
     await expect(page.locator('.characters-page')).toBeVisible()
+    await page.locator('#character-current-tab').click()
     await expect(page.locator('.current-character-card').first()).toBeVisible()
     const geometry = await page.evaluate(() => {
       const buttons = Array.from(document.querySelectorAll<HTMLElement>('.current-character-actions button'))

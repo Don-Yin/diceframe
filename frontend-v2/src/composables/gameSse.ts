@@ -1,10 +1,11 @@
 export interface GameSsePayload {
   type?: string
   text?: string
+  story?: unknown
   state_version?: number
 }
 
-export type GameSseEffect = 'baseline' | 'narration-delta' | 'narration-reset' | 'refresh'
+export type GameSseEffect = 'baseline' | 'narration-delta' | 'narration-reset' | 'story-update' | 'refresh'
 
 /**
  * SSE baseline 只确认“HTTP 首次快照之后从哪里继续”，不得再触发一次完整刷新。
@@ -15,6 +16,7 @@ export function gameSseEffect(payload: GameSsePayload | null): GameSseEffect {
   if (type === 'baseline') return 'baseline'
   if (type === 'narration_delta') return 'narration-delta'
   if (type === 'narration_reset') return 'narration-reset'
+  if (type === 'story_update') return 'story-update'
   return 'refresh'
 }
 

@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import json
 import logging
 import os
 from copy import deepcopy
 from typing import Any, Literal
 
+from src.adventures.scene_context import format_scene_context
+from src.engine import module_hooks
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text, normalize_language
-from src.engine.modules import (
-    checks, economy_state, legacy_combat, narrative_notes, private_channels, progression_state,
-    table_settings,
-)
+from src.engine.modules import checks, economy_state, progression_state
 from src.engine.visibility_rules import manual_roll_visible_to
 from src.knowledge.visibility import entry_visible_to_viewer
 from src.llm.parser import sanitize_narration
@@ -241,6 +242,7 @@ def _shrink_to_window(parts: list[str], sec_idx: dict[str, int], max_total: int)
         ("manual_rolls", False),
         ("authoritative_events", False),
         ("lorebook", False),
+        ("scene_objectives", False),
         ("state", False),
     ):
         idx = sec_idx.get(key)
@@ -592,6 +594,8 @@ async def build_context(
     world_events_text: str = "",
     state_view: dict | None = None,
     authoritative_events_text: str = "",
+    context_recent_rounds: int = 0,
+    scene_objective_view: dict[str, Any] | None = None,
 ) -> str:
     """将游戏状态拼接为完整的 LLM 上下文。
 
@@ -611,6 +615,10 @@ async def build_context(
     max_total = _detect_max_chars(provider_name)
     language = getattr(instance, "language", "zh-CN")
     history_entries = instance.log if history_override is None else history_override
+    if context_recent_rounds:
+        # A view of the recent log, never a mutation of saved history. Existing
+        # budget compression and visibility rules still apply to this subset.
+        history_entries = history_entries[-context_recent_rounds:]
 
     # 按比例分配预算
     budget_system = int(max_total * _BUDGET_SYSTEM_PROMPT)
@@ -625,6 +633,10 @@ async def build_context(
     parts: list[str] = []
     sec_idx: dict[str, int] = {}  # 段名 → parts 索引，供超窗收尾收缩使用
     reserved_system_chars = min(len(gm_prompt_filled), budget_system)
+    scene_text = format_scene_context(scene_objective_view, language, max_chars=min(4096, max_total // 10))
+    if scene_text:
+        parts.append(scene_text)
+        sec_idx["scene_objectives"] = len(parts) - 1
 
     # 1. 游戏状态（LLM 精简视图，含属性修正）
     state = state_view if state_view is not None else instance.to_llm_view()
@@ -679,11 +691,11 @@ async def build_context(
     )
 
     # 3. 摘要 + 关键事实
-    summary = sanitize_narration(narrative_notes.summary(instance).get("narrative", ""))
+    summary = sanitize_narration(module_hooks.narrative_view(instance)["summary"].get("narrative", ""))
     summary_section_parts: list[str] = []
     if summary:
         summary_section_parts.append(_truncate(summary, budget_summary))
-    key_facts = narrative_notes.key_facts(instance)
+    key_facts = module_hooks.narrative_view(instance)["key_facts"]
     if key_facts:
         facts_lines = [
             f"- {f.get('content', '')}"
@@ -698,7 +710,7 @@ async def build_context(
         sec_idx["summary"] = len(parts) - 1
 
     # D1: 已确认事项（防 GM 重复讨论；有预算上限，超窗收尾时优先让出）
-    confirmed_items = narrative_notes.confirmed_items(instance)
+    confirmed_items = module_hooks.narrative_view(instance)["confirmed_items"]
     if confirmed_items:
         confirmed_text = localized_text(language, {
             "en": "; ".join(confirmed_items[-20:]),
@@ -978,13 +990,13 @@ def _player_safe_state(
     return {
         "world_name": instance.world_name,
         "round_number": progression_state.round_value(instance),
-        "scene": narrative_notes.scene(instance),
-        "game_time": narrative_notes.game_time(instance),
-        "difficulty": table_settings.difficulty(instance),
+        "scene": module_hooks.narrative_view(instance)["scene"],
+        "game_time": module_hooks.narrative_view(instance)["game_time"],
+        "difficulty": game_config.difficulty(instance),
         "language": instance.language,
         "questioning_character": actor_view,
         "public_party_roster": party,
-        "combat_state": legacy_combat.combat_state(instance),
+        "combat_state": module_hooks.combat_view(instance)["combat_state"],
     }
 
 
@@ -997,6 +1009,7 @@ async def build_player_safe_context(
     provider_name: str = "",
     lorebook_budget: int = 0,
     visibility: Literal["private", "party"] = "private",
+    scene_objective_view: dict[str, Any] | None = None,
 ) -> str:
     """Build a structurally player-safe context for read-only GM questions.
 
@@ -1027,6 +1040,10 @@ async def build_player_safe_context(
     parts: list[str] = []
     sec_idx: dict[str, int] = {}
     reserved_system_chars = min(len(gm_prompt_filled), budget_system)
+    scene_text = format_scene_context(scene_objective_view, language, max_chars=min(4096, max_total // 10))
+    if scene_text:
+        parts.append(scene_text)
+        sec_idx["scene_objectives"] = len(parts) - 1
 
     state_json = json.dumps(
         _player_safe_state(instance, actor_uid, visibility), ensure_ascii=False,
@@ -1049,12 +1066,12 @@ async def build_player_safe_context(
         sec_idx["lorebook"] = len(parts) - 1
 
     summary_parts: list[str] = []
-    narrative = sanitize_narration(str((narrative_notes.summary(instance) or {}).get("narrative") or ""))
+    narrative = sanitize_narration(str((module_hooks.narrative_view(instance)["summary"] or {}).get("narrative") or ""))
     if narrative:
         summary_parts.append(narrative)
     facts = [
         f"- {fact.get('content', '')}"
-        for fact in (narrative_notes.key_facts(instance) or [])
+        for fact in (module_hooks.narrative_view(instance)["key_facts"] or [])
         if isinstance(fact, dict) and fact.get("content")
     ]
     if facts:
@@ -1068,7 +1085,7 @@ async def build_player_safe_context(
         }) + "\n" + _truncate("\n".join(summary_parts), budget_summary))
         sec_idx["summary"] = len(parts) - 1
 
-    confirmed_items = narrative_notes.confirmed_items(instance)
+    confirmed_items = module_hooks.narrative_view(instance)["confirmed_items"]
     if confirmed_items:
         confirmed = "\n".join(f"- {item}" for item in confirmed_items[-20:])
         parts.append(localized_text(language, {
@@ -1100,7 +1117,7 @@ async def build_player_safe_context(
 
     own_private = []
     for item in (
-        (private_channels.private_log(instance) or {}).get(actor_uid, []) if visibility == "private" else []
+        (module_hooks.read_value(instance, module_hooks.PRIVATE_LOG) or {}).get(actor_uid, []) if visibility == "private" else []
     ):
         if not isinstance(item, dict):
             continue

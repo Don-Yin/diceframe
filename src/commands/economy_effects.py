@@ -87,14 +87,24 @@ def defer_narrative_effects(data: dict[str, Any], response: Any, *, defer_state_
         deferred["state_update"] = deferred_state
     data["state_update"] = immediate
     response.state_update = immediate
+    completion_candidate = None
     for key in _DEFERRED_DATA_KEYS:
         value = data.get(key)
         if _meaningful(value):
-            deferred[key] = deepcopy(value)
+            if key == "plot_update" and isinstance(value, dict):
+                deferred_plot = deepcopy(value)
+                completion_candidate = deferred_plot.pop("adventure_completion", None)
+                if _meaningful(deferred_plot):
+                    deferred[key] = deferred_plot
+            else:
+                deferred[key] = deepcopy(value)
         if key == "memory_delta":
             data[key] = {"add": [], "update": [], "forget": []}
         elif key == "plot_update":
-            data[key] = {"quests": [], "relations": [], "decisions": []}
+            data[key] = {
+                "quests": [], "relations": [], "decisions": [],
+                "adventure_completion": completion_candidate,
+            }
         elif key == "info_asymmetry":
             data[key] = {}
         elif key in {"confirmed", "growth_skills", "milestone_grants", "quick_actions"}:

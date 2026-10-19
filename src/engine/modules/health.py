@@ -1,9 +1,15 @@
-"""Persisted health events and status; runtime reporting remains in engine.health."""
+"""Persisted health events and status; runtime reporting remains in engine.health.
+
+engine.health and the in-place reset reach this slot only through
+``module_hooks`` (``health_events`` / ``health_status`` module state and
+``instance.reset``), so without the module degradation events are not kept.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
+from src.engine import module_hooks
 from src.engine.module_state import ModuleStateSpec, get_module_state, register_module_state
 
 MODULE_NAME = "health"
@@ -50,5 +56,31 @@ def persisted_state(instance: Any) -> dict[str, Any]:
     return {**slot, "health_events": health_events(instance)[-100:]}
 
 
+def reset(instance: Any) -> None:
+    health_events(instance).clear()
+    health_status(instance).clear()
+
+
+def record_state(instance: Any, kind: str, value: Any) -> None:
+    """Write in place: callers may hold the live list / dict (engine.health contract)."""
+    if kind == module_hooks.HEALTH_EVENTS:
+        health_events(instance)[:] = value if isinstance(value, list) else []
+    elif kind == module_hooks.HEALTH_STATUS:
+        status = health_status(instance)
+        status.clear()
+        status.update(value if isinstance(value, dict) else {})
+
+
+def read_state(instance: Any, kind: str) -> Any:
+    if kind == module_hooks.HEALTH_EVENTS:
+        return health_events(instance)
+    if kind == module_hooks.HEALTH_STATUS:
+        return health_status(instance)
+    return None
+
+
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)
 register_module_state(SPEC)
+module_hooks.register(module_hooks.INSTANCE_RESET, MODULE_NAME, reset)
+module_hooks.register(module_hooks.STATE_RECORD, MODULE_NAME, record_state)
+module_hooks.register(module_hooks.STATE_READ, MODULE_NAME, read_state)

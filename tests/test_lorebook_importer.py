@@ -111,7 +111,9 @@ def test_import_book_settings_populate_columns_and_resolver(tmp_path):
         assert book["scan_depth"] == 4
         assert book["token_budget"] == 321
         assert book["recursive_scanning"] is True
-        assert book["settings"] == draft.settings
+        assert {key: value for key, value in book["settings"].items() if key != "diceframe_import"} == draft.settings
+        # An imported display name never becomes canonical external identity.
+        assert book["external_id"] == ""
         refs = resolve_active_books(type("Instance", (), {"world_id": "w"})(), store=store)
         configured = next(ref for ref in refs if ref.book_id == "book:configured")
         assert (configured.scan_depth, configured.token_budget, configured.recursive_scanning) == (4, 321, True)

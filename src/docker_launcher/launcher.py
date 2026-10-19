@@ -31,6 +31,7 @@ try:
         safe_version_dir,
         validate_package_tree,
         verify_sha256,
+        version_key as _version_key,
     )
 except ImportError:  # Executed directly from /opt/diceframe-launcher.
     from contracts import (  # type: ignore[no-redef]
@@ -44,22 +45,8 @@ except ImportError:  # Executed directly from /opt/diceframe-launcher.
         safe_version_dir,
         validate_package_tree,
         verify_sha256,
+        version_key as _version_key,
     )
-
-
-def _version_key(
-    value: str,
-) -> tuple[tuple[int, int, int], int, tuple[tuple[int, int | str], ...]]:
-    text = str(value or "").strip().lstrip("vV")
-    core, separator, prerelease = text.partition("-")
-    chunks = core.split(".")
-    if len(chunks) != 3 or not all(chunk.isdigit() for chunk in chunks):
-        raise ValueError(f"unsupported version: {value}")
-    prerelease_key = tuple(
-        (0, int(part)) if part.isdigit() else (1, part)
-        for part in prerelease.split(".") if part
-    )
-    return (tuple(int(chunk) for chunk in chunks), 0 if separator else 1, prerelease_key)
 
 
 def _read_json(path: Path) -> dict[str, Any]:

@@ -1,5 +1,7 @@
 """Future adventure_runtime slots reject transactions before any live mutation."""
 
+from src.engine.modules import game_config
+
 import asyncio
 from copy import deepcopy
 from dataclasses import replace
@@ -11,7 +13,7 @@ import pytest
 from src.engine import round_recovery, round_snapshots, turn_state
 from src.engine.game_instance import GameRegistry, GameState
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import adventure_runtime_state, round_safety, table_settings
+from src.engine.modules import adventure_runtime_state, round_safety
 from tests.test_game_instance_reset_characterization import _make_populated_instance
 from test_golden_e2e_54pr import golden  # noqa: F401  (fixture re-export)
 
@@ -235,7 +237,7 @@ async def test_seed_creation_rejects_unsupported_source_slot_before_registering(
     before = deepcopy(source.to_dict())
     with pytest.raises(ModuleStateError, match=MATCH):
         await golden.api.create_from_seed(
-            table_settings.seed_code(source), players=_dnd_characters(1), gm_uid="seed_gm", language="zh-CN",
+            game_config.seed_code(source), players=_dnd_characters(1), gm_uid="seed_gm", language="zh-CN",
         )
     assert [game["game_key"] for game in golden.api.list_games()["games"]] == games_before
     assert source.to_dict() == before

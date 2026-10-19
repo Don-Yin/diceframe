@@ -88,6 +88,67 @@ async def test_professional_character_is_rederived_bound_and_saved_without_field
 
 
 @pytest.mark.asyncio
+async def test_professional_join_rejects_legacy_card_with_actionable_blueprint_error(
+    web_api,
+):
+    api, _lorebook, registry, _fake_llm, worlds_dir = web_api
+    (api._rules_dir / "dnd2024_srd.json").write_text(
+        json.dumps({
+            "rule_id": "dnd2024_srd",
+            "rule_name": "5E 2024 SRD 专业规则",
+            "dice_system": "d20",
+            "combat_model": "hp_based",
+            "runtime": {"id": "core:dnd2024", "minimum_version": 1},
+            "attributes": [
+                {"key": key, "name": key.upper(), "min": 3, "max": 20}
+                for key in ("str", "dex", "con", "int", "wis", "cha")
+            ],
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    write_world(worlds_dir, "dnd2024_legacy_join_world", default_rule="dnd2024_srd")
+    choices = api.ruleset_builder_choices("dnd2024_srd", {"locale": "zh-CN"}, "zh-CN")
+    preset = choices["choices"]["quick_presets"][0]
+    finalized = api.ruleset_builder_finalize(
+        "dnd2024_srd",
+        {**preset["draft"], "locale": "zh-CN", "name": "规则席位测试"},
+        "zh-CN",
+    )["character"]
+    legacy = {
+        "character_name": "旧版导入卡",
+        "race": "human",
+        "class": "fighter",
+        "attributes": {"str": 10, "dex": 10, "con": 10, "int": 10, "wis": 10, "cha": 10},
+    }
+    rejected_create = await api.create_game(
+        "dnd2024_legacy_join_world",
+        "旧卡创建测试",
+        rule_id="dnd2024_srd",
+        players=[legacy],
+    )
+    assert rejected_create["ok"] is False
+    assert rejected_create["error_code"] == "PROFESSIONAL_CHARACTER_BLUEPRINT_REQUIRED"
+    assert "专业建卡器" in rejected_create["error"]
+
+    created = await api.create_game(
+        "dnd2024_legacy_join_world",
+        "旧卡加入测试",
+        rule_id="dnd2024_srd",
+        players=[finalized],
+    )
+    assert created["ok"] is True
+    instance = registry.get(api._parse_key(created["game_key"]))
+    before = len(instance.players)
+
+    rejected = await api.create_player(created["game_key"], legacy)
+
+    assert rejected["ok"] is False
+    assert rejected["error_code"] == "PROFESSIONAL_CHARACTER_BLUEPRINT_REQUIRED"
+    assert "专业建卡器" in rejected["error"]
+    assert len(instance.players) == before
+
+
+@pytest.mark.asyncio
 async def test_professional_seed_restart_keeps_rule_and_prevalidates_before_mutation(
     web_api,
 ):
@@ -120,7 +181,26 @@ async def test_professional_seed_restart_keeps_rule_and_prevalidates_before_muta
         rule_id="dnd2024_srd",
         players=[finalized],
     )
+    original_instance = registry.get(api._parse_key(original["game_key"]))
+    original_players = deepcopy(original_instance.players)
+    original_rule_id = original_instance.rule_id
+    original_binding = deepcopy(getattr(original_instance, "ruleset_binding", {}))
     before_keys = {inst.game_key for inst in registry.list_all()}
+
+    missing_blueprint = deepcopy(finalized)
+    missing_blueprint.pop("ruleset_character")
+    missing_blueprint.pop("rule_binding", None)
+    rejected_blueprint = await api.create_from_seed(
+        original["seed_code"], players=[missing_blueprint],
+    )
+
+    assert rejected_blueprint["ok"] is False
+    assert rejected_blueprint["error_code"] == "PROFESSIONAL_CHARACTER_BLUEPRINT_REQUIRED"
+    assert "专业建卡器" in rejected_blueprint["error"]
+    assert {inst.game_key for inst in registry.list_all()} == before_keys
+    assert original_instance.players == original_players
+    assert original_instance.rule_id == original_rule_id
+    assert getattr(original_instance, "ruleset_binding", {}) == original_binding
 
     invalid = deepcopy(finalized)
     invalid["ruleset_character"]["rule_binding"]["runtime_version"] = 999
@@ -543,6 +623,69 @@ async def test_character_wizard_update_changes_display_name_and_sheet(web_api):
     cleared = await api.update_character(created["game_key"], uid, {"portrait": None})
     assert cleared["ok"] is True
     assert "portrait" not in inst.players[uid]["character_sheet"]
+
+
+@pytest.mark.asyncio
+async def test_dnd5e_character_equipment_preserves_and_validates_damage_dice(web_api):
+    api, _lorebook, registry, _fake_llm, worlds_dir = web_api
+    write_world(worlds_dir, "dnd5e_damage_world", default_rule="dnd5e")
+    created = await api.create_game(
+        "dnd5e_damage_world", "骰式装备测试", rule_id="dnd5e",
+        players=[{"character_name": "骰式角色", "attributes": {"str": 10}}],
+        gm_uid="web_session_gm",
+    )
+    uid = created["players"][0]["user_id"]
+    denied = await api.update_character(created["game_key"], uid, {"equipment": []})
+    assert denied["error_code"] == "FIELD_REQUIRES_GM"
+    valid = await api.update_character(created["game_key"], uid, {
+        "equipment": [{
+            "name": "长剑", "type": "weapon", "damage": 7, "damage_dice": "2d6+1",
+            "damage_type": "slashing", "item_key": "longsword", "slot": "main_hand",
+        }],
+    }, gm_authority=True)
+    assert valid["ok"] is True, valid
+    sheet = registry.get(api._parse_key(created["game_key"])).get_character_sheet(uid)
+    assert sheet["equipment"][0]["damage_dice"] == "2d6+1"
+    assert sheet["equipment"][0]["damage"] == 7
+    assert sheet["equipment"][0]["item_key"] == "longsword"
+
+    invalid = await api.update_character(created["game_key"], uid, {
+        "equipment": [{"name": "坏剑", "damage": 9, "damage_dice": "1d8+1d6"}],
+    }, gm_authority=True)
+    assert invalid["ok"] is False
+    assert "伤害骰公式无效" in invalid["error"]
+    assert sheet["equipment"][0]["damage_dice"] == "2d6+1"
+    invalid_type = await api.update_character(created["game_key"], uid, {
+        "equipment": [{"name": "布尔剑", "damage": 1, "damage_dice": True}],
+    }, gm_authority=True)
+    assert invalid_type["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_dnd5e_player_creation_preserves_damage_dice_and_rejects_invalid_formula(web_api):
+    api, _lorebook, registry, _fake_llm, worlds_dir = web_api
+    write_world(worlds_dir, "dnd5e_creation_world", default_rule="dnd5e")
+    created = await api.create_game(
+        "dnd5e_creation_world", "建卡骰式测试", rule_id="dnd5e",
+        players=[{"character_name": "主持人", "attributes": {"str": 10}}], gm_uid="web_session_gm",
+    )
+    valid = await api.create_player(created["game_key"], {
+        "name": "新骰式角色", "attributes": {"str": 10},
+        "equipment": [{"name": "弓", "damage": 5, "damage_dice": "1d8-1", "slot": "main_hand"}],
+    })
+    assert valid["ok"] is True
+    inst = registry.get(api._parse_key(created["game_key"]))
+    sheet = inst.get_character_sheet(valid["user_id"])
+    assert sheet["equipment"][0]["damage_dice"] == "1d8-1"
+
+    before_invalid = len(inst.players)
+    invalid = await api.create_player(created["game_key"], {
+        "name": "坏骰式角色", "attributes": {"str": 10},
+        "equipment": [{"name": "坏弓", "damage": 5, "damage_dice": "d1"}],
+    })
+    assert invalid["ok"] is False
+    assert "伤害骰公式无效" in invalid["error"]
+    assert len(inst.players) == before_invalid
 
 
 @pytest.mark.asyncio

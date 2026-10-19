@@ -20,6 +20,13 @@ async def api_test_transcription(request: web.Request) -> web.Response:
     return await _transcribe(request)
 
 
+async def api_assistant_transcription(request: web.Request) -> web.Response:
+    """Transcribe DF Agent voice input with the configured ASR provider (owner only)."""
+    if not request.get("owner_authenticated", False) or not request.get("user_id"):
+        return web.json_response({"ok": False, "error": "Owner authentication required"}, status=401)
+    return await _transcribe(request)
+
+
 def _require_asr_admin(request: web.Request) -> web.Response | None:
     query = getattr(request, "query", {})
     if query.get("user") or query.get("share"):
@@ -58,3 +65,4 @@ async def _transcribe(request: web.Request, game_key: str = "") -> web.Response:
 def register_asr(app: web.Application) -> None:
     app.router.add_post("/api/games/{game_key}/transcription", api_game_transcription)
     app.router.add_post("/api/asr/test", api_test_transcription)
+    app.router.add_post("/api/assistant/transcription", api_assistant_transcription)

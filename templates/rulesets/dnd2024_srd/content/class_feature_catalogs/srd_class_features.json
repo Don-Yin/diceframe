@@ -17,7 +17,9 @@
     "focus_points": "Focus Points",
     "unarmed_strike": "Unarmed Strike",
     "action": "Action",
-    "bonus_action": "Bonus Action"
+    "bonus_action": "Bonus Action",
+    "paladin": "Paladin",
+    "paladins_smite": "Paladin’s Smite"
   },
   "classes": {
     "monk": {
@@ -106,6 +108,20 @@
               "actions": [{"kind": "dash"}, {"kind": "disengage"}]
             }
           ]
+        }
+      ]
+    },
+    "paladin": {
+      "source_ref": "srd-5.2.1:p54:paladins-smite",
+      "features": [
+        {
+          "id": "paladins_smite",
+          "minimum_level": 2,
+          "summary": "Divine Smite is always prepared; one free cast per Long Rest.",
+          "parameters": {
+            "granted_spell_id": "divine_smite"
+          },
+          "resource_id": "paladins_smite"
         }
       ]
     }

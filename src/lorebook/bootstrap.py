@@ -63,7 +63,7 @@ def seed_builtin_worlds(lorebook_store: Any, worlds_dir: Path) -> int:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             world_id = str(data.get("world_id") or path.stem).strip()
-            if not world_id or data.get("deprecated") or not data.get("starter_lorebook"):
+            if not world_id or data.get("deprecated"):
                 continue
             total += ensure_world_from_template(lorebook_store, world_id, data)
         except Exception:

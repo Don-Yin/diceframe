@@ -144,29 +144,43 @@ class PluginContentCatalog:
     def expose_scene_image(self, data: dict[str, Any], plugin_id: str) -> dict[str, Any]:
         """Convert a packaged scene image into a browser-safe plugin reference."""
         result = dict(data)
-        reference = result.get("scene_image")
-        if not isinstance(reference, dict):
-            return result
-        kind = str(reference.get("kind") or "")
-        if kind == "builtin":
-            return result
-        if kind != "asset":
-            result.pop("scene_image", None)
-            return result
-        relative_path = str(reference.get("path") or "").replace("\\", "/").strip("/")
-        declared = any(
-            item.plugin_id == plugin_id
-            and item.kind == "scene_image_asset"
-            and item.relative_path == relative_path
+        declared_paths = {
+            item.relative_path
             for item in self.registry.list("scene_image_asset")
-        )
-        if declared:
-            result["scene_image"] = {
-                "kind": "plugin",
-                "plugin_id": plugin_id,
-                "path": relative_path,
-            }
-        else:
+            if item.plugin_id == plugin_id
+        }
+
+        def expose(reference: Any) -> dict[str, Any] | None:
+            if not isinstance(reference, dict):
+                return None
+            kind = str(reference.get("kind") or "")
+            if kind == "builtin":
+                return dict(reference)
+            if kind != "asset":
+                return None
+            relative_path = str(reference.get("path") or "").replace("\\", "/").strip("/")
+            if relative_path not in declared_paths:
+                return None
+            return {"kind": "plugin", "plugin_id": plugin_id, "path": relative_path}
+
+        raw_pool = result.get("scene_images")
+        exposed_pool = [item for raw in raw_pool or [] if (item := expose(raw))] if isinstance(raw_pool, list) else []
+        if isinstance(raw_pool, list):
+            if exposed_pool:
+                result["scene_images"] = exposed_pool
+            else:
+                result.pop("scene_images", None)
+        elif "scene_images" in result:
+            result.pop("scene_images", None)
+
+        reference = expose(result.get("scene_image"))
+        if reference is not None:
+            result["scene_image"] = reference
+        elif exposed_pool:
+            # Keep the old singular field populated for clients that have not
+            # learned the scene_images pool yet.
+            result["scene_image"] = exposed_pool[0]
+        elif "scene_image" in result:
             result.pop("scene_image", None)
         return result
 
@@ -287,6 +301,19 @@ class PluginContentCatalog:
             ),
             None,
         )
+
+    def read_declared_resource(self, kind: str, key: str, *, plugin_id: str, language: str = "") -> dict[str, Any]:
+        """Read one JSON contribution from its explicit package, including legacy/map kinds."""
+        item = next((row for row in self.registry.list(kind)
+                     if row.plugin_id == plugin_id and row.key == key), None)
+        if item is None or item.path.is_symlink() or item.path.suffix.lower() != ".json":
+            raise ValueError("declared JSON resource not found")
+        if item.path.stat().st_size > 4 * 1024 * 1024:
+            raise ValueError("declared JSON resource is too large")
+        data = json.loads(item.path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("declared JSON resource must be an object")
+        return self._materialize_locale(item, kind, data, language)
 
     def public_asset_path(self, plugin_id: str, relative_path: str, plugin_directory: Path) -> Path:
         normalized = relative_path.replace("\\", "/").strip("/")

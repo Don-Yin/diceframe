@@ -5,16 +5,23 @@ import { AlertCircleOutline, CheckmarkCircleOutline, CubeOutline, ImageOutline, 
 import { api, errorMessage } from '@/api/client'
 import HelpButton from '@/components/common/HelpButton.vue'
 import TestResultCard from '@/components/admin/TestResultCard.vue'
+import TtsVoiceProfiles from '@/components/admin/TtsVoiceProfiles.vue'
 import { useLocale } from '@/composables/useLocale'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { modelCapability, type ModelCapability } from '@/utils/providerModels'
 import type { AppConfig, TestResult } from '@/api/types'
+import CheckModelSettings from './CheckModelSettings.vue'
+import GenerationSettings from './GenerationSettings.vue'
 
 defineProps<{
   supported: boolean
   saving: boolean
   embeddingTesting: boolean
   embeddingResult: TestResult | null
+  ttsTesting?: boolean
+  asrTesting?: boolean
+  asrRecording?: boolean
+  asrTestText?: string
 }>()
 
 const emit = defineEmits<{
@@ -22,6 +29,9 @@ const emit = defineEmits<{
   'open-providers': []
   'toggle-and-save': [key: keyof AppConfig, value: boolean]
   'test-embedding': []
+  'test-tts': []
+  'test-asr': []
+  'tts-voices-changed': []
 }>()
 
 const store = useSettingsStore()
@@ -156,7 +166,7 @@ function setAsrProvider(value: string) {
 </script>
 
 <template>
-  <div class="settings-pane model-routing-pane">
+  <div class="model-routing-pane">
     <header class="model-routing-header">
       <div><h3>{{ t('modelRoutingTitle') }}</h3><p>{{ t('modelRoutingHint') }}</p></div>
       <div class="model-routing-actions">
@@ -185,7 +195,7 @@ function setAsrProvider(value: string) {
         <header><NIcon :component="SparklesOutline" /><div><h4>{{ t('modelRoleMain') }}</h4><p>{{ t('modelRoleMainHint') }}</p></div></header>
         <label><span>{{ t('providerName') }}</span><select :value="store.config.llm_provider_ref || ''" @change="setRoleProvider('llm_provider_ref', 'model', eventValue($event), 'chat')"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name || provider.id }}</option></select></label>
         <label><span>{{ t('model') }}</span><select :value="store.config.model || ''" :disabled="!store.config.llm_provider_ref" @change="setString('model', eventValue($event))"><option value="">{{ t('modelRoutingChooseModel') }}</option><option v-for="model in savedModels(String(store.config.llm_provider_ref || ''), 'chat')" :key="model" :value="model">{{ model }}</option></select></label>
-        <div class="model-fallback-grid">
+        <div id="settings-fallback" class="model-fallback-grid">
           <section v-for="slot in [1, 2]" :key="slot" class="model-fallback-slot">
             <header><strong>{{ t(slot === 1 ? 'fallbackSlot1' : 'fallbackSlot2') }}</strong><NSwitch :value="!!store.config[slot === 1 ? 'fallback1_enabled' : 'fallback2_enabled']" :disabled="saving" @update:value="emit('toggle-and-save', slot === 1 ? 'fallback1_enabled' : 'fallback2_enabled', $event)" /></header>
             <label><span>{{ t('providerName') }}</span><select :value="store.config[slot === 1 ? 'fallback1_provider_ref' : 'fallback2_provider_ref'] || ''" :disabled="!store.config[slot === 1 ? 'fallback1_enabled' : 'fallback2_enabled']" @change="setRoleProvider(slot === 1 ? 'fallback1_provider_ref' : 'fallback2_provider_ref', slot === 1 ? 'fallback1_model' : 'fallback2_model', eventValue($event), 'chat')"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name || provider.id }}</option></select></label>
@@ -196,7 +206,8 @@ function setAsrProvider(value: string) {
 
       <div class="model-capability-grid">
         <div class="model-capability-column">
-          <article class="model-role-card model-role-card-embedding">
+          <CheckModelSettings :disabled="saving" />
+          <article id="settings-embedding" class="model-role-card model-role-card-embedding">
             <header><NIcon :component="CubeOutline" /><div><h4>{{ t('modelRoleEmbedding') }}</h4><p>{{ t('modelRoleEmbeddingHint') }}</p></div><HelpButton :title="t('embeddingHelpTitle')"><h4>{{ t('embeddingHelpWhatTitle') }}</h4><p>{{ t('embeddingHelpWhatText') }}</p><h4>{{ t('embeddingHelpChooseTitle') }}</h4><p>{{ t('embeddingHelpChooseBefore') }} <code>bge-m3</code>{{ t('embeddingHelpChooseAfter') }} <code>text-embedding-3-small</code>, <code>gte-large</code>, <code>nomic-embed-text</code>{{ t('embeddingHelpChooseSuffix') }}</p><h4>{{ t('embeddingHelpConfigTitle') }}</h4><p>{{ t('embeddingHelpCentralized') }}</p><h4>{{ t('test') }}</h4><p>{{ t('embeddingHelpTest') }}</p></HelpButton></header>
             <label class="model-role-enabled"><span>{{ t('vectorMemory') }}</span><NSwitch :value="!!store.config.embedding_enabled" :disabled="saving" @update:value="emit('toggle-and-save', 'embedding_enabled', $event)" /></label>
             <label><span>{{ t('providerName') }}</span><select :value="store.config.embedding_provider_ref || ''" :disabled="!store.config.embedding_enabled" @change="setRoleProvider('embedding_provider_ref', 'embedding_model', eventValue($event), 'embedding')"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name || provider.id }}</option></select></label>
@@ -205,14 +216,21 @@ function setAsrProvider(value: string) {
             <p class="model-role-field-hint">{{ t('maxInputHint') }}</p><div class="model-role-actions"><NButton :loading="embeddingTesting" :disabled="!store.config.embedding_enabled" @click="emit('test-embedding')">{{ t('testEmbeddingConnection') }}</NButton></div>
             <TestResultCard v-if="embeddingResult" :result="embeddingResult" kind="embedding" />
           </article>
-          <article class="model-role-card">
+          <article id="settings-tts-model" class="model-role-card">
             <header><NIcon :component="VolumeHighOutline" /><div><h4>{{ t('modelRoleTts') }}</h4><p>{{ t('modelRoleTtsHint') }}</p></div></header>
             <label><span>{{ t('modelRoutingMode') }}</span><select :value="store.config.tts_provider || 'browser'" @change="setTtsProvider(eventValue($event))"><option value="browser">{{ t('ttsProviderBrowser') }}</option><option value="edge-tts">{{ t('ttsProviderEdge') }}</option><option value="openai-compatible">{{ t('ttsProviderOpenAI') }}</option><option value="gpt-sovits">GPT-SoVITS</option></select></label>
             <template v-if="ttsProvider === 'openai-compatible' || ttsProvider === 'gpt-sovits'"><label><span>{{ t('providerName') }}</span><select :value="store.config.tts_provider_ref || ''" @change="setRoleProvider('tts_provider_ref', 'tts_model', eventValue($event), 'tts')"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name || provider.id }}</option></select></label><label><span>{{ t('model') }}</span><select :value="store.config.tts_model || ''" :disabled="!store.config.tts_provider_ref" @change="setString('tts_model', eventValue($event))"><option value="">{{ t('modelRoutingChooseModel') }}</option><option v-for="model in savedModels(String(store.config.tts_provider_ref || ''), 'tts')" :key="model" :value="model">{{ model }}</option></select></label></template>
+            <template v-if="ttsProvider !== 'browser'">
+              <label v-if="ttsProvider !== 'edge-tts'"><span>{{ t('ttsAudioFormat') }}</span><select :value="store.config.tts_audio_format ?? 'mp3'" @change="setString('tts_audio_format', eventValue($event))"><option value="mp3">MP3</option><option value="wav">WAV</option><option value="opus">Opus</option><option value="flac">FLAC</option><option value="aac">AAC</option></select></label>
+              <p v-else class="model-role-field-hint">{{ t('ttsEdgeHint') }}</p>
+              <label><span>{{ t('ttsCacheSize') }}</span><NInputNumber :value="Number(store.config.tts_cache_mb ?? 256)" :min="16" :max="2048" :step="64" @update:value="setNumber('tts_cache_mb', $event)" /></label>
+              <TtsVoiceProfiles :provider="ttsProvider" @changed="emit('tts-voices-changed')" />
+              <div class="model-role-actions"><NButton :loading="ttsTesting" :disabled="saving" @click="emit('test-tts')">{{ t('ttsSaveAndTest') }}</NButton></div>
+            </template>
           </article>
         </div>
         <div class="model-capability-column">
-          <article class="model-role-card">
+          <article id="settings-imagegen" class="model-role-card">
             <header><NIcon :component="ImageOutline" /><div><h4>{{ t('modelRoleImagegen') }}</h4><p>{{ t('modelRoleImagegenHint') }}</p></div></header>
             <label class="model-role-enabled"><span>{{ t('enabled') }}</span><NSwitch :value="!!store.config.imagegen_enabled" :disabled="saving" @update:value="emit('toggle-and-save', 'imagegen_enabled', $event)" /></label>
             <label class="model-role-enabled"><span>{{ t('imagegenAutoScene') }}</span><NSwitch :value="!!store.config.imagegen_auto_scene" :disabled="saving || !store.config.imagegen_enabled" @update:value="emit('toggle-and-save', 'imagegen_auto_scene', $event)" /></label>
@@ -226,7 +244,7 @@ function setAsrProvider(value: string) {
             </div>
             <details class="imagegen-advanced-settings">
               <summary>{{ t('imagegenAdvancedSettings') }}</summary>
-              <div class="imagegen-advanced-fields">
+              <div id="settings-imagegen-prompts" class="imagegen-advanced-fields">
                 <label class="model-role-enabled"><span>{{ t('imagegenAutoUseManualPrompt') }}</span><NSwitch :value="!!store.config.imagegen_auto_use_manual_prompt" :disabled="saving || !store.config.imagegen_enabled" @update:value="emit('toggle-and-save', 'imagegen_auto_use_manual_prompt', $event)" /></label>
                 <div class="imagegen-prompt-field"><div class="imagegen-prompt-field-head"><span>{{ t('imagegenManualRules') }}</span><NButton size="tiny" secondary :loading="optimizingField === 'manual_rules'" :disabled="!store.config.imagegen_enabled || !promptFieldValue('manual_rules').trim() || !!optimizingField" @click="optimizePrompt('manual_rules')"><template #icon><NIcon :component="SparklesOutline" /></template>{{ t('imagegenOptimizePrompt') }}</NButton></div><NInput type="textarea" :value="String(store.config.imagegen_manual_rules || '')" :disabled="!store.config.imagegen_enabled" :placeholder="t('imagegenManualRulesPlaceholder')" :autosize="{ minRows: 3, maxRows: 8 }" @update:value="setString('imagegen_manual_rules', $event)" /></div>
                 <div class="imagegen-prompt-field"><div class="imagegen-prompt-field-head"><span>{{ t('imagegenManualPrompt') }}</span><NButton size="tiny" secondary :loading="optimizingField === 'manual_prompt'" :disabled="!store.config.imagegen_enabled || !promptFieldValue('manual_prompt').trim() || !!optimizingField" @click="optimizePrompt('manual_prompt')"><template #icon><NIcon :component="SparklesOutline" /></template>{{ t('imagegenOptimizePrompt') }}</NButton></div><NInput type="textarea" :value="String(store.config.imagegen_manual_prompt || '')" :disabled="!store.config.imagegen_enabled" :placeholder="t('imagegenManualPromptPlaceholder')" :autosize="{ minRows: 3, maxRows: 8 }" @update:value="setString('imagegen_manual_prompt', $event)" /></div>
@@ -248,14 +266,20 @@ function setAsrProvider(value: string) {
               </div>
             </details>
           </article>
-          <article class="model-role-card">
+          <article id="settings-asr" class="model-role-card">
             <header><NIcon :component="MicOutline" /><div><h4>{{ t('modelRoleAsr') }}</h4><p>{{ t('modelRoleAsrHint') }}</p></div></header>
             <label><span>{{ t('modelRoutingMode') }}</span><select :value="store.config.asr_provider || 'disabled'" @change="setAsrProvider(eventValue($event))"><option value="disabled">{{ t('asrProviderDisabled') }}</option><option value="openai-compatible">{{ t('asrProviderOpenAI') }}</option></select></label>
-            <template v-if="asrProvider === 'openai-compatible'"><label><span>{{ t('providerName') }}</span><select :value="store.config.asr_provider_ref || ''" @change="setRoleProvider('asr_provider_ref', 'asr_model', eventValue($event), 'asr')"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name || provider.id }}</option></select></label><label><span>{{ t('model') }}</span><select :value="store.config.asr_model || ''" :disabled="!store.config.asr_provider_ref" @change="setString('asr_model', eventValue($event))"><option value="">{{ t('modelRoutingChooseModel') }}</option><option v-for="model in savedModels(String(store.config.asr_provider_ref || ''), 'asr')" :key="model" :value="model">{{ model }}</option></select></label></template>
+            <template v-if="asrProvider === 'openai-compatible'"><label><span>{{ t('providerName') }}</span><select :value="store.config.asr_provider_ref || ''" @change="setRoleProvider('asr_provider_ref', 'asr_model', eventValue($event), 'asr')"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name || provider.id }}</option></select></label><label><span>{{ t('model') }}</span><select :value="store.config.asr_model || ''" :disabled="!store.config.asr_provider_ref" @change="setString('asr_model', eventValue($event))"><option value="">{{ t('modelRoutingChooseModel') }}</option><option v-for="model in savedModels(String(store.config.asr_provider_ref || ''), 'asr')" :key="model" :value="model">{{ model }}</option></select></label>
+              <label><span>{{ t('asrTimeout') }}</span><NInputNumber :value="Number(store.config.asr_timeout_seconds ?? 60)" :min="5" :max="300" :step="5" @update:value="setNumber('asr_timeout_seconds', $event)" /></label>
+              <p class="model-role-field-hint">{{ t('asrHint') }}</p>
+              <div class="model-role-actions"><NButton :loading="asrTesting && !asrRecording" :disabled="saving" @click="emit('test-asr')">{{ asrRecording ? t('asrTestStop') : t('asrSaveAndTest') }}</NButton></div>
+              <p v-if="asrTestText" class="model-role-field-hint">{{ t('asrTestResult', { text: asrTestText }) }}</p>
+            </template>
           </article>
         </div>
       </div>
     </div>
+    <GenerationSettings :disabled="saving" />
     <NModal :show="!!optimizerPreview" preset="card" class="imagegen-optimizer-modal" :title="t('imagegenOptimizePreview')" @update:show="!$event && (optimizerPreview = null)">
       <div v-if="optimizerPreview" class="imagegen-optimizer-preview">
         <label><span>{{ t('imagegenOptimizeOriginal') }} ({{ optimizerPreview.source.length }})</span><NInput type="textarea" :value="optimizerPreview.source" readonly :autosize="{ minRows: 4, maxRows: 10 }" /></label>

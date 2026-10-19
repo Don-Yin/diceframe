@@ -1,8 +1,52 @@
 import type { Page } from '@playwright/test'
+import type { PluginMarketplaceResponse } from '../src/api/types'
 import { expect, test } from './fixtures'
 
 // 标签顺序与 PluginSettings.vue 的 NTabPane 顺序一致。
 const TAB = { installed: 0, marketplace: 1, content: 2, themes: 3, tools: 4, mirrors: 5 } as const
+
+// fake Hub 不提供插件市场目录；布局用例只隔离这个 GET，其他插件 API 仍走真实服务。
+const MARKETPLACE_FIXTURE: PluginMarketplaceResponse = {
+  ok: true,
+  plugins: [
+    {
+      id: 'e2e-theme-layout',
+      name: 'E2E Theme Layout',
+      version: '1.0.0',
+      description: 'Deterministic theme card for layout checks.',
+      plugin_type: 'theme',
+      repository_url: 'https://example.invalid/e2e-theme-layout',
+      distribution: 'repository',
+      installable: true,
+    },
+    {
+      id: 'e2e-tool-layout',
+      name: 'E2E Tool Layout',
+      version: '1.0.0',
+      description: 'Deterministic tool card for layout checks.',
+      plugin_type: 'tool',
+      repository_url: 'https://example.invalid/e2e-tool-layout',
+      distribution: 'repository',
+      installable: true,
+    },
+  ],
+  total: 2,
+  source: { mirror_name: 'e2e-fixture', elapsed_ms: 0 },
+}
+
+async function installMarketplaceFixture(page: Page) {
+  await page.route('**/api/plugins/marketplace*', async route => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(MARKETPLACE_FIXTURE),
+    })
+  })
+}
 
 async function openPluginTab(page: Page, index: number) {
   await page.goto('/#/plugins')
@@ -71,6 +115,7 @@ test('mirror form and rows stay contained on desktop and phone', async ({ page }
 })
 
 test('install panel and store cards stay contained on desktop and phone', async ({ page }) => {
+  await installMarketplaceFixture(page)
   await openPluginTab(page, TAB.installed)
   const install = page.locator('.plugin-install')
   await expect(install).toBeVisible()

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from src.engine import module_hooks
+
 from typing import Any
 
-from src.engine.modules import narrative_notes, ruleset_runtime
+from src.engine.modules import ruleset_runtime
 
 from .contracts import DirectorContext
 
@@ -32,7 +34,7 @@ def build_director_context(instance: Any, campaign: dict[str, Any] | None = None
             continue
         actions.append({"id": f"action:{index}", "user_id": uid, "text": text})
     return DirectorContext(
-        scene=_text(narrative_notes.scene(instance), 200),
+        scene=_text(module_hooks.narrative_view(instance)["scene"], 200),
         world_id=_text(getattr(instance, "world_id", ""), 120),
         actions=tuple(actions),
         combat_status=_text(combat.get("status"), 40) or "none",

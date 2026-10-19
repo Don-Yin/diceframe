@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { CashOutline, CheckmarkCircleOutline, TimeOutline, WarningOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import type { PendingPayment } from '@/api/types'
@@ -19,6 +19,14 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ confirm: []; reject: []; dismiss: [] }>()
 const { t } = useLocale()
+const card = ref<HTMLElement | null>(null)
+
+/** Scroll the owning card into view when reopened from the GM todo list. */
+function focus() {
+  card.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+defineExpose({ focus })
 
 const reward = computed(() => props.proposal.kind === 'reward')
 const tone = computed(() => reward.value ? 'reward' : 'payment')
@@ -51,7 +59,7 @@ const helpText = computed(() => reward.value && props.solo ? t('economySoloRewar
 </script>
 
 <template>
-  <article class="economy-proposal-card" :class="`economy-proposal-${tone}`" aria-live="polite">
+  <article ref="card" class="economy-proposal-card" :class="`economy-proposal-${tone}`" aria-live="polite">
     <header class="economy-proposal-header">
       <div class="economy-proposal-heading">
         <span class="economy-proposal-icon" aria-hidden="true"><NIcon :component="icon" size="18" /></span>

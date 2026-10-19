@@ -320,8 +320,9 @@ class QQGameCommandsMixin:
                 if isinstance(sc, list):
                     state_changes = sc
             if round_number:
-                self._web_sync_last_round[game_key] = round_number
-                self._web_sync_seen_actions.setdefault(game_key, set()).clear()
+                sync_key = self._web_sync_key(group_id, game_key)
+                self._web_sync_last_round[sync_key] = round_number
+                self._web_sync_seen_actions.setdefault(sync_key, set()).clear()
         except Exception:
             self.logger.warning("推进后拉取回合详情失败，回退用 advance 返回", exc_info=True)
         await self._send_round_summary_card(

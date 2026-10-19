@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any
+from .triggered_spells import free_cast_resource
 
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.features import CombatCapabilityView
@@ -79,6 +80,7 @@ class CombatViewMixin:
                 "conditions": deepcopy(enemy.get("conditions") or {}),
                 "death_saves": {}, "equipment_refs": [], "spell_refs": [], "slots": {},
                 "weapon_category_refs": [], "proficiency_bonus": 0,
+                "creature_type": str(enemy.get("creature_type") or ""),
                 "skill_values": {}, "concentration": None,
             }
         raise CombatIntentError("actor_id is invalid")
@@ -131,8 +133,10 @@ class CombatViewMixin:
             "spell_refs": list(dict.fromkeys([
                 *list(class_magic.get("cantrip_refs") or []),
                 *list(class_magic.get("prepared_spell_refs") or []),
+                *[row["spell_ref"] for row in feature_projection["spell_grants"]],
             ])),
             "slots": deepcopy(class_magic.get("slots_current") or {}),
+            "spell_grants": deepcopy(feature_projection["spell_grants"]),
             "spell_attack_bonus": int(
                 character.get("derived", {}).get("spell_attack_bonus", 0) or 0
             ),
@@ -206,6 +210,32 @@ class CombatViewMixin:
         if unarmed is not None:
             result.append(unarmed)
         return result
+
+    def _spell_statuses(self, actor, economy, trigger=None, *, is_current=True):
+        """Known spells remain visible even when no cast is currently legal."""
+        if actor["kind"] not in {"player", "companion"}:
+            return []
+        available = {row["spell_ref"] for row in self._available_spells(actor, economy, trigger)}
+        statuses = []
+        for ref in actor["spell_refs"]:
+            spell = self.spells.get(ref)
+            if spell is None:
+                continue
+            effect = self.catalog.spell_effects.get(ref.removeprefix("spell:"))
+            reason = ""
+            if effect is None:
+                reason = "not_automated"
+            elif not is_current:
+                reason = "not_your_turn"
+            elif effect["mode"] == "triggered_damage" and not trigger:
+                reason = "requires_melee_hit"
+            elif trigger and effect["mode"] != "triggered_damage":
+                reason = "finish_melee_hit"
+            elif ref not in available:
+                cost = "bonus_action" if str(spell["casting_time"]).startswith("Bonus Action") else "action"
+                reason = "action_spent" if int(economy.get(cost, 0)) < 1 else "slot_already_spent" if economy.get("slot_spell_cast") else "no_spell_slot"
+            statuses.append({"spell_ref": ref, "name": spell["name"], "blocked_reason": reason})
+        return statuses
 
     def _unarmed_strike(self, actor: dict[str, Any]) -> dict[str, Any] | None:
         """Canonical Unarmed Strike profile, or None when content omits it.
@@ -305,6 +335,7 @@ class CombatViewMixin:
 
     def _available_spells(
         self, actor: dict[str, Any], economy: dict[str, Any],
+        trigger: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         if actor["kind"] not in {"player", "companion"}:
             return []
@@ -314,18 +345,24 @@ class CombatViewMixin:
             effect = self.catalog.spell_effects.get(str(ref).removeprefix("spell:"))
             if spell is None or effect is None:
                 continue
+            if effect["mode"] == "triggered_damage" and not trigger:
+                continue
             cost = "bonus_action" if str(spell["casting_time"]).startswith("Bonus Action") else "action"
             if int(economy.get(cost, 0) or 0) < 1:
                 continue
             available_slots = [
                 int(level) for level, count in actor["slots"].items()
-                if int(count) > 0 and int(level) >= int(spell["level"])
+                if int(count) > 0 and int(level) >= int(spell["level"]) and not economy.get("slot_spell_cast")
             ] if spell["level"] > 0 else [0]
+            if spell["level"] > 0 and free_cast_resource(actor, ref):
+                available_slots.insert(0, 0)
+            available_slots.sort()
             if available_slots:
                 result.append({
                     "spell_ref": ref, "name": spell["name"], "level": spell["level"],
                     "casting_time": spell["casting_time"], "range": effect["range"],
                     "mode": effect["mode"], "available_slot_levels": available_slots,
+                    **({"trigger_target_id": trigger["target_id"]} if effect["mode"] == "triggered_damage" else {}),
                 })
         return result
 

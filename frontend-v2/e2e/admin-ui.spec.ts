@@ -3,10 +3,33 @@ import { accessToken } from './support'
 
 const token = accessToken
 
+test('updates stay in About while rollback lives in General maintenance', async ({ page }, info) => {
+  await page.route('**/api/system/update/status', route => route.fulfill({ json: {
+    state: 'done', version: '3.0.0-beta.2', current_version: '3.0.0-beta.2', kind: 'portable',
+    self_update: { supported: true, mode: 'portable', reason: '', hint: '' },
+    rollback: { available: true, target_version: '3.0.0-beta.1' },
+  } }))
+  await page.route('**/api/system/update-check', route => route.fulfill({ json: {
+    ok: true, current_version: '3.0.0-beta.2', update_available: false,
+  } }))
+  await page.goto('/#/settings?section=general&focus=update')
+  await expect(page.locator('#settings-update')).toBeVisible()
+  await expect(page.locator('.settings-nav [data-section="about"]')).toHaveClass(/active/)
+  await expect(page.locator('#settings-update').getByRole('button', { name: '检查更新', exact: true })).toBeVisible()
+  await expect(page.locator('#settings-update')).not.toContainText('回退到上一版本')
+  await page.goto('/#/settings?section=general&focus=rollback')
+  await expect(page.locator('#settings-rollback')).toBeVisible()
+  await expect(page.locator('#settings-update')).toBeHidden()
+  await expect(page.locator('#settings-maintenance').getByRole('button', { name: '回退到上一版本', exact: true })).toBeVisible()
+  await expect(page.locator('#settings-maintenance')).not.toContainText('更新完成')
+  await page.screenshot({ path: info.outputPath('maintenance-rollback.png') })
+})
+
 test('settings status summary stays structured and destructive confirmations are explicit', async ({ page }) => {
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token())
 
   await page.goto('/#/settings')
+  await page.locator('.settings-status-disclosure > summary').click()
   await expect(page.locator('.system-status-grid')).toBeVisible()
   const statusCards = page.locator('.system-status-card')
   await expect(statusCards.first()).toBeVisible()
@@ -23,6 +46,7 @@ test('settings status summary stays structured and destructive confirmations are
   }
 
   await page.goto('/')
+  await page.locator('.overview-game-tools').first().locator('summary').click()
   await page.getByRole('button', { name: '删除' }).first().click()
   await expect(page.getByText('删除存档').first()).toBeVisible()
   await expect(page.getByRole('button', { name: '删除存档' })).toBeVisible()
@@ -34,6 +58,7 @@ test('settings status grid stays within viewport for German locale', async ({ pa
   await page.addInitScript(() => localStorage.setItem('diceframe_locale', 'de'))
   await page.setViewportSize({ width: 1280, height: 1024 })
   await page.goto('/#/settings')
+  await page.locator('.settings-status-disclosure > summary').click()
   const grid = page.locator('.system-status-grid')
   await expect(grid).toBeVisible()
   const overflow = await grid.evaluate(el => ({

@@ -38,19 +38,43 @@ def _deps(store: LorebookStore) -> lorebooks.LorebookDependencies:
     )
 
 
+def _without_timestamps(value):
+    if isinstance(value, dict):
+        return {
+            key: _without_timestamps(item)
+            for key, item in value.items()
+            if key not in {"created_at", "updated_at"}
+        }
+    if isinstance(value, list):
+        return [_without_timestamps(item) for item in value]
+    return value
+
+
 def test_service_create_save_and_list_match_webapi(store: LorebookStore) -> None:
     api = _api(store)
     deps = _deps(store)
     book = {"id": "book-1", "name": "Book"}
     assert lorebooks.create_lorebook(deps, {"id": ""}) == api.create_lorebook({"id": ""})
-    assert lorebooks.create_lorebook(deps, book)["ok"] is True
-    assert lorebooks.create_lorebook(deps, book) == api.create_lorebook(book)
+    created = lorebooks.create_lorebook(deps, book)
+    assert created["ok"] is True
+    assert created["book"]["updated_at"]
+    service_duplicate = lorebooks.create_lorebook(deps, book)
+    api_duplicate = api.create_lorebook(book)
+    assert _without_timestamps(service_duplicate) == _without_timestamps(api_duplicate)
 
     entry = {"id": "entry-1", "name": "Entry"}
     assert lorebooks.save_lorebook_entry(deps, "book-1", entry)["ok"] is True
-    assert lorebooks.save_lorebook_entry(deps, "book-1", entry) == api.save_lorebook_entry("book-1", entry)
-    assert lorebooks.list_lorebooks(deps, world_id="world-1") == api.list_lorebooks("world-1")
-    assert lorebooks.list_lorebooks(deps, game_key="web|room|gm") == api.list_lorebooks(game_key="web|room|gm")
+    created_entry = lorebooks.save_lorebook_entry(deps, "book-1", entry)
+    assert created_entry["ok"] is True
+    service_entry = lorebooks.save_lorebook_entry(deps, "book-1", entry)
+    api_entry = api.save_lorebook_entry("book-1", entry)
+    assert _without_timestamps(service_entry) == _without_timestamps(api_entry)
+    service_worlds = lorebooks.list_lorebooks(deps, world_id="world-1")
+    api_worlds = api.list_lorebooks("world-1")
+    assert _without_timestamps(service_worlds) == _without_timestamps(api_worlds)
+    service_games = lorebooks.list_lorebooks(deps, game_key="web|room|gm")
+    api_games = api.list_lorebooks(game_key="web|room|gm")
+    assert _without_timestamps(service_games) == _without_timestamps(api_games)
 
 
 def test_service_entry_create_uses_book_owner_for_legacy_world_projection(
@@ -68,6 +92,64 @@ def test_service_entry_create_uses_book_owner_for_legacy_world_projection(
     assert result["ok"] is True
     entry = store.get_book_entry("book:standalone", "entry:standalone")
     assert entry and entry["world_id"] is None
+
+
+def test_orphan_primary_book_remains_editable_without_creating_or_rebinding_world(
+    store: LorebookStore,
+) -> None:
+    deps = _deps(store)
+    missing_world = "custom_book_world_missing"
+    book_id = store.ensure_primary_world_book(missing_world)
+    bindings_before = store.list_bindings()
+    worlds_before = store.list_worlds()
+
+    assert lorebooks.list_lorebook_entries(deps, book_id)["entries"] == []
+    saved = lorebooks.save_lorebook_entry(deps, book_id, {
+        "id": "orphan-entry", "name": "Orphan entry", "content": "Original",
+        "world_id": "world-1",  # A different valid world is not its owner.
+    })
+    assert saved["ok"] is True
+    assert saved["entry"]["book_id"] == book_id
+    assert saved["entry"]["world_id"] is None
+    assert lorebooks.save_lorebook_entry(
+        deps, book_id, {"id": "orphan-entry", "content": "Edited"},
+    )["entry"]["content"] == "Edited"
+    assert lorebooks.export_lorebook(deps, book_id)["ok"] is True
+    assert lorebooks.list_lorebook_entries(deps, book_id)["entries"][0]["id"] == "orphan-entry"
+    assert lorebooks.delete_lorebook_entry(deps, book_id, "orphan-entry")["ok"] is True
+    assert store.get_world(missing_world) is None
+    assert store.list_worlds() == worlds_before
+    assert store.list_bindings() == bindings_before
+    assert lorebooks.delete_lorebook(deps, book_id)["ok"] is False
+
+
+def test_move_to_orphan_primary_book_keeps_canonical_owner_and_null_projection(
+    store: LorebookStore,
+) -> None:
+    deps = _deps(store)
+    book_id = store.ensure_primary_world_book("custom_book_world_missing")
+    source_book_id = store.primary_world_book_id("world-1")
+    lorebooks.save_lorebook_entry(deps, source_book_id, {"id": "move-orphan", "name": "Move me"})
+    result = lorebooks.move_lorebook_entry(deps, source_book_id, "move-orphan", book_id)
+    assert result["ok"] is True
+    assert result["entry"]["book_id"] == book_id
+    assert result["entry"]["world_id"] is None
+    assert lorebooks.save_lorebook_entry(
+        deps, source_book_id, {"id": "move-orphan", "content": "Wrong owner"},
+    )["error_code"] == "entry_book_mismatch"
+    store.delete_world_cascade("world-1")
+    assert store.get_book_entry(book_id, "move-orphan") is not None
+
+
+def test_explicit_catalogue_scope_includes_books_bound_outside_current_world(
+    store: LorebookStore,
+) -> None:
+    store.create_lorebook({"id": "book:world", "name": "World book"})
+    store.bind_lorebook({"id": "binding:world", "book_id": "book:world", "scope_kind": "world", "scope_id": "other-world"})
+    store.create_lorebook({"id": "book:game", "name": "Game book"})
+    store.bind_lorebook({"id": "binding:game", "book_id": "book:game", "scope_kind": "game", "scope_id": "game-1"})
+    rows = lorebooks.list_lorebooks(_deps(store), include_all=True)["books"]
+    assert {row["id"] for row in rows} >= {"book:world", "book:game"}
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol, TypedDict
 
-from src.content_modules.projection import ContentProjectionService
+from src.content_modules.projection import ContentProjectionService, entries_for_world
 from src.knowledge.projection import Viewer, project_entries
 from src.knowledge.visibility import classify_audience
 
@@ -70,11 +70,7 @@ def preview(
 
     assert dependencies.lorebook is not None
     projection = dependencies.content_projection
-    entries = (
-        projection.for_world_authoring(world_id)
-        if projection is not None
-        else dependencies.lorebook.list_entries(world_id)
-    )
+    entries = projection.for_world_authoring(world_id) if projection is not None else entries_for_world(dependencies.lorebook, world_id)
     projections = project_entries(entries, resolved)
     audience_counts = {"public": 0, "character": 0, "gm": 0}
     for entry in entries:

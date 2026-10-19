@@ -7,6 +7,8 @@ export interface SpeakOptions {
   rate?: number
   pitch?: number
   gameKey?: string
+  /** Owner-only DF Agent speech: uses the configured provider without a game. */
+  assistant?: boolean
   role?: 'gm' | 'player'
   voice?: string
   onEnd?: () => void
@@ -207,12 +209,15 @@ async function speakWithServer(text: string, key: string, options: SpeakOptions,
   try {
     for (const chunk of chunks) {
       if (generation !== playbackGeneration || speakingKey.value !== key) return
-      const blob = await speechApi.synthesize(options.gameKey || '', {
+      const request = {
         text: chunk,
         voice: voiceFor(options),
         language: options.lang || 'zh-CN',
         speed: options.rate ?? ttsRate(),
-      })
+      }
+      const blob = options.gameKey
+        ? await speechApi.synthesize(options.gameKey, request)
+        : await speechApi.assistantSynthesize(request)
       if (generation !== playbackGeneration || speakingKey.value !== key) return
       await playBlob(blob, generation)
       played += 1
@@ -234,7 +239,7 @@ export function ttsSpeak(text: string, key: string, options: SpeakOptions = {}):
   ttsStop()
   speakingKey.value = key
   const generation = playbackGeneration
-  const useServer = ttsRuntimeConfig.value.provider !== 'browser' && Boolean(options.gameKey)
+  const useServer = ttsRuntimeConfig.value.provider !== 'browser' && Boolean(options.gameKey || options.assistant)
   if (useServer) {
     void speakWithServer(text, key, options, generation)
   } else {

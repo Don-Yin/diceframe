@@ -83,8 +83,10 @@ async function mountPlayView(query: Record<string, string>) {
 }
 
 async function openCardLibrary(wrapper: Awaited<ReturnType<typeof mountPlayView>>) {
+  await wrapper.get('[data-testid="play-tools-toggle"]').trigger('click')
+  await flushPromises()
   const button = wrapper.findAll('button.play-secondary-action')
-    .find(item => item.text() === i18n.global.t('characters'))
+    .find(item => item.text() === i18n.global.t('sharedCharacterLibrary'))
   expect(button).toBeTruthy()
   await button!.trigger('click')
   await flushPromises()

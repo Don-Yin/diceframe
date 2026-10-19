@@ -98,3 +98,37 @@ async def test_party_question_notifies_the_table_talk_channel() -> None:
     assert response.status == 200
     assert api.calls == [("web|room|bot", "p1", "大家都知道这件事吗？", "party")]
     assert pool.events == [("web|room|bot", {"type": "table_talk_changed"})]
+
+
+@pytest.mark.asyncio
+async def test_read_only_bot_can_ask_private_question_but_cannot_persist_party_talk() -> None:
+    api = _Api()
+    pool = _Pool()
+
+    @web.middleware
+    async def _read_only_identity(request: web.Request, handler):
+        request["user_id"] = "p1"
+        request["bot_surface"] = "read_only"
+        return await handler(request)
+
+    app = web.Application(middlewares=[_read_only_identity])
+    app["api"] = api
+    app["connection_pool"] = pool
+    app.router.add_post("/api/games/{game_key}/kp-question", api_kp_question)
+
+    async with TestClient(TestServer(app)) as client:
+        private = await client.post(
+            "/api/games/web%7Croom%7Cbot/kp-question",
+            json={"question": "我能私下问吗？", "visibility": "private"},
+        )
+        party = await client.post(
+            "/api/games/web%7Croom%7Cbot/kp-question",
+            json={"question": "大家能看到吗？", "visibility": "party"},
+        )
+        party_body = await party.json()
+
+    assert private.status == 200
+    assert party.status == 403
+    assert party_body["error_code"] == "BOT_READ_ONLY"
+    assert api.calls == [("web|room|bot", "p1", "我能私下问吗？", "private")]
+    assert pool.events == []

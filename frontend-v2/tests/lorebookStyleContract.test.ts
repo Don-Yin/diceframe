@@ -6,7 +6,7 @@ function source(relativePath: string): string {
   return readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), 'utf8')
 }
 
-const css = source('../src/styles/v2/lorebook2.css')
+const css = source('../src/styles/pages/lorebook.css')
 
 describe('lorebook perspective layout contract', () => {
   it('places the inspector on the right and dropped the character rail', () => {

@@ -37,6 +37,15 @@ describe('manual roll helpers', () => {
     expect(isVisibleToActor({ ...request, visibility: 'party' }, 'player-2', false)).toBe(true)
   })
 
+  it('does not offer a target another roll while the request waits for other players', () => {
+    const partlyResolved: ManualRollRequest = { ...request, target_uids: ['player-1', 'player-2'], results: {
+      'player-1': { formula: 'd20', rolls: [12], modifier: 0, total: 12, natural: 12, rolled_by: 'player-1', rolled_at: '2026-10-16T00:00:00Z' },
+    } }
+    expect(canRollRequest(partlyResolved, 'player-1', false)).toBe(false)
+    expect(canRollRequest(partlyResolved, 'player-2', false)).toBe(true)
+    expect(canRollRequest(partlyResolved, 'gm', true)).toBe(true)
+  })
+
   it('creates a non-empty operation id for an idempotent create retry', () => {
     expect(createOperationId()).toMatch(/\S/)
   })
@@ -125,5 +134,21 @@ describe('manual rolls composer include_in_ai_context', () => {
       expect(body.purpose).toBe(purpose)
       expect('include_in_ai_context' in body).toBe(false)
     }
+  })
+
+  it('shows a pending entry after postponing and keeps history readable without a create action for players', async () => {
+    mockedApi.mockResolvedValue({ ok: true, run_id: 'run-1', requests: [request] })
+    wrapper = mount(ManualRollsPanel, {
+      attachTo: document.body, global: { plugins: [i18n], stubs: { Teleport: true } },
+      props: { gameKey: 'web|room|bot', runId: 'run-1', actorId: 'player-1', isGm: false, players },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="manual-roll-create"]').exists()).toBe(false)
+    await buttonByText(wrapper, '稍后').trigger('click')
+    expect(wrapper.get('[data-testid="manual-roll-pending"]').text()).toBe('待投掷 · 1')
+    await wrapper.get('[data-testid="manual-roll-history"]').trigger('click')
+    expect(wrapper.get('[data-testid="manual-roll-history-list"]').text()).toContain('Perception')
+    expect(wrapper.find('.manual-roll-actions').exists()).toBe(false)
+    expect(wrapper.emitted('availability')?.at(-1)).toEqual([true])
   })
 })

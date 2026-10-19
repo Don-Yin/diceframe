@@ -247,6 +247,8 @@ def validate_content_module_profile(manifest: dict) -> None:
             "adventure-module 必须使用 content_delivery_mode: catalog"
             "（安装只注册内容库，运行时按需物化）"
         )
+    if content_delivery_mode(manifest) == "catalog" and manifest.get("entrypoint") is not None:
+        raise ValueError("catalog 纯内容包不得声明 entrypoint；程序能力应使用执行插件类型")
 
 
 def is_adventure_module(manifest: dict) -> bool:

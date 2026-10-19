@@ -14,7 +14,7 @@ DICE_RE = re.compile(r"^[1-9]\d*d(?:4|6|8|10|12|20)(?:\+[1-9]\d*)?$")
 # 固定伤害（例如徒手打击的 1 点基础伤害）：没有骰子，因此重击不翻倍。
 FLAT_DAMAGE_RE = re.compile(r"^[1-9]\d{0,3}$")
 SPELL_MODES = frozenset({
-    "spell_attack", "saving_throw", "healing", "automatic_damage", "buff", "debuff",
+    "spell_attack", "saving_throw", "healing", "automatic_damage", "buff", "debuff", "triggered_damage",
 })
 
 
@@ -59,12 +59,19 @@ class Dnd2024CombatCatalog:
                 raise CombatCatalogError(f"combat spell is not in the spell catalog: {spell_id}")
             if effect.get("mode") not in SPELL_MODES:
                 raise CombatCatalogError(f"combat spell mode is invalid: {spell_id}")
-            for dice_field in ("damage", "healing", "upcast_damage", "upcast_healing"):
+            for dice_field in ("damage", "healing", "upcast_damage", "upcast_healing", "extra_damage"):
                 dice = effect.get(dice_field)
                 if dice is not None and not DICE_RE.fullmatch(str(dice)):
                     raise CombatCatalogError(
                         f"combat spell {dice_field} is invalid: {spell_id}"
                     )
+            if effect["mode"] == "triggered_damage" and (effect.get("trigger") != "melee_hit" or not effect.get("damage")):
+                raise CombatCatalogError(f"combat spell trigger is invalid: {spell_id}")
+            if "extra_damage_creature_types" in effect and (
+                not isinstance(effect["extra_damage_creature_types"], list)
+                or any(not isinstance(kind, str) or kind not in {"fiend", "undead"} for kind in effect["extra_damage_creature_types"])
+            ):
+                raise CombatCatalogError(f"combat spell creature types are invalid: {spell_id}")
             if not 5 <= int(effect.get("range", 0) or 0) <= 600:
                 raise CombatCatalogError(f"combat spell range is invalid: {spell_id}")
         labels = raw.get("labels") or {}

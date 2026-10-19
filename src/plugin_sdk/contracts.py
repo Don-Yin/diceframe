@@ -8,17 +8,21 @@ them.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 
 JsonObject = dict[str, Any]
 
 
-class ToolDescriptor(TypedDict):
+class _RequiredToolDescriptor(TypedDict):
     name: str
     title: str
     description: str
     input_schema: JsonObject
+
+
+class ToolDescriptor(_RequiredToolDescriptor, total=False):
+    agent_effect: Literal["read_only", "mutation", "destructive"]
 
 
 class BridgeExtensionDescriptor(TypedDict):

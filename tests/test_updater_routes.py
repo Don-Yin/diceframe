@@ -80,3 +80,22 @@ async def test_update_health_exposes_current_boot_id():
     assert payload["ok"] is True
     assert payload["boot_id"] == "boot-new"
     assert isinstance(payload["pid"], int)
+
+
+@pytest.mark.asyncio
+async def test_update_rollback_requires_confirmation_and_delegates():
+    class FakeUpdater:
+        async def rollback_update(self):
+            return {"ok": True, "state": "restarting", "operation": "rollback", "version": "1.6.0"}
+
+    missing = SimpleNamespace(headers={}, app={"updater": FakeUpdater()})
+    denied = await updater_routes.api_update_rollback(missing)
+    assert denied.status == 403
+
+    confirmed = SimpleNamespace(
+        headers={"X-TRPG-Confirm": "true"},
+        app={"updater": FakeUpdater()},
+    )
+    response = await updater_routes.api_update_rollback(confirmed)
+    assert response.status == 200
+    assert _payload(response)["operation"] == "rollback"

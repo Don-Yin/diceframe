@@ -5,8 +5,80 @@ import {
   type PeerLocalApiExecutor,
 } from '@/peer/game/bridge'
 import type { MultiPeerConnectionSession } from '@/peer/session/MultiPeerConnectionSession'
+import { parseApplicationMessage } from '@/peer/game/protocol'
 
 describe('peer host game bridge', () => {
+  it('admits only player recovery operations into the peer protocol', () => {
+    const message = (operation: string) => JSON.stringify({
+      version: 1, type: 'game.request', id: 'recovery-request', operation, payload: {},
+    })
+    for (const operation of ['recovery.read', 'recovery.request', 'recovery.claim']) {
+      expect(parseApplicationMessage(message(operation))).toMatchObject({ operation })
+    }
+    for (const operation of ['recovery.approve', 'recovery.reject', 'recovery.reward', 'recovery.luck']) {
+      expect(() => parseApplicationMessage(message(operation))).toThrow('invalid_application_message')
+    }
+  })
+  it('recovery uses the bound seat and strips client rewards, rolls and Keeper authority', async () => {
+    const execute = vi.fn<PeerLocalApiExecutor>(async path => path.endsWith('host') ? { game_key: 'web|game|host', player_access_open: true } : { ok: true })
+    const changed = vi.fn()
+    const bridge = new PeerHostGameBridge('web|game|host', execute, changed, {}, { peer_1: 'player_1' })
+    await bridge.handle('peer_1', 'recovery.read', { actor_uid: 'gm', seed: 'forged' })
+    expect(execute.mock.calls.at(-1)).toEqual(['/games/web%7Cgame%7Chost/recovery?user=player_1&share=1&delegate=1', undefined])
+    await bridge.handle('peer_1', 'recovery.request', {
+      run_id: 'run', operation_id: 'request-1', expected_revision: 3, kind: 'therapy',
+      healer_uid: 'doctor', skill_id: 'psychoanalysis', actor_uid: 'other', recipient_uid: 'gm',
+      roll: 1, resource_delta: 90, approved: true, owner_authenticated: true,
+    })
+    let call = execute.mock.calls.at(-1)
+    expect(call?.[0]).toBe('/games/web%7Cgame%7Chost/recovery/request?user=player_1&share=1&delegate=1')
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      run_id: 'run', operation_id: 'request-1', expected_revision: 3,
+      kind: 'therapy', healer_uid: 'doctor', skill_id: 'psychoanalysis',
+    })
+    await bridge.handle('peer_1', 'recovery.claim', {
+      run_id: 'run', operation_id: 'claim-1', expected_revision: 4, source_id: 'approved-source',
+      kind: 'reward', actor_uid: 'gm', roll: 1, resource_delta: 99, approved: true,
+    })
+    call = execute.mock.calls.at(-1)
+    expect(call?.[0]).toBe('/games/web%7Cgame%7Chost/recovery/claim?user=player_1&share=1&delegate=1')
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      run_id: 'run', operation_id: 'claim-1', expected_revision: 4, source_id: 'approved-source',
+    })
+    expect(changed).toHaveBeenCalledTimes(2)
+    await expect(bridge.handle('unbound', 'recovery.read', {})).rejects.toThrow('player_identity_required')
+    await expect(bridge.handle('unbound', 'recovery.request', {})).rejects.toThrow('player_identity_required')
+    await expect(bridge.handle('unbound', 'recovery.claim', {})).rejects.toThrow('player_identity_required')
+  })
+  it('failed or duplicate recovery requests do not announce a new state change', async () => {
+    const execute = vi.fn<PeerLocalApiExecutor>(async path => path.endsWith('host') ? { game_key: 'web|game|host', player_access_open: true } : { ok: false, code: 'STALE_REVISION' })
+    const changed = vi.fn()
+    const bridge = new PeerHostGameBridge('web|game|host', execute, changed, {}, { peer_1: 'player_1' })
+    await bridge.handle('peer_1', 'recovery.request', {})
+    execute.mockImplementation(async path => path.endsWith('host') ? { game_key: 'web|game|host', player_access_open: true } : { ok: true, duplicate: true })
+    await bridge.handle('peer_1', 'recovery.claim', {})
+    expect(changed).not.toHaveBeenCalled()
+  })
+  it('Push uses the bound player and cannot carry Keeper approval or client dice', async () => {
+    const execute = vi.fn<PeerLocalApiExecutor>(async path => path.endsWith('host') ? { game_key: 'web|game|host', player_access_open: true } : { ok: true })
+    const bridge = new PeerHostGameBridge('web|game|host', execute, () => undefined, {}, { peer_1: 'player_1' })
+    await bridge.handle('peer_1', 'push.resolve', { check_id: 'c1', operation: 'request', run_id: 'run', round_number: 3, expected_revision: 0, reason: 'new approach', roll: 1, consequence: 'no risk', user_id: 'gm' })
+    const call = execute.mock.calls.at(-1)
+    expect(call?.[0]).toContain('/checks/c1/push/request?user=player_1')
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ run_id: 'run', round_number: 3, expected_revision: 0, reason: 'new approach' })
+    await expect(bridge.handle('peer_1', 'push.resolve', { check_id: 'c1', operation: 'offer' })).rejects.toThrow('Keeper')
+  })
+  it('check-mode requests use the bound actor and strip grant or identity injection', async () => {
+    const execute = vi.fn<PeerLocalApiExecutor>(async path => path.endsWith('host') ? { game_key: 'web|game|host', player_access_open: true } : { ok: true })
+    const bridge = new PeerHostGameBridge('web|game|host', execute, () => undefined, {}, { peer_1: 'player_1' })
+    await bridge.handle('peer_1', 'check_modes.read', {})
+    expect(execute.mock.calls.at(-1)?.[0]).toContain('/check-modes?user=player_1&share=1&delegate=1')
+    await bridge.handle('peer_1', 'check_modes.request', { expected_revision: 2, run_id: 'run', context_id: 'round:1', mode: 'advantage', reason: 'help', uid: 'other', operation: 'grant', owner_authenticated: true })
+    const call = execute.mock.calls.at(-1)
+    expect(call?.[0]).toContain('/check-modes/seats/player_1/request?user=player_1')
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ expected_revision: 2, run_id: 'run', context_id: 'round:1', mode: 'advantage', reason: 'help' })
+    await expect(bridge.handle('unbound', 'check_modes.read', {})).rejects.toThrow()
+  })
   const lobbyMultiplayer = {
     state: 'active_action', round_number: 3, solo_mode: false,
     player_count: 5, max_players: 6, ready_count: 1, alive_count: 5,
@@ -32,6 +104,7 @@ describe('peer host game bridge', () => {
     },
     players: [privatePlayer], npcs: [{ character_name: 'NPC-secret' }],
     gm_style_override: { note: 'GM-secret-note' }, economy_proposals: ['Economy-secret'],
+    rest_activity: [{ id: 'rest-secret', actors: [{ uid: 'p1-secret', name: 'Character-secret' }] }],
     plot_tracker: { note: 'Plot-secret' }, future_private: 'Future-secret',
   }
   const privateValues = [
@@ -44,7 +117,9 @@ describe('peer host game bridge', () => {
 
   it('L4 returns the bound actor detail fetched with delegated identity', async () => {
     const current = { game_key: 'web|game|host', player_access_open: true, gm_style_override: { note: 'secret' } }
-    const projected = { game_key: 'web|game|host', gm_style_override: null, scene: 'player scene' }
+    const projected = { game_key: 'web|game|host', gm_style_override: null, scene: 'player scene',
+      rest_activity: [{ id: 'rest-public', kind: 'overnight', status: 'requested', actors: [{ uid: 'player_1', name: 'Ari' }] }],
+    }
     const executor = vi.fn<PeerLocalApiExecutor>(async (path) => (
       path === '/games/web%7Cgame%7Chost' ? current : projected
     ))
@@ -461,6 +536,25 @@ describe('peer host game bridge', () => {
 })
 
 describe('peer remote game client', () => {
+  it('translates recovery player routes and refuses Keeper recovery endpoints', async () => {
+    const requestGame = vi.fn(async () => ({ ok: true }))
+    const session = { requestGame } as unknown as MultiPeerConnectionSession
+    const client = new PeerRemoteGameClient(session, 'h_abcdefghijk', 'web|game|host')
+    await client.tryApi('/games/web%7Cgame%7Chost/recovery')
+    expect(requestGame).toHaveBeenLastCalledWith('h_abcdefghijk', 'recovery.read', {})
+    for (const action of ['request', 'claim']) {
+      await client.tryApi(`/games/web%7Cgame%7Chost/recovery/${action}`, {
+        method: 'POST', body: JSON.stringify({ run_id: 'run', operation_id: action }),
+      })
+      expect(requestGame).toHaveBeenLastCalledWith('h_abcdefghijk', `recovery.${action}`, { run_id: 'run', operation_id: action })
+    }
+    const calls = requestGame.mock.calls.length
+    for (const action of ['approve', 'reject', 'reward', 'luck', 'claim/extra']) {
+      await expect(client.tryApi(`/games/web%7Cgame%7Chost/recovery/${action}`, { method: 'POST', body: '{}' }))
+        .rejects.toThrow('peer_game_operation_not_supported')
+    }
+    expect(requestGame).toHaveBeenCalledTimes(calls)
+  })
   it('translates only known game routes into semantic operations', async () => {
     const requestGame = vi.fn(async (_peerId, operation, payload) => {
       if (operation === 'player.create') return { ok: true, user_id: 'player_456' }

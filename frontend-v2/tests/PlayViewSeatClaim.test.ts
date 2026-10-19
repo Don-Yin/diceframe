@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { i18n } from '../src/i18n'
 import type { GameDetail, Player } from '../src/api/types'
 import { gameState } from './helpers/playViewGame'
+import { NDropdown } from 'naive-ui'
+import PartyMemberMenu from '../src/features/play/surface/PartyMemberMenu.vue'
 
 const GAME_KEY = 'web|combat|bot'
 
@@ -62,7 +64,7 @@ const STUBS = {
   GameTimeline: true,
   EconomyProposalCard: true,
   TableTalkFeed: true,
-  GmToolbar: true,
+
   MultiplayerPanel: true,
   HealthPanel: true,
   ManualRollsPanel: true,
@@ -175,7 +177,8 @@ describe('PlayView takeover link', () => {
   }
 
   async function openTakeover(wrapper: Awaited<ReturnType<typeof mountPlayView>>['wrapper']) {
-    wrapper.findComponent({ name: 'MultiplayerPanel' }).vm.$emit('copy-link', 'p2')
+    const member = wrapper.findAllComponents(PartyMemberMenu).find(menu => menu.props('player').user_id === 'p2')!
+    member.getComponent(NDropdown).vm.$emit('select', 'copy-link')
     await flushPromises()
     return wrapper.findComponent({ name: 'InviteQrModal' })
   }
@@ -184,6 +187,7 @@ describe('PlayView takeover link', () => {
     i18n.global.locale.value = 'zh-CN'
     gameState.detail.value = { ...memberDetail, solo_mode: false, gm_uid: 'gm' } as GameDetail
     gameState.isGm.value = true
+    gameState.players.value = [{ user_id: 'gm', character_name: 'GM' }, { user_id: 'p2', character_name: 'Ally' }] as Player[]
     gameState.userId.value = ''
     gameState.currentGame.value = GAME_KEY
     mocks.confirm.mockReset().mockResolvedValue(false)
@@ -266,6 +270,26 @@ describe('PlayView takeover link', () => {
     const confirmed = await openTakeover(wrapper)
     expect(confirmed.props('seatToken')).toBe('tok-rotated')
     expect(issueCalls().map(([, init]) => JSON.parse(String(init?.body)).rotate)).toEqual([false, false, true])
+    wrapper.unmount()
+  })
+
+  it('keeps kick behind confirmation and edits the selected member', async () => {
+    api.mockReset().mockResolvedValue({})
+    const { wrapper, router } = await mountPlayView({ game: GAME_KEY })
+    const member = wrapper.findAllComponents(PartyMemberMenu).find(menu => menu.props('player').user_id === 'p2')!
+    const dropdown = member.getComponent(NDropdown)
+    dropdown.vm.$emit('select', 'kick')
+    await flushPromises()
+    expect(api.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false)
+    mocks.confirm.mockResolvedValueOnce(true)
+    dropdown.vm.$emit('select', 'kick')
+    await flushPromises()
+    expect(api.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toEqual([
+      [`/games/${encodeURIComponent(GAME_KEY)}/character/p2`, { method: 'DELETE' }],
+    ])
+    dropdown.vm.$emit('select', 'edit')
+    await flushPromises()
+    expect(router.currentRoute.value.query).toMatchObject({ edit_user: 'p2', game: GAME_KEY })
     wrapper.unmount()
   })
 })

@@ -64,6 +64,37 @@ class DiceFrameClient:
     async def detail(self, game_key: str, actor: str = "") -> dict[str, Any]:
         return await self._request("GET", f"/api/games/{quote(game_key, safe='')}", actor=actor)
 
+    async def download_scene_image(self, game_key: str, actor: str, target_dir: Path) -> Path:
+        """Download only the table's currently published image, with actor authority.
+
+        No URL or arbitrary asset ID is accepted: private gallery images and
+        other rooms cannot be selected by a channel adapter.
+        """
+        if not actor or not game_key:
+            raise DiceFrameHTTPError("场景图下载需要游戏与玩家身份")
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout_sec))
+        url = f"{self.base_url}/api/games/{quote(game_key, safe='')}/scene-image"
+        headers = {"X-Bot-Token": self.bot_token, "X-Bot-Actor": actor}
+        async with self._session.get(url, headers=headers, allow_redirects=False) as response:
+            if response.status != 200:
+                raise DiceFrameHTTPError(f"场景图下载失败：HTTP {response.status}", status=response.status)
+            content_type = response.content_type
+            suffix = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}.get(content_type)
+            if not suffix:
+                raise DiceFrameHTTPError("场景图格式不受支持")
+            data = bytearray()
+            async for chunk in response.content.iter_chunked(64 * 1024):
+                data.extend(chunk)
+                if len(data) > 10 * 1024 * 1024:
+                    raise DiceFrameHTTPError("场景图超过 10 MB")
+        if not data:
+            raise DiceFrameHTTPError("场景图为空")
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / f"scene-{secrets.token_hex(8)}{suffix}"
+        target.write_bytes(data)
+        return target
+
     async def game_detail(self, game_key: str, actor: str = "") -> dict[str, Any]:
         return await self.detail(game_key, actor)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import json
 import os
 import secrets
@@ -21,6 +22,9 @@ from src.engine.game_instance import GameInstance, GameState
 from src.engine.modules import adventure_runtime_state, room_access
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.webui.services.legal import bundled_documents
+from scripts.e2e_coc_fixture import E2E_COC_GAME_KEYS, write_coc_fixture
+from scripts.e2e_choice_fixture import E2E_CHOICE_GAME_KEYS, write_choice_fixtures
+from scripts.e2e_recovery_fixture import E2E_RECOVERY_GAME_KEYS, write_recovery_fixtures
 
 
 E2E_GAME_KEY = ("web", "e2e-room", "web_bot")
@@ -41,6 +45,18 @@ E2E_ADVENTURE_SECRET_NODE = "E2E Secret Ritual"
 E2E_LORE_WORLD_ID = "e2e_lore_golden"
 # Activation Inspector 走的是真实 retriever，需要一个绑定到该世界的存档。
 E2E_LORE_GAME_KEY = ("web", "e2e-lore-golden", "web_bot")
+
+E2E_PARTY_GAME_KEYS = tuple(
+    ("web", f"e2e-{journey}-{viewport}", "web_bot")
+    for journey in ("party-actions", "party-control-links")
+    for viewport in ("desktop", "mobile")
+)
+# Fixture writers use these identities too; additions must be declared here or
+# in the corresponding fixture module so completeness checks stay meaningful.
+E2E_GAME_KEYS = (
+    E2E_GAME_KEY, E2E_DND_GAME_KEY, E2E_ADVENTURE_GAME_KEY, E2E_LORE_GAME_KEY,
+    *E2E_PARTY_GAME_KEYS, *E2E_CHOICE_GAME_KEYS, *E2E_COC_GAME_KEYS.values(), *E2E_RECOVERY_GAME_KEYS,
+)
 
 E2E_MODULE_ID = "e2e-module"
 E2E_MODULE_NAME = "E2E Module"
@@ -66,13 +82,15 @@ def _write_e2e_module(data_dir: Path) -> None:
         "plugin_type": "content-pack",
         "content_profile": "adventure-module",
         "content_delivery_mode": "catalog",
-        "contributes": {},
+        "contributes": {"world_templates": ["content/worlds/*.json"], "character_templates": ["content/characters/*.json"]},
         "adventure_packages": [f"adventures/{E2E_MODULE_ADVENTURE_DIRECTORY}"],
         "config_schema": "config.schema.json",
     }
     files: dict[str, dict] = {
         "plugin.json": manifest,
         "config.schema.json": {"type": "object", "properties": {}},
+        "content/worlds/resource_world.json": {"world_schema_version": 2, "world_id": "resource_world", "world_name": "E2E Resource World", "starter_lorebook": [{"id": "gate", "name": "Gate", "content": "Module gate prose", "keywords": ["gate"]}]},
+        "content/characters/resource_hero.json": {"id": "resource_hero", "character_name": "E2E Resource Hero", "background": "Module hero background"},
         f"adventures/{E2E_MODULE_ADVENTURE_DIRECTORY}/manifest.json": {
             "schema_version": 1,
             "adventure_id": E2E_MODULE_ADVENTURE_ID,
@@ -287,6 +305,12 @@ def prepare_e2e_data(data_dir: Path) -> Path:
         "gm_response": "The road is quiet.",
     }]
     save_file = _write_save(data_dir, instance)
+    # Mutating party journeys need independent seats for each viewport; other
+    # smoke tests invite extra members into the shared room.
+    for game_key in E2E_PARTY_GAME_KEYS:
+        party = deepcopy(instance)
+        party.game_key = game_key
+        _write_save(data_dir, party)
 
     # FIX-00：独立的一局绑定 data-only v2 冒险，供 Play 页 AdventurePanel 的
     # “GM 可读 / 分享玩家只读公开部分”浏览器验收使用，避免扰动既有布局用例。
@@ -338,6 +362,7 @@ def prepare_e2e_data(data_dir: Path) -> Path:
     if not dnd_instance.bind_ruleset_runtime(dnd_character["rule_binding"]):
         raise RuntimeError("failed to bind D&D 2024 runtime in E2E fixture")
     _write_save(data_dir, dnd_instance)
+    write_choice_fixtures(data_dir, dnd_instance, _write_save)
     # FIX-06：模组库的浏览器验收需要真实 content-pack 包（§8 的产品面）。
     _write_e2e_module(data_dir)
     # Lorebook Golden 的真实链路验收需要一个**真的 v4 老库**：服务器启动时会跑
@@ -356,6 +381,8 @@ def prepare_e2e_data(data_dir: Path) -> Path:
     lore_instance.round_number = 2
     lore_instance.players = _e2e_players()
     _write_save(data_dir, lore_instance)
+    write_coc_fixture(data_dir, _write_save)
+    write_recovery_fixtures(data_dir, _write_save)
     return save_file
 
 
@@ -384,6 +411,15 @@ def _write_legacy_lorebook_db(data_dir: Path) -> Path:
             "INSERT OR IGNORE INTO worlds (id, name, description, language) VALUES (?, ?, ?, ?)",
             (E2E_LORE_WORLD_ID, "Golden Lore World", "Lorebook Golden E2E", "zh-CN"),
         )
+        # 内容语言选择器回归数据：ja / de 标记的世界，供语言切换用例筛选。
+        for world_id, name, language in (
+            ("e2e_lore_golden_ja", "ゴールデン・ロア・ワールド", "ja"),
+            ("e2e_lore_golden_de", "Golden Lore Welt", "de"),
+        ):
+            conn.execute(
+                "INSERT OR IGNORE INTO worlds (id, name, description, language) VALUES (?, ?, ?, ?)",
+                (world_id, name, f"Lorebook Golden E2E ({language})", language),
+            )
         for entry in _legacy_lore_entries():
             columns = ", ".join(f'"{key}"' for key in entry)
             placeholders = ", ".join("?" for _ in entry)

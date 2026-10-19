@@ -29,16 +29,18 @@ class HostCredentials:
         environ: Mapping[str, str],
         save_config: Callable[[], None],
         logger: logging.Logger | None = None,
+        plugin_data_dir: Path | None = None,
     ) -> None:
         self.state = state
         self.data_dir = data_dir
+        self.plugin_data_dir = plugin_data_dir or data_dir
         self.access_token_file = access_token_file
         self.environ = environ
         self.save_config = save_config
         self.logger = logger or logging.getLogger("trpg")
 
     def legacy_plugin_bot_token(self) -> str:
-        legacy_file = self.data_dir / "plugins" / "qq-napcat" / "secrets.json"
+        legacy_file = self.plugin_data_dir / "plugins" / "qq-napcat" / "secrets.json"
         if not legacy_file.exists():
             return ""
         try:

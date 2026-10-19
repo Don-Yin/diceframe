@@ -1,0 +1,22 @@
+/* Shared foundations, shell, then feature owners. No legacy override entry. */
+@import './shared.css';
+@import './navigation.css';
+@import './pages/auth.css';
+@import './pages/overview.css';
+@import './pages/characters.css';
+@import './pages/library.css';
+@import './pages/lorebook.css';
+@import './pages/logs.css';
+@import './pages/memory.css';
+@import './pages/rules.css';
+@import './pages/rulesets.css';
+@import './pages/worlds.css';
+@import './pages/adventures.css';
+@import './pages/modules.css';
+@import './pages/plugins.css';
+@import './pages/create.css';
+@import './pages/creator.css';
+@import './pages/peer.css';
+@import './pages/maps.css';
+@import './pages/play.css';
+@import './pages/settings.css';

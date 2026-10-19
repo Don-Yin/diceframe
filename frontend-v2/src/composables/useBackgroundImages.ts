@@ -36,13 +36,35 @@ export const backgroundOptions: readonly BackgroundOption[] = [
 
 const DEFAULT_URLS: Record<BackgroundSlot, string> = {
   atmosphere: '/v2-assets/ui/dark-fantasy-atmosphere.jpg',
-  'scene-dnd5e': '/v2-assets/ui/campaign-mountain-city.jpg',
+  'scene-dnd5e': '/v2-assets/ui/dnd-ashen-throne.png',
   'scene-freeform-fantasy': '/v2-assets/ui/rules/rule-freeform-fantasy.webp',
   'scene-freeform-coc': '/v2-assets/ui/rules/rule-freeform-coc.webp',
   'scene-freeform-cyberpunk': '/v2-assets/ui/rules/rule-freeform-cyberpunk.webp',
   'scene-freeform-wuxia': '/v2-assets/ui/rules/rule-freeform-wuxia.webp',
   'scene-tavern-free': '/v2-assets/ui/rules/rule-tavern-free.webp',
   ruins: '/v2-assets/ui/campaign-moonlit-ruins.jpg',
+}
+
+// Scene-image references are persisted by stable builtin IDs. Keep aliases
+// used by the save-cover pool resolvable in the client so returning to the
+// overview does not turn a valid builtin cover into the generic rule fallback.
+const BUILTIN_SCENE_URLS: Record<string, string> = {
+  dnd5e: '/v2-assets/ui/campaign-mountain-city.jpg',
+  ashen_throne: '/v2-assets/ui/dnd-ashen-throne.png',
+  mountain_city: '/v2-assets/ui/campaign-mountain-city.jpg',
+  moonlit_ruins: '/v2-assets/ui/campaign-moonlit-ruins.jpg',
+  dark_fantasy: '/v2-assets/ui/dark-fantasy-atmosphere.jpg',
+  freeform_fantasy: '/v2-assets/ui/rules/rule-freeform-fantasy.webp',
+  freeform_coc: '/v2-assets/ui/rules/rule-freeform-coc.webp',
+  freeform_coc_harbor: '/v2-assets/ui/rules/rule-freeform-coc-harbor.webp',
+  freeform_coc_town: '/v2-assets/ui/rules/rule-freeform-coc-town.webp',
+  freeform_cyberpunk: '/v2-assets/ui/rules/rule-freeform-cyberpunk.webp',
+  freeform_cyberpunk_alley: '/v2-assets/ui/rules/rule-freeform-cyberpunk-alley.webp',
+  freeform_cyberpunk_rooftops: '/v2-assets/ui/rules/rule-freeform-cyberpunk-rooftops.webp',
+  freeform_wuxia: '/v2-assets/ui/rules/rule-freeform-wuxia.webp',
+  freeform_wuxia_mountains: '/v2-assets/ui/rules/rule-freeform-wuxia-mountains.webp',
+  freeform_wuxia_riverside: '/v2-assets/ui/rules/rule-freeform-wuxia-riverside.webp',
+  tavern_free: '/v2-assets/ui/rules/rule-tavern-free.webp',
 }
 const CSS_PROPERTIES: Partial<Record<BackgroundSlot, string>> = {
   atmosphere: '--df-bg-atmosphere-image',
@@ -77,6 +99,10 @@ export function ruleSceneSlot(ruleId?: string): RuleBackgroundSlot {
 
 export function ruleSceneUrl(ruleId?: string): string {
   return previews[ruleSceneSlot(ruleId)]
+}
+
+export function builtinSceneImageUrl(imageId?: string, fallbackRuleId?: string): string {
+  return BUILTIN_SCENE_URLS[String(imageId || '').trim()] || ruleSceneUrl(fallbackRuleId)
 }
 
 export function ruleSceneStyle(ruleId?: string): Record<string, string> {

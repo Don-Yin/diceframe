@@ -28,7 +28,7 @@ from src.password_hashing import hash_password
 
 logger = logging.getLogger("trpg")
 
-CURRENT_INSTANCE_SCHEMA_VERSION = 43
+CURRENT_INSTANCE_SCHEMA_VERSION = 47
 
 # 内置 freeform_coc 在 Currency Model V2 中把 base_unit 从「美元」升级为
 # 「美分」（1 amount = 1 美分），存量 CoC 存档的所有 canonical 金额必须 ×100
@@ -1020,6 +1020,22 @@ def _migrate_v42_to_v43(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v43_to_v44(payload: dict[str, Any]) -> dict[str, Any]:
+    """Fence readers that cannot enforce AI overrides and linked Push consent."""
+    from src.engine.modules import ai_seats, check_modes
+
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    if "ai_seats" not in modules:
+        modules["ai_seats"] = ai_seats.fresh()
+    if "check_modes" not in modules:
+        modules["check_modes"] = check_modes.fresh()
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 44
+    return payload
+
+
 def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Apply sequential, idempotent migrations to one persisted save payload."""
 
@@ -1027,6 +1043,12 @@ def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     version = int(payload.get("instance_schema_version", 1) or 1)
     if version < 1 or version > CURRENT_INSTANCE_SCHEMA_VERSION:
         raise ValueError(f"unsupported game instance schema version: {version}")
+    from src.migrations.resource_recovery import validate_recovery_state
+
+    validate_recovery_state(payload)
+    from src.migrations.local_instance_branch import main_sequence_version
+
+    version = main_sequence_version(payload, version)
     if version == 1:
         payload = _migrate_v1_to_v2(payload)
         version = 2
@@ -1153,7 +1175,27 @@ def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     if version == 42:
         payload = _migrate_v42_to_v43(payload)
         version = 43
+    if version == 43:
+        payload = _migrate_v43_to_v44(payload)
+        version = 44
+    if version == 44:
+        from src.migrations.table_preferences import split_table_preferences
+
+        payload = split_table_preferences(payload)
+        version = 45
+    if version == 45:
+        # Reader fence: older readers cannot enforce finale write barriers or
+        # deferred improvement receipts. Missing optional slots remain absent;
+        # never infer a historical plan, mark or reverse earlier skill gains.
+        version = 46
+    if version == 46:
+        # Reader fence: older runtimes can bypass recovery authorization and
+        # cannot preserve consumed qualification identities. Do not materialize
+        # historical sources or infer resources/rewards for older saves.
+        version = 47
     payload["instance_schema_version"] = version
+    from src.migrations.run_story import validate_slot_envelopes
+    validate_slot_envelopes(payload)
     return payload
 
 
@@ -1171,6 +1213,10 @@ def rebind_imported_game_state_payload(
     """
 
     payload = migrate_game_state_payload(data)
+    from src.migrations.resource_recovery import rebind_recovery_state
+    rebind_recovery_state(payload, run_id=run_id)
+    from src.migrations.run_story import rebind_story_state
+    rebind_story_state(payload, run_id=run_id)
     payload["game_key"] = list(game_key)
     payload["run_id"] = run_id
     payload["memory_namespace"] = f"{game_key!s}::run:{run_id}"
@@ -1229,6 +1275,9 @@ def normalize_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     rooms and unplayed multiplayer sessions therefore keep every participant.
     """
     payload = migrate_game_state_payload(data)
+    from src.migrations.run_story import preserves_frozen_roster
+    if preserves_frozen_roster(payload):
+        return payload
     players = payload.get("players")
     log = payload.get("log")
     if not isinstance(players, dict) or len(players) <= 1 or not isinstance(log, list) or not log:

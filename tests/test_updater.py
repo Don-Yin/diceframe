@@ -460,6 +460,13 @@ def _write_portable_archive(path: Path, version: str = "1.7.0") -> None:
         package.writestr(f"{top}/DiceFrame.exe", b"launcher")
 
 
+def _write_portable_payload(path: Path) -> None:
+    (path / "app").mkdir(parents=True)
+    (path / "python").mkdir()
+    (path / "app" / "web_server.py").write_text("# server", encoding="utf-8")
+    (path / "python" / "python.exe").write_bytes(b"python")
+
+
 @pytest.mark.asyncio
 async def test_portable_apply_stages_side_by_side_and_restart_signal(
     tmp_path, monkeypatch
@@ -501,6 +508,51 @@ async def test_portable_apply_stages_side_by_side_and_restart_signal(
     assert signal["expected_version"] == "1.7.0"
     assert Path(signal["candidate_dir"]) == candidate
     assert not archive.exists()
+
+
+@pytest.mark.asyncio
+async def test_portable_rollback_targets_previous_slot_and_stages_launcher(
+    tmp_path, monkeypatch
+):
+    install_root = tmp_path / "DiceFrame"
+    data_dir = install_root / "data"
+    updater_dir = data_dir / "_updater"
+    updater_dir.mkdir(parents=True)
+    versions = install_root / "versions"
+    previous = versions / "v1.6.0"
+    current = versions / "v1.7.0-beta.1"
+    _write_portable_payload(previous)
+    _write_portable_payload(current)
+    (install_root / "DiceFrame.exe").write_bytes(b"current launcher")
+    (updater_dir / "current.json").write_text(
+        json.dumps({
+            "schema": 1,
+            "version": "1.7.0-beta.1",
+            "relative_dir": "versions/v1.7.0-beta.1",
+            "previous_relative_dir": "versions/v1.6.0",
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TRPG_INSTALL_ROOT", str(install_root))
+    monkeypatch.delenv("TRPG_DATA_DIR", raising=False)
+
+    svc = updater.UpdaterService(_dependencies(data_dir, install_root / "app", SimpleNamespace()))
+    status = svc.get_status()
+    assert status["rollback"]["available"] is True
+    assert status["rollback"]["target_version"] == "1.6.0"
+
+    result = await svc.rollback_update()
+    assert result["ok"] is True
+
+    status = svc.get_status()
+    assert status["state"] == "restarting"
+    assert status["operation"] == "rollback"
+    assert status["version"] == "1.6.0"
+    signal = json.loads((updater_dir / "restart_signal.json").read_text(encoding="utf-8"))
+    assert signal["operation"] == "rollback"
+    assert signal["expected_version"] == "1.6.0"
+    assert Path(signal["candidate_dir"]) == previous
+    assert Path(signal["launcher_path"]).is_file()
 
 
 def _write_source_archive(path: Path, version: str = "1.7.0") -> None:

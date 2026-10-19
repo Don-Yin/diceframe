@@ -14,6 +14,8 @@ from src.engine.game_instance import GameInstance
 from src.engine.health import record_health_event
 from src.engine.language import localized_text, normalize_language
 from src.engine.modules import progression_state
+from src.engine.story import StoryFormatError, StorySink, StoryStream, read_story_mode
+from src.commands.story_output import bound_story_response, decode_story_response
 from src.llm.client import OutputTruncatedError, length_retry_budgets
 from src.llm.parser import (
     find_protocol_suffix_start,
@@ -483,7 +485,8 @@ async def _call_stream_with_length_retry(
     budgets = length_retry_budgets(narrative_max_tokens)
     for budget_index, current_max_tokens in enumerate(budgets):
         attempt_started = time.perf_counter()
-        filt = _NarrationDeltaFilter(on_delta)
+        story_stream = StoryStream(instance, on_delta) if read_story_mode(instance) == "dialogue" else None
+        filt = _NarrationDeltaFilter(story_stream.feed if story_stream else on_delta)
         try:
             response = await llm_client.call_stream(
                 system_prompt=gm_prompt,
@@ -493,6 +496,9 @@ async def _call_stream_with_length_retry(
                 on_delta=filt.feed,
             )
             await filt.flush()
+            if story_stream is not None:
+                await story_stream.flush()
+                response.story = story_stream.last_story
             response.token_budget_initial = narrative_max_tokens
             response.token_budget_used = current_max_tokens
             return response
@@ -543,6 +549,9 @@ async def call_llm_with_tag_retry(
     dice_retry = 0
     retry_kind = ""
     protocol_retry_used = False
+    story_retry_used = False
+    dialogue = read_story_mode(instance) == "dialogue"
+    streamed_story = None
     started = time.perf_counter()
     while True:
         attempt_started = time.perf_counter()
@@ -561,6 +570,12 @@ async def call_llm_with_tag_retry(
                     "ja": "⚠️ 前の応答が【システム判定・必須遵守】の判定結果に矛盾しています。判定結果を厳守してナレーションを書き直してください。",
                     "de": "⚠️ Die vorherige Antwort widersprach dem erforderlichen Würfel-/Probenergebnis. Schreibe die Erzählung neu und folge dabei strikt dem Probenergebnis.",
                 },
+            )
+        elif retry_kind == "story":
+            retry_context = context + (
+                "\n\nThe previous public body did not follow character-dialogue format. "
+                "Rewrite it as one narration/dialogue JSON object per line, using only roster IDs "
+                "or new:local_handle, followed by the required --- state-tag block."
             )
         if stream:
             response = await _call_stream_with_length_retry(
@@ -603,6 +618,18 @@ async def call_llm_with_tag_retry(
             response.narration = narration_part or response.narration or response.content
         response.narration = sanitize_narration(response.narration or response.content)
         data = parse_tag_state(response.content, combat_model)
+        if dialogue:
+            streamed_story = getattr(response, "story", None) if stream else None
+            try:
+                decode_story_response(instance, response, strict=not story_retry_used)
+            except StoryFormatError:
+                if story_retry_used:
+                    raise
+                story_retry_used = True
+                retry_kind = "story"
+                if on_reset:
+                    await on_reset()
+                continue
         if not data.get("state_update") and not data.get("plot_update"):
             try:
                 json_data = safe_parse_json(response.content)
@@ -646,10 +673,20 @@ async def call_llm_with_tag_retry(
         progression_state.round_value(instance),
         int((time.perf_counter() - started) * 1000),
     )
-    await _compress_long_narration(
-        llm_client, instance, gm_prompt, response, data,
-        public_narration_context, actions_text, combat_model, narrative_max_tokens,
-    )
+    if dialogue:
+        limits = _NARRATION_LIMITS.get(normalize_language(instance.language), _NARRATION_LIMITS["zh-CN"])
+        bound_story_response(response, data, trigger=limits["trigger"], limit=limits["combat"])
+        if stream and streamed_story != response.story:
+            if on_reset:
+                await on_reset()
+            await on_delta(response.narration)
+            if isinstance(on_delta, StorySink):
+                await on_delta.story_update(response.story)
+    else:
+        await _compress_long_narration(
+            llm_client, instance, gm_prompt, response, data,
+            public_narration_context, actions_text, combat_model, narrative_max_tokens,
+        )
     response.token_budget_initial = narrative_max_tokens
     response.token_budget_used = max_budget_used
     return response, data

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isSettingsSectionAvailable, normalizeSettingsSection } from '../src/utils/settingsSections'
+import { isSettingsSectionAvailable, legacySettingsFocus, normalizeSettingsSection } from '../src/utils/settingsSections'
 
 // 旧设置入口兼容契约：历史链接里的 #memory 段要落到现在的「模型」页。
 describe('normalizeSettingsSection', () => {
@@ -10,7 +10,15 @@ describe('normalizeSettingsSection', () => {
   it('passes valid section ids through unchanged', () => {
     expect(normalizeSettingsSection('api')).toBe('api')
     expect(normalizeSettingsSection('connection')).toBe('connection')
-    expect(normalizeSettingsSection('advanced')).toBe('advanced')
+    expect(normalizeSettingsSection('advanced')).toBe('models')
+  })
+
+  it('opens the merged general page for previous voice, Agent and maintenance links', () => {
+    for (const section of ['voice', 'agent', 'system']) expect(normalizeSettingsSection(section)).toBe('general')
+    expect(legacySettingsFocus('voice')).toBe('tts')
+    expect(legacySettingsFocus('agent')).toBe('agent')
+    expect(legacySettingsFocus('system')).toBe('logs')
+    expect(legacySettingsFocus('toString')).toBeUndefined()
   })
 
   it('returns null for unknown sections', () => {

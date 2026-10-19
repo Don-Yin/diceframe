@@ -76,6 +76,18 @@ const inviteInput = ref('')
 const invitePanel = ref<HTMLElement | null>(null)
 
 const stateLabel = computed(() => t(`peerState_${state.value}`))
+const peerStage = computed<'setup' | 'invite' | 'connect' | 'enter'>(() => {
+  if (connected.value) return 'enter'
+  if (mode.value === 'host' && inviteCodes.value.length) return 'invite'
+  if (state.value !== 'idle' && state.value !== 'closed' && state.value !== 'error') return 'connect'
+  return 'setup'
+})
+const peerStages = computed(() => [
+  { key: 'setup' as const, label: t('peerStepSetup') },
+  { key: 'invite' as const, label: t('peerStepInvite') },
+  { key: 'connect' as const, label: t('peerStepConnect') },
+  { key: 'enter' as const, label: t('peerStepEnter') },
+])
 /** 状态详情里的 Hub/协议原始错误码转成人话，正常进度文案原样展示。 */
 const displayDetail = computed(() => friendlyPeerDetail(stateDetail.value, t))
 /** 失败/关闭状态的 detail 才用红色横幅；连接中的进度提示走中性样式。 */
@@ -363,13 +375,18 @@ async function enterGame() {
       <RouterLink :to="{ name: 'overview' }" class="peer-back">
         <NIcon :component="ArrowBackOutline" />{{ t('peerBack') }}
       </RouterLink>
-      <span class="section-kicker">{{ t('peerKicker') }}</span>
+      <span class="section-kicker">CONNECT THE TABLE</span>
       <h1>{{ t('peerTitle') }}</h1>
       <p>{{ t('peerSubtitle') }}</p>
     </header>
 
     <main class="peer-layout">
       <section class="peer-card peer-setup">
+        <ol class="peer-flow-steps" :aria-label="t('peerProgressLabel')">
+          <li v-for="(step, index) in peerStages" :key="step.key" :class="{ active: peerStage === step.key, complete: peerStages.findIndex(item => item.key === peerStage) > index }" :aria-current="peerStage === step.key ? 'step' : undefined">
+            <span>{{ index + 1 }}</span>{{ step.label }}
+          </li>
+        </ol>
         <div class="peer-mode-tabs">
           <button :class="{ active: mode === 'host' }" :disabled="sessionActive" @click="selectMode('host')">{{ t('peerHostMode') }}</button>
           <button :class="{ active: mode === 'guest' }" :disabled="sessionActive" @click="selectMode('guest')">{{ t('peerGuestMode') }}</button>
@@ -420,7 +437,7 @@ async function enterGame() {
             <input v-model="directConsent" type="checkbox">
             <span>{{ t('peerDirectConsent') }} <RouterLink :to="{ name: 'legal-privacy' }" target="_blank" rel="noopener">{{ t('legalPrivacyTitle') }}</RouterLink></span>
           </label>
-          <button class="success peer-primary" :disabled="!directConsent || !selectedGameKey || playersLoading || !hasInviteCapacity || busy || sessionActive" @click="createRoom">
+          <button class="primary success peer-primary" :disabled="!directConsent || !selectedGameKey || playersLoading || !hasInviteCapacity || busy || sessionActive" @click="createRoom">
             <NIcon :component="LinkOutline" />{{ t('peerCreateRoom') }}
           </button>
         </template>
@@ -455,7 +472,7 @@ async function enterGame() {
             <input v-model="directConsent" type="checkbox">
             <span>{{ t('peerDirectConsent') }} <RouterLink :to="{ name: 'legal-privacy' }" target="_blank" rel="noopener">{{ t('legalPrivacyTitle') }}</RouterLink></span>
           </label>
-          <button class="success peer-primary" :disabled="!directConsent || !inviteInput || sessionActive || busy" @click="joinRoom">
+          <button class="primary success peer-primary" :disabled="!directConsent || !inviteInput || sessionActive || busy" @click="joinRoom">
             <NIcon :component="LinkOutline" />{{ t('peerJoinRoom') }}
           </button>
         </template>
@@ -523,7 +540,7 @@ async function enterGame() {
           <code v-for="(peerState, peerId) in peerStates" :key="peerId">{{ peerId }} · {{ t(`peerState_${peerState}`) }}</code>
         </div>
         <button v-if="state !== 'idle' && state !== 'closed'" class="peer-disconnect" @click="peerSession.stop()">{{ t('peerDisconnect') }}</button>
-        <button v-if="connected && peerSession.gameKey" class="success peer-enter-game" @click="enterGame">{{ t('peerEnterGame') }}</button>
+        <button v-if="connected && peerSession.gameKey" class="primary success peer-enter-game" @click="enterGame">{{ t('peerEnterGame') }}</button>
         <p class="peer-boundary">{{ t('peerBoundary') }}</p>
 
         <div class="peer-connection-check" :class="{ active: connected }">

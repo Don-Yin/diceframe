@@ -133,5 +133,50 @@ def restore_from_transaction(instance: Any, snapshot: dict[str, Any]) -> None:
     replace_event_ledger(instance, deepcopy(snapshot["event_ledger"]))
 
 
+def round_entry_snapshot(instance: Any) -> dict[str, Any]:
+    """Judgment-entry record: full state copy, ledger as an append-only mark.
+
+    The ledger only grows inside a round, so its length plus the last batch id
+    identify the entry point without persisting a second copy of the ledger.
+    """
+    ledger = event_ledger(instance)
+    last = ledger[-1] if ledger and isinstance(ledger[-1], dict) else {}
+    return {
+        "state": deepcopy(state(instance)),
+        "ledger_length": len(ledger),
+        "ledger_last_batch_id": str(last.get("batch_id") or ""),
+    }
+
+
+def restore_round_entry(instance: Any, entry: Any) -> bool:
+    """Roll state and ledger back to a ``round_entry_snapshot``.
+
+    The ledger is truncated only when it still extends the recorded entry;
+    if it was replaced meanwhile it is left alone. Returns whether the ledger
+    was rewound (state is always restored for a well-formed entry).
+    """
+    if not isinstance(entry, dict) or not isinstance(entry.get("state"), dict):
+        return False
+    require_writable(instance)
+    replace_state(instance, deepcopy(entry["state"]))
+    length = entry.get("ledger_length")
+    ledger = event_ledger(instance)
+    if type(length) is not int or length < 0 or length > len(ledger):
+        return False
+    # With an empty entry ledger there is no marker to distinguish an
+    # append-only extension from a ledger that was replaced wholesale.  Keep
+    # the current ledger rather than clearing unrelated events; the caller
+    # still restores the ruleset state and logs the ambiguous ledger.
+    if length == 0 and ledger:
+        return False
+    if length:
+        last = ledger[length - 1]
+        last_id = str(last.get("batch_id") or "") if isinstance(last, dict) else ""
+        if last_id != str(entry.get("ledger_last_batch_id") or ""):
+            return False
+    del ledger[length:]
+    return True
+
+
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)
 register_module_state(SPEC)

@@ -12,9 +12,12 @@ from typing import Any
 
 from aiohttp import web
 
+from src.docker_launcher.data_versions import (
+    activation_pending, prune_retired_data, wait_for_activation,
+)
 from src.ai_providers import resolve_provider
 from src.adventures import sync_adventure_catalog
-from src.common_factory import TRPGSubsystems
+from src.common_factory import TRPGSubsystems, close_model_clients
 from src.hub_client import HubClient
 from src.plugin_host import PluginHost
 from src.template_catalog import sync_template_catalog
@@ -202,15 +205,33 @@ class WebUIBootstrap:
         recovered = await subsystems.registry.recover_all()
         if recovered:
             self.logger.info("恢复了 %d 个存档", len(recovered))
-            delivered = await app["api"].recover_economy_outboxes(recovered)
-            if delivered:
-                self.logger.info("恢复了 %d 个对局的经济外部效果", delivered)
         removed_templates = app["api"].cleanup_orphan_game_templates()
         if removed_templates:
             self.logger.info(
                 "已清理 %d 个孤立的对局临时世界模板", removed_templates
             )
-        await plugin_host.start_enabled()
+        if activation_pending(dependencies.environ):
+            app["_data_activation_task"] = asyncio.create_task(
+                self.activate_after_update(app, recovered), name="update-data-activation",
+            )
+        else:
+            await self.start_background(app, recovered)
+
+    async def activate_after_update(self, app: web.Application, recovered) -> None:
+        await wait_for_activation(self.dependencies.environ)
+        runtime = Path(self.dependencies.environ["TRPG_DOCKER_RUNTIME_ROOT"]).resolve()
+        try:
+            prune_retired_data(runtime)
+        except (OSError, ValueError):
+            self.logger.warning("保留无法安全清理的旧更新数据副本", exc_info=True)
+        await self.start_background(app, recovered)
+
+    async def start_background(self, app: web.Application, recovered) -> None:
+        if recovered:
+            delivered = await app["api"].recover_economy_outboxes(recovered)
+            if delivered:
+                self.logger.info("恢复了 %d 个对局的经济外部效果", delivered)
+        await app["plugin_host"].start_enabled()
         app["_embedding_backfill_task"] = asyncio.create_task(
             self.embed_pending_memories(app)
         )
@@ -299,6 +320,18 @@ class WebUIBootstrap:
         signal.raise_signal(signal.SIGINT)
 
     async def on_cleanup(self, app: web.Application) -> None:
+        activation_task = app.get("_data_activation_task")
+        if activation_task:
+            activation_task.cancel()
+            try:
+                await activation_task
+            except asyncio.CancelledError:
+                pass
+        api = app.get("api")
+        if api is not None and hasattr(api, "close_assistant_agent"):
+            await api.close_assistant_agent()
+        if api is not None and hasattr(api, "close_hosted_combat"):
+            await api.close_hosted_combat()
         plugin_host = app.get("plugin_host")
         if plugin_host:
             await plugin_host.cleanup()
@@ -329,8 +362,7 @@ class WebUIBootstrap:
             await subsystems.registry.save_all_active()
         except Exception:
             self.logger.exception("关闭前保存失败")
-        if subsystems.llm_client:
-            await subsystems.llm_client.close()
+        await close_model_clients(subsystems)
         if subsystems.memory_store and subsystems.memory_store.embedding_client:
             await subsystems.memory_store.embedding_client.close()
         subsystems.lorebook_store.close()

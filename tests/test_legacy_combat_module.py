@@ -268,7 +268,7 @@ def test_v32_payload_migrates_through_to_no_slot():
     before = deepcopy(original)
     migrated = migrate_game_state_payload(original)
     assert original == before
-    assert migrated["instance_schema_version"] == CURRENT_INSTANCE_SCHEMA_VERSION == 43
+    assert migrated["instance_schema_version"] == CURRENT_INSTANCE_SCHEMA_VERSION
     assert SLOT not in migrated["modules"]
     assert not LEGACY_VALUES.keys() & migrated.keys()
     assert migrate_game_state_payload(migrated) == migrated
@@ -298,7 +298,7 @@ def test_old_saves_drop_the_slot_whatever_its_shape(version, slot):
     before = deepcopy(original)
     migrated = migrate_game_state_payload(original)
     assert original == before
-    assert migrated["instance_schema_version"] == 43
+    assert migrated["instance_schema_version"] == CURRENT_INSTANCE_SCHEMA_VERSION
     assert SLOT not in migrated["modules"]
     assert migrate_game_state_payload(migrated) == migrated
 

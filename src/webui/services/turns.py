@@ -6,6 +6,8 @@ HTTP routes 只负责读取请求和绑定 SSE 回调；回合状态机、骰子
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
@@ -13,8 +15,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 
 from src.commands.round_processor import RoundNotProcessed, RoundProcessingFailure
-from src.engine import progression
-from src.engine.modules import adventure_runtime_state, checks, economy_state, round_safety, ruleset_runtime, session_stats, table_settings
+from src.engine import check_decisions, progression
+from src.engine.modules import adventure_runtime_state, checks, economy_state, round_safety, ruleset_runtime, session_stats
 from src.engine.action_gate import (
     ACTOR_DECEASED,
     ECONOMY_DECISION_PENDING,
@@ -40,7 +42,8 @@ from src.engine.economy import (
 from src.engine.game_instance import GameState
 from src.engine.language import localized_text
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
-from src.engine.modules import progression_state, round_presentation
+from src.engine import module_hooks
+from src.engine.modules import progression_state
 from src.engine.player_control import SUBMISSION_BLOCK_CODES
 from src.engine.visibility_rules import proposal_visible_to
 from src.webui.services._common import MAX_ACTIONS_PER_TURN
@@ -209,10 +212,11 @@ def _pending_luck_payload(
         "ok": True,
         "phase": "luck",
         "advanced": False,
-        "message": "检定已完成，请选择是否消耗幸运后再继续叙事",
+        "message": "检定已完成，请先处理检定选择再继续叙事",
         "check_result": checks.last_check(instance),
         "check_results": list(checks.last_checks(instance)),
         "pending_luck_decisions": instance.pending_luck_checks(),
+        "pending_push_decisions": check_decisions.pending(instance),
         "multiplayer": instance.multiplayer_status(),
     }
     if roll:
@@ -231,7 +235,7 @@ def _round_payload(
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "narration": narration,
-        "quick_actions": list(round_presentation.quick_actions(instance)),
+        "quick_actions": list(module_hooks.read(instance, module_hooks.QUICK_ACTIONS)),
         "economy_proposals": _visible_economy_proposals(instance, viewer_uid),
         "check_result": checks.last_check(instance),
         "check_results": list(checks.last_checks(instance)),
@@ -241,16 +245,16 @@ def _round_payload(
     if ok is not None:
         payload["ok"] = ok
     if include_recap:
-        payload["recap"] = round_presentation.last_state_update(instance)
+        payload["recap"] = module_hooks.read_value(instance, module_hooks.STATE_UPDATE)
     return payload
 
 
 def _luck_error_status(code: str) -> int:
     if code in {"GAME_NOT_FOUND", "CHECK_NOT_FOUND"}:
         return 404
-    if code == "LUCK_FORBIDDEN":
+    if code in {"LUCK_FORBIDDEN", "PUSH_FORBIDDEN"}:
         return 403
-    if code in {"LUCK_ALREADY_RESOLVED", "LUCK_NOT_PENDING", "REWRITE_IN_PROGRESS", "STALE_RUN"}:
+    if code in {"LUCK_ALREADY_RESOLVED", "LUCK_NOT_PENDING", "PUSH_INVALID_OR_STALE", "REWRITE_IN_PROGRESS", "STALE_RUN"}:
         return 409
     return 400
 
@@ -323,8 +327,12 @@ async def _fill_ai_player_actions(
         return False
     if not isinstance(records, (list, tuple)):
         return False
+    if any(isinstance(record, dict) and record.get("seat_status_changed") for record in records):
+        # Failed/skipped seats have no action to trigger the usual save path.
+        await dependencies.save_instance(instance)
     return any(
-        isinstance(record, dict) and str(record.get("status") or "") == "added"
+        isinstance(record, dict)
+        and str(record.get("status") or "") in {"added", "fallback"}
         for record in records
     )
 
@@ -605,7 +613,7 @@ async def _advance_progression(
     await _prepare_checks(dependencies, instance)
     if run_changed is not None and run_changed():
         return _gate_rejection(instance, viewer_uid, RUN_CHANGED)
-    if instance.pending_luck_checks():
+    if check_decisions.pending_any(instance):
         await dependencies.save_instance(instance)
         return _result(_pending_luck_payload(instance, roll=roll_payload))
     try:
@@ -655,6 +663,9 @@ async def resume_after_control_change(
     if not instance:
         return _result({"ok": False, "resumed": False, "error": "游戏不存在"}, 404)
 
+    if not progression.accepts_narrative(instance):
+        return _result({'ok': True, 'resumed': False, 'reason': 'profile_progression'})
+
     combat = dependencies.resume_authoritative_combat
     if combat is not None:
         combat_outcome = await combat(game_key, seat_uid)
@@ -682,6 +693,35 @@ async def resume_after_control_change(
         })
     advanced["payload"]["resumed"] = True
     return advanced
+
+
+async def resume_after_creation(
+    dependencies: TurnDependencies,
+    game_key: str,
+) -> TurnResult:
+    """Run the same progression boundary for a newly committed AI table.
+
+    Lifecycle creation has no control-change seat to report.  Pick the first
+    active AI seat only so an authoritative combat runtime can verify the
+    actor identity; the actual exploration fill still handles every AI seat
+    in stable order.
+    """
+
+    from src.engine.player_control import is_ai_controlled
+
+    instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
+    seat_uid = ""
+    if instance is not None:
+        seat_uid = next(
+            (
+                uid for uid in sorted(instance.active_alive_players)
+                if is_ai_controlled(instance, uid)
+            ),
+            "",
+        )
+    return await resume_after_control_change(
+        dependencies, game_key, seat_uid=seat_uid,
+    )
 
 
 async def submit_action(
@@ -780,7 +820,7 @@ async def submit_action(
             None,
         )
         existing_pending_roll = bool(existing_action and existing_action.get("dice_pending"))
-        if table_settings.solo_mode(instance):
+        if game_config.solo_mode(instance):
             action_count = sum(1 for action in instance.action_queue if action.get("user_id") == actor_uid)
             if action_count >= MAX_ACTIONS_PER_TURN:
                 return _result({"error": f"本回合已达行动上限（{MAX_ACTIONS_PER_TURN} 条）"}, 400)
@@ -900,6 +940,15 @@ async def resolve_luck_and_continue(
     decision = await dependencies.resolve_luck_decision(
         game_key, check_id, actor_uid, spend,
     )
+    return await continue_after_decision(dependencies, game_key, actor_uid, decision,
+        on_delta=on_delta, on_reset=on_reset)
+
+
+async def continue_after_decision(
+    dependencies: TurnDependencies, game_key: str, actor_uid: str, decision: dict, *,
+    on_delta: NarrationDelta | None = None, on_reset: NarrationReset | None = None,
+) -> TurnResult:
+    """All post-check choices resume through the existing round authority chain."""
     if not decision.get("ok"):
         return _result(decision, _luck_error_status(str(decision.get("code") or "")))
     if decision.get("round_already_resolved"):
@@ -976,7 +1025,7 @@ async def advance_round(
 
     if instance.state == GameState.ACTIVE_JUDGMENT and instance.action_queue:
         await _prepare_checks(dependencies, instance)
-        pending_luck = instance.pending_luck_checks()
+        pending_luck = check_decisions.pending_any(instance)
         if pending_luck and not force:
             return _result(_pending_luck_payload(instance), 409)
         advanced_declined_luck: list[dict[str, Any]] = []
@@ -1029,7 +1078,7 @@ async def advance_round(
     advanced = await instance.advance_round() if force else await instance.try_advance()
     if advanced:
         await _prepare_checks(dependencies, instance)
-        pending_luck = instance.pending_luck_checks()
+        pending_luck = check_decisions.pending_any(instance)
         if pending_luck and not force:
             await dependencies.save_instance(instance)
             return _result(_pending_luck_payload(instance))

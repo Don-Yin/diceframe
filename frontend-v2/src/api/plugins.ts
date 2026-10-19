@@ -102,6 +102,9 @@ export const pluginApi = {
       map_background?: MapBackgroundSelection
       map_icons?: Array<{ id: string; file_name: string; file_data: string }>
       language?: string
+      adventure_ids?: string[]
+      adventure_refs?: Array<{ adventure_id: string; source_kind: string; source_id: string }>
+      lorebook_ids?: string[]
   }) => apiBlob('/plugins/export', { method: 'POST', body: JSON.stringify(payload) }),
   updateConfig: (pluginId: string, payload: Record<string, unknown>) =>
     api(pluginPath(pluginId, '/config'), { method: 'PUT', body: JSON.stringify(payload) }),

@@ -70,6 +70,7 @@ def _enemy_instance_from_profile(
         "speed": int(profile.get("speed", 30)),
         "abilities": dict(profile.get("abilities") or {}),
         "attacks": [dict(attack) for attack in profile.get("attacks") or []],
+        **({"creature_type": profile["creature_type"]} if profile.get("creature_type") else {}),
     }
 
 

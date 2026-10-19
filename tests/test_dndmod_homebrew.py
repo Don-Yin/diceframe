@@ -27,7 +27,6 @@ MODULE_MANIFEST = {
     "name": "Homebrew Module",
     "version": "1.0.0",
     "plugin_type": "content-pack",
-    "entrypoint": ["python", "-c", "pass"],
     "content_profile": "adventure-module",
     "content_delivery_mode": "catalog",
     "ruleset_catalogs": ["packs/dnd2024"],

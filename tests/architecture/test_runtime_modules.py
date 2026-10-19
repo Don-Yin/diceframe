@@ -24,17 +24,12 @@ CONTROL_WRITERS = {
 # ``x.combat_extension_round_snapshots`` store outside these owners would be a
 # silent shadow attribute on the dataclass. Direct attribute writes only: this
 # does not police aliases, subscript mutation, clear/pop, or generic setattr.
+# Reset, rollback, abort, swipe and round commit reach the module through
+# module_hooks, so the core lifecycle files are no longer owners (#515).
 COMBAT_WRITERS = {
     SRC / "webui" / "services" / "combat_extension.py",
-    SRC / "engine" / "round_snapshots.py",
     MODULES / "combat_extension_state.py",
     SRC / "migrations" / "instance.py",
-    # Existing lifecycle owner replaces current and clears snapshots on reset.
-    SRC / "engine" / "instance_lifecycle.py",
-    # Existing rollback/abort owner clears current on invalid restoration.
-    SRC / "engine" / "round_recovery.py",
-    # Existing historical rewrite owner has the same fail-closed fallback.
-    SRC / "commands" / "swipe_generator.py",
 }
 
 
@@ -338,33 +333,49 @@ MODULE_API_WRITERS: dict[str, tuple[frozenset[str], frozenset[Path]]] = {
             SRC / "commands" / "game_lifecycle.py",
             SRC / "commands" / "round_processor.py",
             SRC / "webui" / "services" / "adventure_runtime.py",
+            # Node/choice transactions and their compensated before-images.
+            SRC / "webui" / "services" / "adventure_commands.py",
             SRC / "webui" / "services" / "game_lifecycle.py",
             SRC / "webui" / "services" / "game_seed_lifecycle.py",
             SRC / "webui" / "services" / "ruleset_gameplay.py",
         }),
     ),
+    # Reached only through module_hooks (round reset / report record).
     "world_reports": (
-        frozenset({"replace_last_overreach", "replace_last_world_legality", "replace_last_world_events"}),
-        frozenset({SRC / "commands" / "round_processor.py"}),
+        frozenset({
+            "replace_last_overreach", "replace_last_world_legality", "replace_last_world_events",
+            "clear_round", "record_state",
+        }),
+        frozenset(),
     ),
     "round_presentation": (
         frozenset({
             "replace_gm_directives", "replace_quick_actions", "replace_last_state_update",
             "replace_last_token_budget_bump", "replace_pending_combat_results",
+            "begin_round", "reset", "record_state",
         }),
-        frozenset({SRC / "engine" / "game_instance.py", SRC / "engine" / "instance_lifecycle.py"}),
+        # Reached only through module_hooks.
+        frozenset(),
     ),
+    # Reached only through module_hooks (engine.health reads/writes reports).
     "health": (
-        frozenset({"replace_health_events", "replace_health_status"}),
+        frozenset({"replace_health_events", "replace_health_status", "reset", "record_state"}),
         frozenset(),
     ),
+    # Reached only through module_hooks.
     "lorebook_runtime": (
-        frozenset({"replace_timers"}),
+        frozenset({"replace_timers", "tick", "clear"}),
         frozenset(),
     ),
+    # Reached only through module_hooks (seat.* and instance reset points).
+    "seat_activity": (
+        frozenset({"mark_acted", "forget_seat", "reset", "seat_acted"}),
+        frozenset(),
+    ),
+    # Reached only through module_hooks (engine.player_control reads/writes state).
     "player_control_state": (
-        frozenset({"set_away_control_policy_value"}),
-        frozenset({SRC / "engine" / "player_control.py"}),
+        frozenset({"set_away_control_policy_value", "record_state"}),
+        frozenset(),
     ),
 }
 
@@ -563,6 +574,9 @@ def test_only_session_stats_owners_assign_fields() -> None:
     # Same names on unrelated response/plugin objects are not session stats.
     unrelated = {
         (SRC / "commands" / "protocol_repair.py", "repaired", "total_tokens"),
+        # Model-response usage accumulated across a format-repair call; it
+        # reaches persisted session totals only through record_llm_usage.
+        (SRC / "commands" / "story_output.py", "response", "total_tokens"),
         (SRC / "plugin_host" / "host.py", "runtime", "started_at"),
     }
     violations: list[str] = []
@@ -594,11 +608,9 @@ PRIVATE_CHANNEL_GETTERS = {"private_log", "table_talk"}
 
 
 def test_only_private_channel_owners_assign_compatibility_properties() -> None:
-    # Aggregate methods own appends/removal; lifecycle owns reset clears.
+    # Aggregate methods append through module_hooks; reset clears via instance.reset.
     owners = {
         MODULES / "private_channels.py",
-        SRC / "engine" / "game_instance.py",
-        SRC / "engine" / "instance_lifecycle.py",
         SRC / "migrations" / "instance.py",
     }
     violations: list[str] = []
@@ -632,20 +644,14 @@ def test_private_channel_guard_rejects_module_api_writes(source) -> None:
 
 MEDIA_SETTERS = {"replace_scene_image", "replace_map_background"}
 MEDIA_GETTERS = {"scene_image", "map_background"}
-# Existing generated-image save failures restore the previous top-level scene
-# image through the module API; they never set a new one.
-MEDIA_ROLLBACK_WRITERS = {
-    SRC / "commands" / "round_processor.py",
-    SRC / "webui" / "services" / "generated_images.py",
-}
+# Scene-image / map-background writes go through module_hooks (SCENE_IMAGE /
+# MAP_BACKGROUND); no file outside the module calls its write API (#515).
+MEDIA_ROLLBACK_WRITERS: set = set()
 
 
 def test_only_media_owners_assign_compatibility_properties() -> None:
-    # Aggregate setters own updates; lifecycle retains its existing reset policy.
     owners = {
         MODULES / "media.py",
-        SRC / "engine" / "game_instance.py",
-        SRC / "engine" / "instance_lifecycle.py",
         SRC / "migrations" / "instance.py",
     }
     violations: list[str] = []
@@ -718,11 +724,13 @@ TABLE_SETTINGS_FIELDS = frozenset({
     "dice_reveal_mode",
 })
 # The GameInstance table settings facades are gone: writes go through
-# ``table_settings.replace_<field>(...)``. Aggregate methods (configure_*/set_*)
-# and the reset lifecycle own those calls; new-run construction in
-# commands/game_lifecycle.py copies the source run's gm_style_override.
+# Explicit kernel owners and optional preference hooks. Aggregate methods and
+# reset own kernel writes; optional preferences carry themselves via new-run hooks.
 TABLE_SETTINGS_REPLACE_CALLERS = {
-    MODULES / "table_settings.py",
+    MODULES / "game_config.py",
+    MODULES / "narration_preferences.py",
+    MODULES / "check_presentation.py",
+    MODULES / "economy_state.py",
     SRC / "engine" / "game_instance.py",
     SRC / "engine" / "instance_lifecycle.py",
     SRC / "commands" / "game_lifecycle.py",
@@ -731,7 +739,7 @@ TABLE_SETTINGS_REPLACE_CALLERS = {
 
 def _table_settings_property_writes(path: Path, tree: ast.AST) -> list[int]:
     """Direct attribute stores of a retired name (would raise on GameInstance)."""
-    if path == MODULES / "table_settings.py":
+    if path in {MODULES / name for name in ("game_config.py", "narration_preferences.py", "check_presentation.py", "economy_state.py")}:
         return []
     return [
         node.lineno for node in ast.walk(tree)
@@ -749,9 +757,9 @@ def _table_settings_replace_calls(path: Path, tree: ast.AST) -> list[int]:
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "table_settings"
+        and node.func.value.id in {"game_config", "narration_preferences", "check_presentation", "economy_state", "table_settings"}
         and node.func.attr.startswith("replace_")
-        and node.func.attr.removeprefix("replace_") in TABLE_SETTINGS_FIELDS
+        and node.func.attr.removeprefix("replace_") in TABLE_SETTINGS_FIELDS | {"reward_policy"}
     ]
 
 
@@ -777,7 +785,7 @@ def test_table_settings_guard_rejects_external_writes(source) -> None:
     tree = ast.parse(source)
     for path in ("commands/game_lifecycle.py", "engine/game_instance.py", "engine/instance_lifecycle.py"):
         assert _table_settings_property_writes(SRC / path, tree)
-    assert not _table_settings_property_writes(MODULES / "table_settings.py", tree)
+    assert not _table_settings_property_writes(MODULES / "game_config.py", tree)
 
 
 ROOM_ACCESS_SETTERS = {"replace_max_players", "replace_player_access_open", "replace_bot_bind_token"}
@@ -786,9 +794,9 @@ ROOM_ACCESS_CARRY_OVER_WRITERS = {SRC / "commands" / "game_lifecycle.py"}
 
 
 def test_table_settings_guard_rejects_replace_calls_outside_owners() -> None:
-    tree = ast.parse("table_settings.replace_solo_mode(x, True)\n"
-                     "table_settings.replace_economy_reward_policy(x, {})\n"
-                     "table_settings.solo_mode(x)")
+    tree = ast.parse("game_config.replace_solo_mode(x, True)\n"
+                     "economy_state.replace_reward_policy(x, {})\n"
+                     "game_config.solo_mode(x)")
     assert len(_table_settings_replace_calls(SRC / "webui" / "services" / "game_controls.py", tree)) == 2
     for owner in TABLE_SETTINGS_REPLACE_CALLERS:
         assert not _table_settings_replace_calls(owner, tree)

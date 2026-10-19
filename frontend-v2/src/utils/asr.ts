@@ -53,6 +53,11 @@ function peerGameActive(): boolean {
   }
 }
 
+/** Configured server ASR outside a game (DF Agent is owner-only and local). */
+export function serverAsrReady(): boolean {
+  return asrRuntimeConfig.value.ready && secureMicContext()
+}
+
 export function voiceInputSupported(): boolean {
   // P2P 直连局的音频上传无法走数据通道白名单，联机模式下直接隐藏（与服务端 TTS 的先例一致）。
   return asrRuntimeConfig.value.ready && secureMicContext() && !peerGameActive()

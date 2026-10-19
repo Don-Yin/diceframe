@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.plugin_host.mirrors import FetchResult
+from src.docker_launcher.contracts import safe_extract_package
 from src.webui.services import updater
 
 
@@ -51,6 +52,15 @@ def _docker_archive(path: Path, version: str = "2.4.0") -> None:
         package.writestr(f"{top}/app/src/version.py", f'__version__ = "{version}"')
         package.writestr(f"{top}/app/static-v2/index.html", "ok")
         package.writestr(f"{top}/runtime/site-packages/runtime.txt", "ok")
+
+
+def _install_docker_payload(archive: Path, runtime: Path, version: str) -> Path:
+    extract = runtime / ("extract-" + version)
+    package_root = safe_extract_package(archive, extract)
+    target = runtime / "docker-versions" / f"v{version}"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    package_root.rename(target)
+    return target
 
 
 def test_docker_asset_selection_is_version_exact_and_prefers_manifest():
@@ -136,6 +146,47 @@ async def test_docker_download_and_prepare_candidate(tmp_path, monkeypatch):
     signal = json.loads((runtime / "restart_signal.json").read_text(encoding="utf-8"))
     assert signal["relative_dir"] == "docker-versions/v2.4.0"
     assert (runtime / signal["relative_dir"] / "manifest.json").is_file()
+
+
+@pytest.mark.asyncio
+async def test_docker_rollback_targets_previous_payload(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    runtime = data / "_updater"
+    runtime.mkdir(parents=True)
+    previous_archive = tmp_path / "previous.zip"
+    current_archive = tmp_path / "current.zip"
+    _docker_archive(previous_archive, "2.3.2")
+    _docker_archive(current_archive, "2.4.0")
+    previous = _install_docker_payload(previous_archive, runtime, "2.3.2")
+    current = _install_docker_payload(current_archive, runtime, "2.4.0")
+    (runtime / "current.json").write_text(json.dumps({
+        "schema": 1,
+        "mode": "docker",
+        "version": "2.4.0",
+        "relative_dir": "docker-versions/v2.4.0",
+        "previous_relative_dir": "docker-versions/v2.3.2",
+    }), encoding="utf-8")
+    monkeypatch.setenv("TRPG_INSTALL_MODE", "docker-managed")
+    monkeypatch.setenv("TRPG_DOCKER_RUNTIME_ROOT", str(runtime))
+
+    service = _service(data, tmp_path, SimpleNamespace())
+    status = service.get_status()
+    assert status["rollback"]["available"] is True
+    assert status["rollback"]["target_version"] == "2.3.2"
+
+    result = await service.rollback_update()
+    assert result == {
+        "ok": True,
+        "state": "restarting",
+        "operation": "rollback",
+        "version": "2.3.2",
+    }
+    signal = json.loads((runtime / "restart_signal.json").read_text(encoding="utf-8"))
+    assert signal["operation"] == "rollback"
+    assert signal["expected_version"] == "2.3.2"
+    assert signal["relative_dir"] == "docker-versions/v2.3.2"
+    assert Path(signal["candidate_dir"]) == previous
+    assert current.is_dir()
 
 
 def test_docker_prepare_reuses_matching_version_without_overwrite(tmp_path, monkeypatch):

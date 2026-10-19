@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import logging
 from typing import Any
 
@@ -10,7 +12,7 @@ from src.commands.state_recap import build_state_change_messages
 from src.engine.character_utils import revive_character
 from src.engine.game_instance import GameInstance
 from src.engine.health import record_health_event
-from src.engine.modules import progression_state, table_settings
+from src.engine.modules import progression_state
 from src.engine.puzzle import PuzzleState
 from src.rulesets.contracts import (
     CharacterRevivalRuntime,
@@ -66,7 +68,7 @@ def apply_revive_commands(
 ) -> None:
     revive_commands = data.get("revive_commands", [])
     # P2-O：硬核难度禁止复活，落实"硬核=角色可永久死亡"的机制差异（不只靠 GM prompt 文案）。
-    hardcore = str(table_settings.difficulty(instance) or "") == "硬核"
+    hardcore = str(game_config.difficulty(instance) or "") == "硬核"
     for cmd in revive_commands:
         uid = cmd["uid"]
         method = cmd.get("method", "法术")
@@ -101,7 +103,9 @@ def apply_growth_rewards(
         return list(messages or [])
     growth_system = rule.growth_system if rule else "xp_level"
     if growth_system == "skill_improvement":
-        progression.skill_growth_checks(instance, data.get("growth_skills", []))
+        from src.engine import module_hooks
+        from src.engine.modules import checks
+        module_hooks.run(module_hooks.SETTLED_SKILL_USE, instance, rule, list(checks.last_checks(instance)))
         return []
 
     xp_rewards: dict[str, int] = data.get("xp_rewards", {})
@@ -151,10 +155,17 @@ async def apply_memory_delta(instance: GameInstance, response: Any, memory_store
 
 
 def apply_plot_update(instance: GameInstance, response: Any) -> None:
-    if response.plot_update and instance.plot_tracker:
+    plot_update = response.plot_update
+    if isinstance(plot_update, dict) and "adventure_completion" in plot_update:
+        plot_update = dict(plot_update)
+        plot_update.pop("adventure_completion", None)
+    if isinstance(plot_update, dict) and 'story_transition' in plot_update:
+        from src.engine import module_hooks
+        module_hooks.record(instance, 'story_candidate', plot_update['story_transition'])
+    if plot_update and instance.plot_tracker:
         try:
             changes = instance.plot_tracker.apply_update(
-                response.plot_update, progression_state.round_value(instance),
+                plot_update, progression_state.round_value(instance),
             )
             if changes:
                 logger.info("剧情更新: round=%d, changes=%s", progression_state.round_value(instance), changes)

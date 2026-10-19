@@ -14,8 +14,11 @@ Every plugin starts with `plugin.json`. `schema_version`, `id`, `name`, `version
 6. Validate and package with:
 
 ```bash
+python scripts/validate_content_module.py path/to/plugin --json
 python scripts/package_plugin.py path/to/plugin
 ```
+
+Adventure content stays a `content-pack`: declare `content_profile: "adventure-module"`, `content_delivery_mode: "catalog"` and `adventure_packages`. Catalog mode rejects `entrypoint`; it registers data for deliberate use rather than starting a program or importing into every game. A legacy pack with no delivery fields retains its existing behavior and, if executable, its process risk. The deep validator checks declared adventures/catalogues and runtime requirements; packaging alone does not prove gameplay compatibility.
 
 This path does not require a `PluginHost` edit.
 

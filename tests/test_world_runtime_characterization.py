@@ -19,6 +19,8 @@ WR PR 的 schema / migration 变更都有一张"改动前后必须等价（或�
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import asyncio
 from copy import deepcopy
 
@@ -26,7 +28,7 @@ import pytest
 
 from src.engine.game_instance import GameInstance, GameRegistry
 from src.engine.memory_outbox import pending_memory_deliveries, queue_memory_delivery
-from src.engine.modules import economy_state, table_settings
+from src.engine.modules import economy_state
 from src.engine.world_events import advance_world_time
 from src.engine.world_state import (
     WORLD_STATE_SCHEMA_VERSION,
@@ -186,7 +188,7 @@ def test_world_writes_produce_no_memory_deltas() -> None:
 def test_rollback_restores_world_but_not_bindings() -> None:
     instance = make_instance()
     instance.world_id = "world-1"
-    table_settings.replace_solo_mode(instance, True)
+    game_config.replace_solo_mode(instance, True)
     instance.players["p1"] = {"character_name": "Alice", "character_sheet": {"hp": 10}}
     instance.bind_ruleset_runtime({
         "runtime_id": "core:dnd2024",

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 APP_NAME = "DiceFrame"
-__version__ = "2.6.1"
+__version__ = "3.0.0-beta.3"
 DEFAULT_UPDATE_REPOSITORY = "diceframe/diceframe"
-# 服务器仍能正确服务的最低客户端（移动端 App）版本；出现不兼容契约变更时上调，
-# 经 /api/config 的 min_client_version 下发，客户端据此提示升级 App。宽松初值。
-MIN_CLIENT_VERSION = "0.5.0"
+# 服务器仍能正确服务的最低客户端（移动端 App）版本；出现不兼容契约变更时上调。
+# 经 /api/config 的 min_client_version 下发，客户端据此提示升级 App。
+MIN_CLIENT_VERSION = "0.6.0"
 
 
 def version_below(minimum: str, current: str) -> bool:

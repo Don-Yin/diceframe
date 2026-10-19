@@ -1,0 +1,1144 @@
+.overview-page {
+  width: 100%;
+  max-width: none;
+  padding: 0 clamp(16px, 3.8vw, 64px) 48px;
+}
+
+.overview-hero {
+  position: relative;
+  align-items: flex-end;
+  min-height: 114px;
+  padding: 0 0 16px;
+  border-bottom-color: var(--df-border-soft);
+}
+
+/* ContentPageHeader has component-scoped defaults. The overview shell owns
+   the exact geometry of the reference header, so give this route an explicit
+   114px band instead of inheriting the generic page padding. */
+.overview-page .overview-hero {
+  box-sizing: border-box;
+  height: 114px;
+  min-height: 114px;
+  padding: 0 0 16px;
+}
+
+.overview-page .overview-hero .content-page-heading-kicker,
+.overview-page .overview-hero h1 { transform: none; }
+
+.overview-hero::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 1px;
+  content: "";
+  background: linear-gradient(90deg, var(--df-accent), transparent 70%);
+}
+
+.overview-hero h1 {
+  margin-top: 6px;
+  font-size: clamp(32px, 3vw, 46px);
+  line-height: 1.08;
+}
+
+.overview-hero p {
+  color: var(--df-text-muted);
+  line-height: 1.65;
+}
+
+.overview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 720px;
+  padding-bottom: 2px;
+}
+
+.overview-actions button {
+  min-height: 43px;
+  padding-inline: 18px;
+}
+
+.overview-actions .overview-entry-action {
+  display: inline-flex;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 160px;
+  height: 44px;
+  padding: 0 16px;
+  font-size: 14px;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.overview-actions .peer-launch-button {
+  border-color: color-mix(in srgb, var(--df-accent) 48%, var(--df-border));
+  color: var(--df-accent-strong);
+  background: color-mix(in srgb, var(--df-accent-soft) 58%, var(--df-surface-1));
+}
+
+.overview-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, .8fr)) minmax(260px, 1.5fr);
+  gap: 16px;
+  margin-block: 20px 28px;
+}
+
+.overview-stats article {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  min-height: 92px;
+  min-width: 0;
+  padding: 14px 18px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background:
+    radial-gradient(circle at 100% 0, color-mix(in srgb, var(--df-interactive) 8%, transparent), transparent 48%),
+    linear-gradient(145deg, color-mix(in srgb, var(--df-surface-raised) 92%, transparent), var(--df-surface-1));
+}
+
+.overview-stats article > .n-icon {
+  color: var(--df-accent);
+  font-size: 30px;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--df-accent) 22%, transparent));
+}
+
+.overview-stats article::before {
+  position: absolute;
+  top: auto;
+  right: 18px;
+  bottom: 0;
+  left: 18px;
+  width: auto;
+  height: 1px;
+  content: "";
+  background: linear-gradient(90deg, transparent, var(--df-accent), transparent);
+  opacity: .4;
+}
+
+.overview-stats strong {
+  display: block;
+  overflow: hidden;
+  color: var(--df-accent-strong);
+  font-family: var(--df-font-title);
+  font-size: 30px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-stats span {
+  display: block;
+  margin-top: 7px;
+  color: var(--df-text-muted);
+  font-size: 12px;
+}
+
+.overview-stats-disclosure { margin-block: 0 20px; }
+.overview-stats-disclosure > summary { width: fit-content; padding: 6px 0; color: var(--df-text-muted); font-size: 12px; cursor: pointer; }
+.overview-stats-disclosure[open] > summary { color: var(--df-accent-strong); }
+
+.adventure-library {
+  display: grid;
+  gap: 14px;
+  scroll-margin-top: 82px;
+}
+
+.library-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 35px;
+  color: var(--df-accent-strong);
+  font-family: var(--df-font-title);
+  font-size: 17px;
+}
+
+.library-heading-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.library-heading-copy > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.library-heading-copy > span i {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--df-accent);
+  transform: rotate(45deg);
+  box-shadow: inset 0 0 0 2px var(--df-canvas), 0 0 10px color-mix(in srgb, var(--df-accent) 30%, transparent);
+}
+
+.library-heading small {
+  color: var(--df-text-muted);
+  font: 11px/1 var(--df-font-body);
+}
+
+.library-heading-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  align-items: center;
+  gap: 6px;
+}
+
+.library-heading-actions button {
+  min-width: 62px;
+  height: 40px;
+  min-height: 40px;
+  padding-inline: 11px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.save-sort-select {
+  width: auto;
+  min-width: 158px;
+  min-height: 34px;
+  padding-block: 5px;
+  font: 12px/1.2 var(--df-font-body);
+}
+
+.save-sort-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--df-text-muted);
+  font: 12px/1.2 var(--df-font-body);
+  white-space: nowrap;
+}
+
+.game-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr));
+  gap: 18px;
+  margin-top: 0;
+}
+
+.game-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-lg);
+  background: var(--df-surface-1);
+  isolation: isolate;
+  box-shadow: var(--df-shadow), inset 0 1px 0 rgba(255, 255, 255, .045);
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.game-card::after {
+  display: none;
+}
+
+.game-card > .game-card-art {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background-image: var(--df-bg-scene-image);
+  background-position: center;
+  background-size: cover;
+  filter: saturate(.86) contrast(1.04);
+  transform: scale(1.025);
+  transition: filter .22s ease, transform .28s ease;
+}
+
+.game-card-art > img,
+.overview-featured-art > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.game-card-art::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--df-canvas) 18%, transparent) 0%,
+      transparent 24%,
+      color-mix(in srgb, var(--df-surface-1) 48%, transparent) 44%,
+      color-mix(in srgb, var(--df-surface-1) 88%, transparent) 62%,
+      color-mix(in srgb, var(--df-surface-1) 97%, transparent) 82%,
+      var(--df-surface-1) 100%),
+    linear-gradient(100deg, color-mix(in srgb, var(--df-canvas) 40%, transparent), transparent 64%);
+}
+
+.overview-page .game-card:hover > .game-card-art {
+  filter: saturate(.94) contrast(1.06) brightness(1.04);
+  transform: scale(1.04);
+}
+
+/* Selection feedback belongs to the scenic background only.  Keeping the
+   card geometry stable prevents the title, actions, and external tool menu
+   from shifting when a save is selected. */
+.overview-page .game-card.is-selected > .game-card-art {
+  filter: saturate(.94) contrast(1.06) brightness(1.04);
+  transform: scale(1.04);
+}
+
+.game-card > :not(.game-card-art) {
+  position: relative;
+  z-index: 1;
+}
+
+.game-card:hover {
+  border-color: color-mix(in srgb, var(--df-interactive) 58%, var(--df-border-soft));
+  box-shadow: var(--df-shadow-strong), inset 0 1px 0 rgba(255, 255, 255, .07);
+  transform: none;
+}
+
+.game-card.is-selected {
+  border-color: color-mix(in srgb, var(--df-interactive) 68%, var(--df-border-soft));
+  box-shadow: var(--df-shadow-strong), inset 0 1px 0 rgba(255, 255, 255, .07);
+}
+
+.game-card-cover {
+  position: relative;
+  min-height: 170px;
+  overflow: hidden;
+  border-bottom: 0;
+  isolation: isolate;
+}
+
+.cover-sigil {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--df-accent-strong) 64%, transparent);
+  border-radius: 50%;
+  color: color-mix(in srgb, var(--df-accent-strong) 70%, transparent);
+  background: color-mix(in srgb, var(--df-canvas) 62%, transparent);
+  font-size: 29px;
+  opacity: .78;
+  backdrop-filter: blur(4px);
+  transform: translate(-50%, -45%);
+  box-shadow: 0 0 42px color-mix(in srgb, var(--df-accent) 16%, transparent), inset 0 0 0 5px color-mix(in srgb, var(--df-canvas) 75%, transparent);
+}
+
+.cover-sigil::before,
+.cover-sigil::after {
+  position: absolute;
+  content: "";
+  pointer-events: none;
+  border-radius: 50%;
+}
+
+.cover-sigil::before {
+  inset: -18px;
+  border: 1px dashed color-mix(in srgb, var(--df-accent) 20%, transparent);
+  opacity: .5;
+}
+
+.cover-sigil::after {
+  inset: -9px;
+  border: 1px solid color-mix(in srgb, var(--df-accent) 34%, transparent);
+  opacity: .7;
+}
+
+.game-card-cover .game-select {
+  position: absolute;
+  top: 13px;
+  left: 15px;
+  padding: 5px 8px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--df-control-bg) 86%, transparent);
+  backdrop-filter: blur(8px);
+}
+.game-card-cover .game-select.is-hidden { opacity: 0; pointer-events: none; }
+
+.game-card-cover .game-card-badges {
+  position: absolute;
+  top: 13px;
+  right: 15px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.game-card-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 11px;
+  padding: 12px 18px 18px;
+  background: transparent;
+}
+
+.game-card-body h2 {
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  color: var(--df-accent-strong);
+  overflow: hidden;
+  font-size: 23px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 2px 18px color-mix(in srgb, var(--df-canvas) 62%, transparent);
+}
+
+.game-card {
+  min-width: 0;
+}
+
+.game-card-body .scene-line {
+  display: -webkit-box;
+  min-height: 3.1em;
+  margin: 0;
+  overflow: hidden;
+  color: var(--df-text-secondary);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  text-shadow: 0 1px 12px color-mix(in srgb, var(--df-canvas) 58%, transparent);
+}
+
+/* Cover text sits over artwork, so keep its light palette and dark shadow
+   independent of the surrounding light-mode surfaces. */
+:root[data-mode="light"] .game-card-body h2 {
+  color: #f0d8a0;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .9), 0 2px 18px rgba(0, 0, 0, .65);
+}
+
+:root[data-mode="light"] .game-card-body .scene-line {
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .9), 0 1px 12px rgba(0, 0, 0, .65);
+}
+
+.game-card-body .meta {
+  margin: 0;
+  font-size: 12px;
+}
+
+.game-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.game-card-meta span {
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-sm);
+  color: var(--df-text-muted);
+  background: color-mix(in srgb, var(--df-control-bg) 72%, transparent);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.game-card-actions {
+  margin-top: auto;
+}
+
+.game-card-enter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 49px;
+  font-family: var(--df-font-title);
+  font-size: 16px;
+}
+
+.game-card-enter .n-icon {
+  margin-left: 0;
+  font-size: 18px;
+}
+
+.game-card-tools button {
+  min-width: 0;
+  min-height: 40px;
+  font-size: 12px;
+}
+.game-card-tools button { padding-inline: 12px; }
+
+/* Feature-owned homepage controls and dense library presentation. */
+.overview-page .overview-featured {
+  position: relative;
+  display: block;
+  min-height: 235px;
+  margin-bottom: 14px;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--df-accent) 34%, var(--df-border-soft));
+  background: var(--df-surface-1);
+}
+
+.overview-page .overview-featured-art {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  min-height: 0;
+  background-image: var(--df-bg-scene-image);
+  background-position: center;
+  background-size: cover;
+  filter: saturate(.88) contrast(1.04);
+}
+
+.overview-page .overview-featured-copy {
+  position: relative;
+  z-index: 1;
+  width: min(45%, 620px);
+  min-height: 235px;
+  margin-left: auto;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px clamp(26px, 4vw, 64px) 24px clamp(26px, 3.8vw, 58px);
+  text-align: right;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--df-surface-1) 0%, transparent), color-mix(in srgb, var(--df-surface-1) 82%, transparent) 22%, color-mix(in srgb, var(--df-surface-1) 98%, transparent) 100%);
+}
+
+.overview-page .overview-featured-copy h2,
+.overview-page .overview-featured-copy p { margin: 0; }
+.overview-page .overview-featured-copy h2 { color: var(--df-accent-strong); font: 800 clamp(24px, 3vw, 34px)/1.1 var(--df-font-title); overflow-wrap: anywhere; }
+.overview-page .overview-featured-details {
+  display: flex;
+  width: min(100%, 370px);
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  align-self: flex-end;
+  padding: 0;
+}
+.overview-page .overview-featured-copy p { color: var(--df-text-secondary); line-height: 1.6; }
+.overview-page .overview-featured-facts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 14px; color: var(--df-text-muted); font-size: 12px; }
+.overview-page .overview-featured-enter,
+.overview-page .game-card-enter {
+  position: relative;
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding-inline: 20px;
+  border: 1px solid color-mix(in srgb, var(--df-text) 24%, transparent);
+  border-radius: var(--df-radius-sm);
+  color: var(--df-text);
+  background:
+    linear-gradient(160deg,
+      rgb(255 255 255 / .18),
+      rgb(255 255 255 / .05) 52%,
+      color-mix(in srgb, var(--df-interactive-strong) 22%, transparent)),
+    color-mix(in srgb, var(--df-surface-raised) 36%, transparent);
+  background-clip: padding-box;
+  -webkit-backdrop-filter: blur(16px) saturate(145%);
+  backdrop-filter: blur(16px) saturate(145%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .32),
+    inset 0 -1px 0 rgb(255 255 255 / .06),
+    0 5px 16px rgb(0 0 0 / .12);
+  transition: transform .14s ease, filter .14s ease, border-color .14s ease, box-shadow .14s ease;
+}
+.overview-page .overview-featured-enter {
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
+  min-height: 49px;
+  margin-top: 4px;
+}
+.overview-page .overview-featured-enter .n-icon,
+.overview-page .game-card-enter .n-icon {
+  margin-left: 0;
+  transition: transform .14s ease;
+}
+.overview-page .overview-featured-enter:hover,
+.overview-page .game-card-enter:hover {
+  border-color: color-mix(in srgb, var(--df-interactive-strong) 55%, transparent);
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .42),
+    inset 0 -1px 0 rgb(255 255 255 / .09),
+    0 8px 22px rgb(0 0 0 / .16);
+}
+.overview-page .overview-featured-enter:focus-visible,
+.overview-page .game-card-enter:focus-visible {
+  outline: 2px solid var(--df-interactive-strong);
+  outline-offset: 3px;
+}
+.overview-page .overview-featured-enter:hover .n-icon,
+.overview-page .game-card-enter:hover .n-icon {
+  transform: translateX(2px);
+}
+.overview-page .overview-featured-enter:active,
+.overview-page .game-card-enter:active {
+  transform: translateY(0) scale(.985);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .24),
+    0 2px 8px rgb(0 0 0 / .1);
+}
+
+.overview-page .library-heading { flex-wrap: wrap; }
+.overview-page .library-heading-actions { min-width: 0; max-width: 100%; }
+.overview-page .library-heading-actions:not(.is-selection-mode) {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.overview-page .library-search-field {
+  display: inline-flex;
+  width: min(250px, 24vw);
+  min-width: 170px;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: var(--df-control-bg);
+  color: var(--df-text-muted);
+}
+
+.overview-page .library-search-field:focus-within { border-color: var(--df-interactive); outline: 2px solid color-mix(in srgb, var(--df-interactive) 28%, transparent); outline-offset: 1px; }
+.overview-page .library-search-field input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--df-text); font: 12px/1.2 var(--df-font-body); }
+.overview-page .library-view-toggle { display: inline-flex; align-items: center; gap: 2px; padding: 0; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
+.overview-page .library-view-toggle button { display: grid; width: 30px; min-width: 30px; min-height: 34px; padding: 0; place-items: center; border: 0; border-radius: calc(var(--df-radius-md) - 2px); background: transparent; color: var(--df-text-muted); }
+.overview-page .library-view-toggle button.active { background: var(--df-surface-3); color: var(--df-interactive-strong); }
+.overview-page .overview-archive-tools { position: relative; }
+.overview-page .overview-archive-tools > summary,
+.overview-page .overview-game-tools > summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-sm);
+  background: var(--df-surface-2);
+  color: var(--df-text-secondary);
+  font: 650 12px/1.2 var(--df-font-body);
+  list-style: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* The archive toolbar mixes native buttons with a details summary. Keep the
+   controls on one baseline so the top row does not jump when management is
+   opened or selection mode changes. */
+.overview-page .library-heading-actions > .overview-archive-tools > summary,
+.overview-page .library-heading-actions > button,
+.overview-page .library-heading-actions > .overview-select-saves {
+  height: 40px;
+  min-height: 40px;
+}
+.overview-page .overview-archive-tools > summary::-webkit-details-marker,
+.overview-page .overview-game-tools > summary::-webkit-details-marker { display: none; }
+.overview-page .overview-archive-tools > summary::after,
+.overview-page .overview-game-tools > summary::after { content: '⌄'; color: var(--df-text-muted); }
+.overview-page .overview-archive-tools[open] > summary,
+.overview-page .overview-game-tools[open] > summary { border-color: var(--df-interactive); color: var(--df-interactive-strong); }
+.overview-page .overview-archive-tools > summary:focus-visible,
+.overview-page .overview-game-tools > summary:focus-visible { outline: 2px solid var(--df-interactive); outline-offset: 3px; }
+.overview-page .overview-archive-tools > div {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 15;
+  display: grid;
+  gap: 8px;
+  min-width: 168px;
+  padding: 8px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: var(--df-surface-raised);
+  box-shadow: var(--df-shadow-strong);
+}
+.overview-page .overview-archive-tools > div > button { width: 100%; }
+
+.overview-page .overview-import-saves {
+  min-width: 88px;
+  border-color: color-mix(in srgb, var(--df-interactive) 48%, var(--df-border-soft));
+  color: var(--df-interactive-strong);
+  background: color-mix(in srgb, var(--df-interactive) 12%, var(--df-surface-2));
+}
+
+.overview-page .overview-empty-import {
+  border-color: color-mix(in srgb, var(--df-interactive) 48%, var(--df-border-soft));
+  color: var(--df-interactive-strong);
+  background: color-mix(in srgb, var(--df-interactive) 12%, var(--df-surface-2));
+}
+
+.overview-page .game-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.overview-page .game-card { min-width: 0; }
+.overview-page .game-card-body { min-width: 0; }
+.overview-page .game-card-actions { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.overview-page .game-card-enter { min-width: 0; flex: 1 1 auto; }
+.overview-page .overview-game-tools { flex: 0 0 auto; }
+.overview-page .overview-game-tools { position: relative; }
+.overview-page .overview-game-tools > summary { min-width: 104px; height: 49px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; }
+.overview-page .game-card-tools {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 12;
+  display: grid;
+  gap: 6px;
+  min-width: 168px;
+  padding: 8px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: color-mix(in srgb, var(--df-surface-raised) 96%, transparent);
+  box-shadow: var(--df-shadow-strong);
+  backdrop-filter: blur(14px);
+}
+.overview-page .game-grid.is-list { grid-template-columns: minmax(0, 1fr); }
+.overview-page .game-grid.is-list .game-card { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 190px; }
+.overview-page .game-grid.is-list .game-card > .game-card-art { right: auto; width: 220px; }
+.overview-page .game-grid.is-list .game-card > .game-card-cover,
+.overview-page .game-grid.is-list .game-card > .game-card-body { grid-column: 2; margin-left: 0; }
+.overview-page .game-grid.is-list .game-card > .game-card-cover { grid-row: 1; min-height: 100%; }
+.overview-page .game-grid.is-list .game-card > .game-card-body { grid-row: 1; padding-left: 0; }
+.overview-page .game-grid.is-list .game-card > .game-card-cover { display: none; }
+.overview-page .game-grid.is-list .game-card > .game-card-body { grid-column: 1 / -1; padding-left: 244px; }
+
+.overview-page .overview-filter-empty { margin-top: 0; }
+
+@media (max-width: 1280px) {
+  .overview-page .game-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+  .overview-hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .overview-actions {
+    justify-content: flex-start;
+  }
+
+  .overview-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-stats .wide {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 801px) {
+  .overview-page .overview-featured {
+    height: 239px;
+    min-height: 239px;
+  }
+
+  .overview-page .overview-featured-art {
+    min-height: 0;
+  }
+
+  .overview-page .overview-featured {
+    grid-template-columns: minmax(0, 1.58fr) minmax(360px, 1fr);
+  }
+
+  .overview-page .overview-featured-copy h2 {
+    font-size: clamp(30px, 3vw, 42px);
+  }
+}
+
+@media (max-width: 1000px) {
+  .overview-page .overview-featured-copy { width: min(64%, 620px); }
+  .overview-page .game-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-page .library-heading-actions:not(.is-selection-mode) { flex-wrap: wrap; }
+}
+
+@media (max-width: 800px) {
+  .overview-page button,
+  .overview-page [role="button"] {
+    scroll-margin-block: 72px;
+  }
+
+  .overview-page {
+    padding: 12px 12px 90px;
+  }
+
+  .overview-page .overview-hero {
+    height: auto;
+    min-height: 0;
+  }
+
+  .overview-page .overview-featured {
+    min-height: 0;
+  }
+
+  .overview-page .overview-featured-art {
+    min-height: 100%;
+  }
+
+  .overview-page .overview-featured-copy {
+    width: 100%;
+    min-height: 350px;
+    justify-content: flex-start;
+    padding: 54px 18px 18px;
+    text-align: left;
+    background: linear-gradient(180deg, transparent 8%, color-mix(in srgb, var(--df-surface-1) 24%, transparent) 35%, color-mix(in srgb, var(--df-surface-1) 98%, transparent) 72%);
+  }
+
+  .overview-page .overview-featured-copy h2 { font-size: 23px; line-height: 1.35; }
+  .overview-page .overview-featured-details { flex: 1; width: 100%; align-self: stretch; }
+  .overview-page .overview-featured-facts { justify-content: flex-start; gap: 6px; }
+  .overview-page .overview-featured-facts span { padding: 5px 7px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: color-mix(in srgb, var(--df-control-bg) 72%, transparent); font-size: 11px; }
+  .overview-page .overview-featured-enter { margin-top: auto; }
+
+  .adventure-library {
+    margin-bottom: 120px;
+  }
+
+  .overview-hero {
+    min-height: 0;
+  }
+
+  .overview-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+    width: 100%;
+  }
+
+  .overview-actions button {
+    min-width: 0;
+    padding-inline: 7px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .overview-actions .overview-entry-action {
+    width: 100%;
+    min-width: 0;
+    padding: 0 7px;
+    font-size: 12px;
+    white-space: normal;
+  }
+
+  .library-heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .library-heading-copy {
+    justify-content: space-between;
+  }
+
+  .library-heading-actions {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .library-heading-actions button {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+  }
+
+  .save-sort-field {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    min-height: 40px;
+    padding: 0 10px;
+    border: 1px solid var(--df-border-soft);
+    border-radius: var(--df-radius-sm);
+    background: var(--df-surface-1);
+  }
+
+  .save-sort-select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .game-card-cover {
+    min-height: 142px;
+  }
+
+  .overview-page .game-card-art { background-position: 68% center; }
+}
+
+@media (max-width: 700px) {
+  .overview-page .overview-featured-copy { padding: 18px; }
+  .overview-page .game-grid { grid-template-columns: minmax(0, 1fr); }
+  .overview-page .library-heading-actions:not(.is-selection-mode) { display: grid; grid-template-columns: minmax(0, 1fr) auto; width: 100%; }
+  .overview-page .library-search-field { width: auto; min-width: 0; grid-column: 1 / -1; }
+  .overview-page .save-sort-field { grid-column: 1 / -1; }
+  .overview-page .library-view-toggle { justify-self: end; }
+  .overview-page .game-grid.is-list .game-card { display: block; }
+  .overview-page .game-grid.is-list .game-card > .game-card-art { position: absolute; width: 100%; }
+  .overview-page .game-grid.is-list .game-card > .game-card-body { padding-left: 18px; }
+  .overview-page .game-card-tools {
+    position: fixed;
+    right: 14px;
+    bottom: 76px;
+    left: auto;
+    width: min(220px, calc(100vw - 28px));
+    z-index: 30;
+  }
+
+  .overview-page .overview-archive-tools > div { right: auto; left: 0; }
+
+  .overview-page .game-card:has(.overview-game-tools[open]) {
+    transform: none;
+    overflow: visible;
+    z-index: 40;
+  }
+}
+
+/* Keep the explicit selection entry point in the archive toolbar. Batch
+   actions are rendered only after the user enters selection mode. */
+.overview-page .overview-select-saves { display: inline-flex; }
+
+@media (max-width: 520px) {
+  .overview-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .overview-stats .wide {
+    grid-column: auto;
+  }
+
+  .game-card-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Final composition pass: save cards are single scenic surfaces.  Keep the
+   entire image visible behind the card content and let the gradient establish
+   readability instead of dividing the card into an image and a body. */
+@media (min-width: 801px) {
+  .overview-page {
+    padding-top: 8px;
+  }
+
+  .overview-page .overview-hero {
+    height: 104px;
+    min-height: 104px;
+    margin-bottom: 10px;
+  }
+}
+
+@media (min-width: 801px) {
+  .overview-page .overview-featured {
+    height: clamp(244px, 18.3vw, 306px);
+    min-height: clamp(244px, 18.3vw, 306px);
+    grid-template-columns: minmax(0, 1.93fr) minmax(360px, 1fr);
+  }
+
+  .overview-page .overview-featured-copy {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .overview-page .game-card {
+    display: block;
+    min-height: 368px;
+    background: var(--df-surface-1);
+  }
+
+  .overview-page .game-card > .game-card-art {
+    inset: 0;
+    height: auto;
+    transform: scale(1.025);
+  }
+
+  .overview-page .game-card-art::after {
+    background:
+      linear-gradient(180deg,
+        color-mix(in srgb, var(--df-canvas) 20%, transparent) 0%,
+        transparent 30%,
+        color-mix(in srgb, var(--df-surface-1) 68%, transparent) 56%,
+        color-mix(in srgb, var(--df-surface-1) 96%, transparent) 86%,
+        var(--df-surface-1) 100%),
+      linear-gradient(100deg, color-mix(in srgb, var(--df-canvas) 42%, transparent), transparent 68%);
+  }
+
+  .overview-page .game-card-cover {
+    min-height: 0;
+    height: 54px;
+  }
+
+  .overview-page .cover-sigil {
+    display: none;
+  }
+
+  .overview-page .game-card-body {
+    min-height: 314px;
+    background: transparent;
+  }
+}
+
+@media (max-width: 800px) {
+  .overview-page .game-card {
+    display: block;
+    min-height: 350px;
+  }
+
+  .overview-page .game-card > .game-card-art {
+    inset: 0;
+    height: auto;
+    transform: scale(1.025);
+  }
+
+  .overview-page .game-card-cover {
+    min-height: 0;
+    height: 54px;
+  }
+
+  .overview-page .cover-sigil {
+    display: none;
+  }
+
+  .overview-page .game-card-body {
+    min-height: 296px;
+    background: transparent;
+  }
+}
+
+/* Final archive composition: list cards keep the same scenic surface as the
+   grid.  The old list split the card into a 220px thumbnail and an opaque
+   body, which made every save look like two unrelated panels. */
+@media (min-width: 801px) {
+  .overview-page {
+    padding-top: 14px;
+  }
+
+  .overview-page .overview-hero .content-page-heading-kicker,
+  .overview-page .overview-hero h1 {
+    transform: none;
+  }
+
+  .overview-page .overview-featured-enter,
+  .overview-page .game-card-enter {
+    min-height: 49px;
+    font-size: 16px;
+  }
+
+  .overview-page .overview-featured-enter {
+    align-self: stretch;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .overview-page .game-card-body .game-card-meta {
+    margin-top: auto;
+  }
+
+  .overview-page .game-card-actions {
+    margin-top: 0;
+  }
+
+  .overview-page .game-grid.is-list .game-card {
+    display: block;
+    min-height: 246px;
+  }
+
+  .overview-page .game-grid.is-list .game-card > .game-card-art {
+    inset: 0;
+    width: auto;
+    height: auto;
+  }
+
+  .overview-page .game-grid.is-list .game-card > .game-card-art::after {
+    background:
+      linear-gradient(90deg,
+        color-mix(in srgb, var(--df-surface-1) 70%, transparent) 0%,
+        color-mix(in srgb, var(--df-surface-1) 40%, transparent) 56%,
+        color-mix(in srgb, var(--df-surface-1) 76%, transparent) 100%),
+      linear-gradient(180deg,
+        color-mix(in srgb, var(--df-canvas) 14%, transparent) 0%,
+        transparent 46%,
+        color-mix(in srgb, var(--df-surface-1) 78%, transparent) 100%);
+  }
+
+  .overview-page .game-grid.is-list .game-card > .game-card-cover {
+    display: block;
+    height: 54px;
+    min-height: 0;
+  }
+
+  .overview-page .game-grid.is-list .game-card > .game-card-body {
+    display: flex;
+    min-height: 192px;
+    padding: 18px 30px 22px;
+    background: transparent;
+  }
+
+  .overview-page .game-grid.is-list .game-card-body h2 {
+    max-width: min(72%, 760px);
+  }
+}
+
+@media (max-width: 800px) {
+  /* Keep the mobile metadata/action cluster together at the bottom of the
+     scenic card.  A flex auto margin on the actions alone left the round,
+     player and token rows visibly floating too high in a large empty card. */
+  .overview-page .game-card-body .game-card-meta {
+    margin-top: auto;
+  }
+
+  .overview-page .game-card-actions {
+    margin-top: 0;
+  }
+
+  .overview-page .overview-featured-enter,
+  .overview-page .game-card-enter {
+    min-height: 49px;
+    font-size: 16px;
+  }
+
+  .overview-page .overview-featured-enter {
+    align-self: stretch;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overview-page .game-card,
+  .overview-page .game-card > .game-card-art {
+    transition: none;
+  }
+
+  .overview-page .game-card:hover > .game-card-art,
+  .overview-page .game-card.is-selected > .game-card-art {
+    transform: scale(1.025);
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "schema_version": 2,
+  "kind": "adventure",
+  "id": "lantern-harbor",
+  "format": "diceframe:adventure-graph-v2",
+  "source_ref": "diceframe-original:starter-adventure",
+  "automation_level": "guided",
+  "name": "Lantern Harbor",
+  "summary": "Choose how to restore the harbor light.",
+  "chapters": [],
+  "objectives": [],
+  "milestones": [],
+  "start_node_ids": [
+    "pier"
+  ],
+  "nodes": [
+    {
+      "id": "pier",
+      "type": "scene",
+      "name": "The pier",
+      "description": "The keeper offers a lantern. Choose whether to help openly or investigate the hidden order.",
+      "transitions": [
+        {
+          "to": "beacon"
+        }
+      ]
+    },
+    {
+      "id": "beacon",
+      "type": "decision",
+      "name": "The beacon",
+      "description": "The beacon needs a lens. Ask the keeper for help or investigate quietly.",
+      "choice_mode": "exclusive",
+      "transitions": [
+        {
+          "to": "ending",
+          "choice_id": "ask",
+          "choice_label": "Ask the keeper"
+        },
+        {
+          "to": "secret",
+          "choice_id": "investigate",
+          "choice_label": "Investigate quietly"
+        }
+      ]
+    },
+    {
+      "id": "ending",
+      "type": "reference",
+      "name": "Light returns",
+      "description": "The keeper fetches the lens and the boats return safely.",
+      "transitions": []
+    },
+    {
+      "id": "secret",
+      "type": "reference",
+      "name": "The sealed order",
+      "description": "PRIVATE_STARTER_CLUE: The keeper was ordered to hide the lens.",
+      "visibility": "gm",
+      "transitions": []
+    }
+  ],
+  "world_seed": {
+    "entities": [
+      {
+        "entity_id": "location:pier",
+        "kind": "location"
+      },
+      {
+        "entity_id": "location:beacon",
+        "kind": "location"
+      }
+    ],
+    "relations": [
+      {
+        "relation_id": "harbor-route",
+        "kind": "connects",
+        "from_ref": "location:pier",
+        "to_ref": "location:beacon"
+      }
+    ],
+    "facts": [
+      {
+        "key": "gm:harbor.lens",
+        "value": "PRIVATE_STARTER_CLUE: beneath the pier",
+        "visibility": "gm"
+      }
+    ],
+    "processes": []
+  }
+}

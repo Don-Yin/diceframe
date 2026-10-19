@@ -14,7 +14,9 @@ from datetime import datetime, timezone
 from src.engine.character_utils import apply_resource_delta, get_resource
 from src.engine.game_instance import GameInstance, GameState
 from src.engine import progression
-from src.engine.modules import checks, seat_activity, session_stats
+from src.engine import module_hooks
+from src.engine import check_decisions
+from src.engine.modules import checks, session_stats
 
 logger = logging.getLogger("trpg")
 
@@ -57,7 +59,8 @@ async def resolve_luck_decision(
         progression.require_writable(instance)
         session_stats.require_writable(instance)
         checks.require_writable(instance)
-        seat_activity.require_writable(instance)
+        module_hooks.run(module_hooks.SEAT_PREFLIGHT, instance)
+        check_decisions.validate_all(instance)
 
         if spend:
             if str(target.get("dice") or "").lower() != "d100" or str(target.get("verdict") or "") != "失败":
@@ -83,8 +86,9 @@ async def resolve_luck_decision(
             target["luck_remaining"] = remaining
             if actor_uid == owner_uid and owner_uid in instance.players:
                 # The seat spent its own luck: it is in play (see seat_activity).
-                seat_activity.mark_acted(instance, owner_uid)
+                module_hooks.run(module_hooks.SEAT_ACTED, instance, owner_uid, module_hooks.SEAT_SOURCE_LUCK)
 
+        check_decisions.close(target)
         target["luck_decision"] = desired
         target["luck_spend_available"] = False
         target["luck_resolved_at"] = datetime.now(timezone.utc).isoformat()
@@ -99,14 +103,18 @@ async def decline_pending_luck(instance: GameInstance) -> list[dict]:
     """GM 强制推进时将所有未选择的幸运检定按失败继续。"""
     async with instance._lock:
         declined: list[dict] = []
-        if any(check.get("luck_decision") == "pending" for check in checks.last_checks(instance)):
+        for check in checks.last_checks(instance):
+            check_decisions.validate(check)
+        if any(check.get("luck_decision") == "pending" for check in checks.last_checks(instance)) or check_decisions.pending(instance):
             progression.require_writable(instance)
             session_stats.require_writable(instance)
             checks.require_writable(instance)
         now = datetime.now(timezone.utc).isoformat()
         for check in checks.last_checks(instance):
-            if check.get("luck_decision") != "pending":
+            push_open = check.get("push", {}).get("status") in check_decisions.OPEN
+            if check.get("luck_decision") != "pending" and not push_open:
                 continue
+            check_decisions.close(check, reason="gm_forced_advance")
             check["luck_decision"] = "declined"
             check["luck_spend_available"] = False
             check["luck_resolved_at"] = now
@@ -143,6 +151,7 @@ async def system_decline_luck(instance: GameInstance, check_id: str) -> dict:
         progression.require_writable(instance)
         session_stats.require_writable(instance)
         checks.require_writable(instance)
+        check_decisions.close(target, reason="luck_timeout")
         target["luck_decision"] = "declined"
         target["luck_spend_available"] = False
         target["luck_timeout"] = True
@@ -150,10 +159,7 @@ async def system_decline_luck(instance: GameInstance, check_id: str) -> dict:
         if checks.last_check(instance) and str(checks.last_check(instance).get("check_id") or "") == check_id:
             instance.sync_last_check(target)
         session_stats.touch(instance, at=target["luck_resolved_at"])
-        declined_all = not any(
-            c.get("luck_decision") == "pending"
-            for c in checks.last_checks(instance)
-        )
+        declined_all = not check_decisions.pending_any(instance)
         return {"ok": True, "check_result": dict(target), "declined_all": declined_all}
 
 

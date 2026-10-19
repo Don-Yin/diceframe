@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from src.game_preferences import validate_preferences
+
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,13 +30,15 @@ from src.imagegen.contracts import (
 from src.tts.contracts import SUPPORTED_PROVIDER_IDS
 from src.webui.access_password import hash_access_password
 from src.webui.cors import invalid_cors_origins, normalize_cors_origins
+from src.llm.generation_options import validate_generation_options, validate_recent_rounds
+from src.assistant_agent_limits import MIN_TASK_MAX_TOKENS, MAX_TASK_MAX_TOKENS
 
 SECRET_CONFIG_KEYS = frozenset({
     "access_token", "bot_token", "napcat_token",
 })
 STRING_CONFIG_KEYS = frozenset({
     "model", "embedding_model", "web_cors_origins",
-    "fallback1_model", "fallback2_model",
+    "fallback1_model", "fallback2_model", "check_model",
     "public_base_url", "napcat_host", "napcat_connection_id",
     "tts_model", "tts_default_voice", "tts_gm_voice", "tts_player_voice",
     "asr_model",
@@ -43,12 +47,14 @@ STRING_CONFIG_KEYS = frozenset({
     *PROVIDER_REF_KEYS,
 })
 CONFIG_KEYS = (
+    "game_defaults",
+    "llm_generation_options", "context_recent_rounds", "check_model_enabled", "check_model",
     "model", "web_port", "web_cors_origins", "embedding_enabled",
     "embedding_model", "embedding_max_input",
     "fallback1_enabled", "fallback1_model",
     "fallback2_enabled", "fallback2_model",
     "narrative_max_tokens", "character_gen_max_tokens", "summary_max_tokens", "brief_max_tokens",
-    "analysis_max_tokens", "text_gen_max_tokens", "proxy_enabled", "proxy_url", "public_base_url", "access_token",
+    "analysis_max_tokens", "text_gen_max_tokens", "assistant_agent_max_tokens", "assistant_agent_task_max_tokens", "proxy_enabled", "proxy_url", "public_base_url", "access_token",
     "qq_bot_enabled", "napcat_host", "napcat_port", "napcat_token", "napcat_heartbeat_sec",
     "napcat_reconnect_delay_sec", "napcat_action_timeout_sec", "napcat_reply_delay_min_sec",
     "napcat_reply_delay_max_sec", "napcat_command_dedup_window_sec", "napcat_connection_id",
@@ -66,6 +72,7 @@ CONFIG_KEYS = (
     "ai_providers", *PROVIDER_REF_KEYS,
 )
 MODEL_RUNTIME_CONFIG_KEYS = frozenset({
+    "llm_generation_options", "context_recent_rounds", "check_model_enabled", "check_provider_ref", "check_model",
     "model",
     "embedding_enabled", "embedding_model", "embedding_max_input",
     "fallback1_enabled", "fallback1_model",
@@ -77,7 +84,7 @@ MODEL_RUNTIME_CONFIG_KEYS = frozenset({
     "embedding_provider_ref",
 })
 API_RUNTIME_CONFIG_KEYS = frozenset({
-    "character_gen_max_tokens", "text_gen_max_tokens",
+    "character_gen_max_tokens", "text_gen_max_tokens", "assistant_agent_max_tokens", "assistant_agent_task_max_tokens",
     "tts_provider", "tts_model", "tts_audio_format",
     "tts_default_voice", "tts_gm_voice", "tts_player_voice", "tts_timeout_seconds", "tts_cache_mb",
     "asr_provider", "asr_model", "asr_timeout_seconds",
@@ -117,10 +124,10 @@ def _degrade_speech_engines_lost_provider(candidate: dict[str, Any], refs_before
     ).strip()
     if imagegen_ref_cleared:
         candidate["imagegen_enabled"] = False
-    for capability in ("fallback1", "fallback2", "embedding"):
+    for capability in ("fallback1", "fallback2", "embedding", "check"):
         ref_key = f"{capability}_provider_ref"
         if refs_before.get(ref_key) and not candidate.get(ref_key):
-            candidate[f"{capability}_enabled"] = False
+            candidate["check_model_enabled" if capability == "check" else f"{capability}_enabled"] = False
 BOT_CONFIG_MAP = {
     "qq_bot_enabled": "enabled",
     "napcat_host": "host",
@@ -186,6 +193,20 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
             if key not in body:
                 continue
             raw = body[key]
+            if key == "game_defaults":
+                candidate[key] = validate_preferences(raw)
+                continue
+            if key == "check_model_enabled":
+                if not isinstance(raw, bool):
+                    return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, "check_model_enabled must be a boolean")
+                candidate[key] = raw
+                continue
+            if key in {"llm_generation_options", "context_recent_rounds"}:
+                try:
+                    candidate[key] = (validate_generation_options(raw) if key == "llm_generation_options" else validate_recent_rounds(raw))
+                except ValueError as exc:
+                    return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, str(exc))
+                continue
             if key in SECRET_CONFIG_KEYS:
                 value = clean_text_value(raw)
                 if value:
@@ -205,7 +226,15 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
                 candidate[key] = normalize_ai_providers(raw)
             elif key in STRING_CONFIG_KEYS:
                 candidate[key] = clean_text_value(raw)
+            elif key == "assistant_agent_task_max_tokens":
+                if isinstance(raw, bool) or not isinstance(raw, int):
+                    return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, "assistant_agent_task_max_tokens must be an integer")
+                if not MIN_TASK_MAX_TOKENS <= raw <= MAX_TASK_MAX_TOKENS:
+                    return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, f"assistant_agent_task_max_tokens must be between {MIN_TASK_MAX_TOKENS} and {MAX_TASK_MAX_TOKENS}")
+                candidate[key] = raw
             elif key.endswith("_max_tokens"):
+                if isinstance(raw, bool):
+                    return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, f"{key} must be an integer")
                 candidate[key] = max(1, int(raw))
             elif key == "proxy_url":
                 proxy_url = str(raw or "").strip()

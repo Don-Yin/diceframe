@@ -100,10 +100,13 @@ test('appearance and advanced settings obey the compact layout contract', async 
   }
 
   await page.goto('/#/settings?section=advanced')
-  const advancedPane = page.locator('.advanced-settings-pane')
+  const advancedPane = page.locator('.advanced-settings-pane:visible')
+  await advancedPane.locator('.generation-settings > summary').click()
   await expect(advancedPane.getByRole('heading', { name: '生成参数' })).toBeVisible()
-  await expect(advancedPane.getByRole('heading', { name: 'DiceFrame Hub 与隐私' })).toBeVisible()
   await expect(advancedPane.getByRole('button', { name: '保存' }).first()).toBeEnabled()
+
+  await page.goto('/#/settings?section=security')
+  await expect(page.locator('#settings-hub-privacy').getByRole('heading', { name: 'DiceFrame Hub 与隐私' })).toBeVisible()
 
   await page.goto('/#/settings?section=about')
   await expect(page.locator('.about-card')).toBeVisible()
@@ -159,7 +162,7 @@ test('model settings expose DeepSeek help and configurable test timeout', async 
     columnCount: 2,
   })
 
-  await page.goto('/#/settings?section=advanced')
+  await page.goto('/#/settings?section=system')
   const timeoutSection = page.locator('.test-timeout-section')
   await expect(timeoutSection.getByRole('heading', { name: '连接测试超时' })).toBeVisible()
   await expect(timeoutSection.locator('input')).toHaveValue('30')
@@ -198,6 +201,7 @@ test('multi-player character actions stay in a separate even row', async ({ page
   await page.addInitScript(() => localStorage.setItem('currentGame', 'web|e2e-room|web_bot'))
   await page.setViewportSize({ width: 1940, height: 1080 })
   await page.goto('/#/characters')
+  await page.getByRole('tab', { name: '本局角色', exact: true }).click()
 
   const cards = page.locator('.current-character-card')
   await expect(cards.first()).toBeVisible()
@@ -240,6 +244,7 @@ test('avatar picker keeps distinct realistic and anime packs for every ruleset',
   await authenticate(page)
   await page.addInitScript(() => localStorage.setItem('currentGame', 'web|e2e-room|web_bot'))
   await page.goto('/#/characters')
+  await page.getByRole('tab', { name: '本局角色', exact: true }).click()
 
   await page.locator('.current-character-card .current-character-actions button').first().click()
   const currentOptions = page.locator('.portrait-picker > .portrait-options .portrait-option')
@@ -276,6 +281,8 @@ test('avatar picker keeps distinct realistic and anime packs for every ruleset',
 test('settings status stays in one readable horizontal row', async ({ page }, testInfo) => {
   await authenticate(page)
   await page.goto('/#/settings')
+  await expect(page.locator('.settings-status-disclosure')).toBeVisible()
+  await page.locator('.settings-status-disclosure > summary').click()
 
   const grid = page.locator('.system-status-grid')
   const cards = page.locator('.system-status-card')
@@ -438,27 +445,58 @@ test('overview keeps list selection controls beside the adventure library', asyn
   await page.goto('/#/overview')
 
   const heroActions = page.locator('.overview-actions')
-  await expect(heroActions.getByRole('button', { name: '导入存档' })).toBeVisible()
+  await expect(heroActions.getByRole('button', { name: '导入存档', exact: true })).toHaveCount(0)
   await expect(heroActions.getByRole('button', { name: '创建新冒险' })).toBeVisible()
   await expect(heroActions.getByRole('button', { name: '全选' })).toHaveCount(0)
 
   const libraryActions = page.locator('.library-heading-actions')
+  await expect(libraryActions.getByRole('button', { name: '导入存档', exact: true })).toBeVisible()
+  await expect(libraryActions.locator('.overview-archive-tools')).toBeVisible()
+  // Batch actions stay hidden until the user explicitly enters save selection.
+  await expect(libraryActions.getByRole('button', { name: '选择存档' })).toBeVisible()
+  for (const name of ['全选', '反选', '取消选择', '批量导出']) {
+    await expect(libraryActions.getByRole('button', { name, exact: true })).toHaveCount(0)
+  }
+
+  await page.getByTestId('overview-select-saves').click()
+  const saveCount = await page.getByRole('checkbox', { name: '选择存档' }).count()
+  expect(saveCount).toBeGreaterThan(0)
   await expect(libraryActions.getByRole('button', { name: '全选' })).toBeVisible()
   await expect(libraryActions.getByRole('button', { name: '反选' })).toBeVisible()
   await expect(libraryActions.getByRole('button', { name: '取消选择' })).toBeDisabled()
-  await expect(libraryActions.getByRole('button', { name: '批量导出' })).toBeVisible()
-
-  const saveCount = await page.getByRole('checkbox', { name: '选择存档' }).count()
-  expect(saveCount).toBeGreaterThan(0)
+  await expect(libraryActions.getByRole('button', { name: '批量导出' })).toHaveCount(0)
   await libraryActions.getByRole('button', { name: '全选' }).click()
   await expect(libraryActions.getByRole('button', { name: `删除 ${saveCount}` })).toBeVisible()
   await libraryActions.getByRole('button', { name: '取消选择' }).click()
   await expect(libraryActions.getByRole('button', { name: /删除 \d+/ })).toHaveCount(0)
 
-  const geometry = await libraryActions.locator('button').evaluateAll(buttons => buttons.map(button => {
+  const geometry = await libraryActions.locator(':scope > button').evaluateAll(buttons => buttons.map(button => {
     const rect = button.getBoundingClientRect()
     return { top: rect.top, height: rect.height }
   }))
   expect(Math.max(...geometry.map(item => item.top)) - Math.min(...geometry.map(item => item.top))).toBeLessThanOrEqual(2)
   expect(Math.max(...geometry.map(item => item.height)) - Math.min(...geometry.map(item => item.height))).toBeLessThanOrEqual(2)
+})
+
+test('primary section pages keep the original wide game frame', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'desktop width contract')
+  await authenticate(page)
+  for (const width of [1920, 1366]) {
+    await page.setViewportSize({ width, height: 1080 })
+
+    for (const [route, selector] of [
+      ['overview', '.overview-page'],
+      ['characters', '.characters-page'],
+      ['modules', '.modules-page'],
+      ['settings', '.settings-page'],
+    ] as const) {
+      await page.goto(`/#/${route}`)
+      const frame = page.locator(selector).first()
+      await expect(frame).toBeVisible()
+      const box = await frame.boundingBox()
+      expect(box).not.toBeNull()
+      expect(box!.width).toBeGreaterThanOrEqual(width === 1920 ? 1559 : width - 1)
+      expect(Math.abs(box!.x - (width - box!.width) / 2)).toBeLessThanOrEqual(1)
+    }
+  }
 })

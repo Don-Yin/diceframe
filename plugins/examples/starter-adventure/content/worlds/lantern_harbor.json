@@ -1,0 +1,12 @@
+{
+  "id": "lantern_harbor",
+  "world_id": "lantern_harbor",
+  "world_name": "Lantern Harbor",
+  "language": "en",
+  "description": "A harbor where the beacon has gone dark.",
+  "world_setting": "A fogbound harbor. Keepers guide small boats with colored lanterns.",
+  "starter_scene": "The keeper waits at the pier.",
+  "default_rule": "dnd2024_srd",
+  "default_map": "plugin:starter-adventure:map:harbor-route",
+  "starter_lorebook": []
+}

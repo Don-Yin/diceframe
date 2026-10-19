@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api, apiBlob, errorMessage } from '@/api/client'
 import type {
   AdventureDetailResponse, AdventureSummary, AdventuresResponse, WorldListResponse, WorldSummary,
@@ -8,8 +9,18 @@ import { useConfirm } from '@/composables/useConfirm'
 import { useLocale } from '@/composables/useLocale'
 import { useToast } from '@/composables/useToast'
 import Modal from '@/components/ui/Modal.vue'
+import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
+import ScriptImportDialog from '@/features/adventures/ScriptImportDialog.vue'
+import ContentTextReviewDialog from '@/features/content-review/ContentTextReviewDialog.vue'
+import { textReviewCopy } from '@/features/content-review/textCopy'
+import AdventureGraphForm from '@/features/adventures/AdventureGraphForm.vue'
+import type { ScriptFiles } from '@/features/adventures/scriptTypes'
+import { useAdventureEditorGraph, type EditorStep, type EditorChoice, type EditorChapter, type EditorScene, type EditorEncounter } from './adventureEditorGraph'
+import { useAdventureWorkbenchEditor } from './useAdventureWorkbenchEditor'
 
 const { locale, t } = useLocale()
+const route = useRoute()
+const router = useRouter()
 const { confirm } = useConfirm()
 const toast = useToast()
 const items = ref<AdventureSummary[]>([])
@@ -17,11 +28,15 @@ const worlds = ref<WorldSummary[]>([])
 const error = ref('')
 const busy = ref(false)
 const importInput = ref<HTMLInputElement | null>(null)
+const scriptImportOpen = ref(false)
+const graphDraftPending = ref(false)
+const contentReviewOpen = ref(false)
 const copySource = ref<AdventureSummary | null>(null)
 const copyForm = ref({ directory_id: '', adventure_id: '', name: '', summary: '', version: '1.0.0' })
 const editing = ref<AdventureSummary | null>(null)
 const filesJson = ref('')
 const editingFiles = ref<Record<string, unknown>>({})
+const graphFiles = computed(() => editingFiles.value as ScriptFiles)
 const createOpen = ref(false)
 const createSource = ref<'manual' | 'ai'>('manual')
 const createStep = ref<1 | 2>(1)
@@ -35,53 +50,18 @@ const editorAiPrompt = ref('')
 const editorAiBusy = ref(false)
 const createForm = ref({ directory_id: '', adventure_id: '', name: '', summary: '', version: '1.0.0', world_policy: 'portable', recommended_world_id: '', estimated_minutes: 60 })
 const editorForm = ref({ name: '', summary: '', version: '1.0.0', world_policy: 'portable', recommended_world_id: '', estimated_minutes: 60 })
-type EditorStep = { id: string; chapter_id: string; scene_ref: string; requires: string; encounter_preset_id: string; title: string; narration: string; objective: string; hint: string }
-type EditorChoice = { id: string; step_id: string; next_step_id: string; label: string; description: string }
-type EditorChapter = { id: string; name: string }
-type EditorScene = { ref: string; name: string }
-type EditorAttack = { id: string; damage: string; attack_bonus: number }
-type EditorEnemy = { id: string; profile_id: string; hp: number; armor_class: number; attacks: EditorAttack[] }
-type EditorEncounter = { id: string; name: string; difficulty: string; description: string; catalog_path: string; enemies: EditorEnemy[] }
 const editorSteps = ref<EditorStep[]>([])
 const editorChoices = ref<EditorChoice[]>([])
 const editorChapters = ref<EditorChapter[]>([])
 const editorScenes = ref<EditorScene[]>([])
 const editorEncounters = ref<EditorEncounter[]>([])
 const editorStartStepId = ref('')
-
-const editorGraphIssues = computed(() => {
-  const stepIds = new Set(editorSteps.value.map(step => step.id))
-  const chapterIds = new Set(editorChapters.value.map(chapter => chapter.id))
-  const encounterIds = new Set(editorEncounters.value.map(encounter => encounter.id))
-  const issues: string[] = []
-  if (!editorStartStepId.value || !stepIds.has(editorStartStepId.value)) {
-    issues.push(String(locale.value).startsWith('zh') ? '未选择有效的冒险起点。' : 'Choose a valid adventure start step.')
-  }
-  editorSteps.value.forEach(step => {
-    if (!chapterIds.has(step.chapter_id)) issues.push(`步骤「${step.title || step.id}」没有有效章节。`)
-    if (step.encounter_preset_id && !encounterIds.has(step.encounter_preset_id)) issues.push(`步骤「${step.title || step.id}」引用了不存在的遭遇。`)
-  })
-  const incoming = new Set<string>()
-  editorChoices.value.forEach(choice => {
-    if (!stepIds.has(choice.step_id)) issues.push(`选项「${choice.label || choice.id}」没有有效来源步骤。`)
-    if (choice.next_step_id) {
-      if (!stepIds.has(choice.next_step_id)) issues.push(`选项「${choice.label || choice.id}」跳转目标不存在。`)
-      else incoming.add(choice.next_step_id)
-    }
-  })
-  editorSteps.value.forEach(step => {
-    if (step.id !== editorStartStepId.value && !incoming.has(step.id)) issues.push(`步骤「${step.title || step.id}」从起点不可达。`)
-  })
-  return [...new Set(issues)]
+const { graphIssues: editorGraphIssues, flowPreview: editorFlowPreview } = useAdventureEditorGraph(
+  editorSteps, editorChoices, editorChapters, editorEncounters, editorStartStepId, locale,
+)
+const { hydrateStructuredEditor, syncStructuredEditor, makeChoice, addStep, insertStep, moveStep, addChoice, addChapter, removeChapter, removeStep, removeChoice, addEncounter, removeEncounter, addEnemy, removeEnemy, addAttack, removeAttack } = useAdventureWorkbenchEditor({
+  locale, editing, editingFiles, filesJson, editorForm, editorSteps, editorChoices, editorChapters, editorScenes, editorEncounters, editorStartStepId,
 })
-
-const editorFlowPreview = computed(() => editorSteps.value.map((step, index) => ({
-  step,
-  index,
-  outgoing: editorChoices.value
-    .filter(choice => choice.step_id === step.id)
-    .map(choice => ({ label: choice.label || '继续', target: editorSteps.value.find(item => item.id === choice.next_step_id)?.title || (choice.next_step_id ? choice.next_step_id : '结局') })),
-})))
 
 const builtinCount = computed(() => items.value.filter(item => !item.custom).length)
 const customCount = computed(() => items.value.filter(item => item.custom).length)
@@ -99,7 +79,9 @@ async function load() {
   error.value = ''
   try {
     const [result, worldResult] = await Promise.all([
-      api<AdventuresResponse>(`/adventures?rule_id=dnd2024_srd&language=${encodeURIComponent(locale.value)}`),
+      // The workbench is ruleset-agnostic. Compatibility is shown by the
+      // server projection and checked again when a game is created.
+      api<AdventuresResponse>(`/adventures?language=${encodeURIComponent(locale.value)}`),
       api<WorldListResponse>('/worlds'),
     ])
     items.value = result.adventures || []
@@ -109,7 +91,30 @@ async function load() {
   }
 }
 
-onMounted(load)
+type AdventureIntent = 'new' | 'script-import' | 'ai' | 'package-import' | 'text-review'
+const adventureIntents = new Set<AdventureIntent>(['new', 'script-import', 'ai', 'package-import', 'text-review'])
+
+async function consumeIntent() {
+  const rawIntent = route.query.intent
+  const intent = typeof rawIntent === 'string' && adventureIntents.has(rawIntent as AdventureIntent)
+    ? rawIntent as AdventureIntent
+    : null
+  if (!intent) return
+  if (intent === 'new') openCreate()
+  else if (intent === 'ai') openAiDraft()
+  else if (intent === 'script-import') scriptImportOpen.value = true
+  else if (intent === 'package-import') importInput.value?.click()
+  else if (intent === 'text-review') contentReviewOpen.value = true
+  const query = { ...route.query }
+  delete query.intent
+  await router.replace({ query })
+}
+
+onMounted(async () => {
+  await load()
+  await consumeIntent()
+})
+watch(() => route.query.intent, () => { void consumeIntent() })
 
 function safeStem(value: string) {
   return value.toLowerCase().replace(/^[^a-z0-9]+/, '').replace(/[^a-z0-9_.-]+/g, '_').slice(0, 48) || 'adventure'
@@ -402,7 +407,7 @@ async function openEditor(item: AdventureSummary, asCreationStep = false) {
     filesJson.value = JSON.stringify(result.adventure.files, null, 2)
     advancedOpen.value = false
     editorPanel.value = 'overview'
-    hydrateStructuredEditor()
+    if (item.format !== 'diceframe:adventure-graph-v2') hydrateStructuredEditor()
   } catch (cause: unknown) {
     error.value = errorMessage(cause)
   }
@@ -425,304 +430,14 @@ async function cancelEditor() {
   }
 }
 
-function hydrateStructuredEditor() {
-  const files = editingFiles.value
-  const manifest = (files['manifest.json'] || {}) as Record<string, any>
-  const adventure = (files['adventure.json'] || {}) as Record<string, any>
-  const localePath = `locales/${locale.value}/adventure.json`
-  const localeFile = (files[localePath] || files['locales/zh-CN/adventure.json'] || {}) as Record<string, any>
-  const tutorial = (localeFile.fields?.tutorial || {}) as Record<string, any>
-  editorForm.value = {
-    name: String(tutorial.name || adventure.name || ''),
-    summary: String(tutorial.summary || adventure.summary || ''),
-    version: String(manifest.version || '1.0.0'),
-    world_policy: String(manifest.world_policy || 'portable'),
-    recommended_world_id: String(manifest.recommended_world_id || adventure.recommended_world_id || ''),
-    estimated_minutes: Number(adventure.estimated_minutes || 60),
-  }
-  const stepTexts = (tutorial.steps || {}) as Record<string, any>
-  const chapterTexts = (tutorial.chapters || {}) as Record<string, any>
-  editorChapters.value = (Array.isArray(adventure.chapters) ? adventure.chapters : []).map((chapter: any, index: number) => ({
-    id: String(chapter.id || `chapter_${index + 1}`), name: String(chapterTexts[chapter.id]?.name || `第 ${index + 1} 章`),
-  }))
-  editorScenes.value = Object.entries(files)
-    .filter(([path, value]) => path.startsWith('content/') && (value as any)?.kind === 'scene')
-    .map(([path, value]) => {
-      const scene = value as Record<string, any>
-      const sceneId = String(scene.id || path.split('/').pop()?.replace(/\.json$/, '') || '')
-      const sceneLocale = (files[`locales/${locale.value}/scenes/${sceneId}.json`] || files[`locales/zh-CN/scenes/${sceneId}.json`] || {}) as Record<string, any>
-      return { ref: `scene:${sceneId}`, name: String(sceneLocale.fields?.name || sceneId) }
-    })
-  editorSteps.value = (Array.isArray(adventure.steps) ? adventure.steps : []).map((step: any) => ({
-    id: String(step.id || ''), chapter_id: String(step.chapter_id || ''), scene_ref: String(step.scene_ref || ''),
-    requires: String(step.requires || 'none'), encounter_preset_id: String(step.encounter_preset_id || ''),
-    title: String(stepTexts[step.id]?.title || '未命名步骤'), narration: String(stepTexts[step.id]?.narration || ''),
-    objective: String(stepTexts[step.id]?.objective || ''), hint: String(stepTexts[step.id]?.hint || ''),
-  }))
-  editorStartStepId.value = String(adventure.start_step_id || editorSteps.value[0]?.id || '')
-  const choiceTexts = (tutorial.choices || {}) as Record<string, any>
-  editorChoices.value = (Array.isArray(adventure.choices) ? adventure.choices : []).map((choice: any) => ({
-    id: String(choice.id || ''), step_id: String(choice.step_id || ''), next_step_id: String(choice.next_step_id || ''),
-    label: String(choiceTexts[choice.id]?.label || choice.id || ''), description: String(choiceTexts[choice.id]?.description || ''),
-  }))
-  editorEncounters.value = Object.entries(files)
-    .filter(([path, value]) => path.startsWith('content/') && (value as any)?.kind === 'encounter_catalog')
-    .flatMap(([path, value]) => {
-      const catalog = value as Record<string, any>
-      const catalogId = String(catalog.id || path.split('/').pop()?.replace(/\.json$/, '') || '')
-      const localeFile = (files[`locales/${locale.value}/encounters/${catalogId}.json`] || files[`locales/zh-CN/encounters/${catalogId}.json`] || {}) as Record<string, any>
-      const labels = (localeFile.fields?.labels?.presets || {}) as Record<string, any>
-      return (Array.isArray(catalog.presets) ? catalog.presets : []).map((preset: any) => {
-        const id = String(preset.id || '')
-        const label = labels[id] as Record<string, any> | undefined
-        return {
-          id,
-          name: String(label?.name || id || '未命名遭遇'),
-          difficulty: String(preset.difficulty || 'standard'),
-          description: String(label?.description || ''),
-          catalog_path: path,
-          enemies: (Array.isArray(preset.enemies) ? preset.enemies : []).map((enemy: any, enemyIndex: number) => ({
-            id: String(enemy.id || `enemy_${enemyIndex + 1}`),
-            profile_id: String(enemy.profile_id || ''),
-            hp: Math.max(1, Number(enemy.hp || 1)),
-            armor_class: Math.max(1, Number(enemy.armor_class || 10)),
-            attacks: (Array.isArray(enemy.attacks) ? enemy.attacks : []).map((attack: any, attackIndex: number) => ({
-              id: String(attack.id || `attack_${attackIndex + 1}`),
-              damage: String(attack.damage || '1d4'),
-              attack_bonus: Number(attack.attack_bonus || 0),
-            })),
-          })),
-        }
-      })
-    })
-}
-
-function syncStructuredEditor() {
-  const files = JSON.parse(JSON.stringify(editingFiles.value)) as Record<string, any>
-  const manifest = files['manifest.json'] as Record<string, any>
-  const adventure = files['adventure.json'] as Record<string, any>
-  const localePath = `locales/${locale.value}/adventure.json`
-  const localeFile = (files[localePath] || files['locales/zh-CN/adventure.json']) as Record<string, any>
-  const tutorial = (localeFile.fields ||= {}).tutorial ||= {}
-  manifest.version = editorForm.value.version.trim() || '1.0.0'
-  manifest.world_policy = editorForm.value.world_policy
-  manifest.recommended_world_id = editorForm.value.recommended_world_id.trim()
-  adventure.estimated_minutes = Math.max(1, Number(editorForm.value.estimated_minutes || 60))
-  const originalChapters = Array.isArray(adventure.chapters) ? adventure.chapters : []
-  adventure.chapters = editorChapters.value.map(chapter => {
-    const original = originalChapters.find((candidate: any) => candidate.id === chapter.id) || {}
-    return { ...original, id: chapter.id, step_ids: editorSteps.value.filter(step => step.chapter_id === chapter.id).map(step => step.id) }
-  })
-  adventure.start_step_id = editorStartStepId.value || editorSteps.value[0]?.id || adventure.start_step_id
-  adventure.steps = editorSteps.value.map(step => {
-    const original = (Array.isArray(adventure.steps) ? adventure.steps : []).find((candidate: any) => candidate.id === step.id) || {}
-    return { ...original, id: step.id, chapter_id: step.chapter_id, scene_ref: step.scene_ref, requires: step.requires, encounter_preset_id: step.encounter_preset_id || undefined, choice_ids: editorChoices.value.filter(choice => choice.step_id === step.id).map(choice => choice.id) }
-  })
-  adventure.choices = editorChoices.value.map(choice => {
-    const original = (Array.isArray(adventure.choices) ? adventure.choices : []).find((candidate: any) => candidate.id === choice.id) || {}
-    return { ...original, id: choice.id, step_id: choice.step_id, next_step_id: choice.next_step_id }
-  })
-  const encountersByCatalog = new Map<string, EditorEncounter[]>()
-  editorEncounters.value.forEach(encounter => {
-    const entries = encountersByCatalog.get(encounter.catalog_path) || []
-    entries.push(encounter)
-    encountersByCatalog.set(encounter.catalog_path, entries)
-  })
-  for (const [catalogPath, encounters] of encountersByCatalog) {
-    const catalog = (files[catalogPath] ||= {
-      schema_version: 1,
-      kind: 'encounter_catalog',
-      id: catalogPath.split('/').pop()?.replace(/\.json$/, '') || 'adventure_encounters',
-      source_ref: `user:${editing.value?.adventure_id || 'adventure'}`,
-      automation_level: 'deterministic',
-      presets: [],
-    }) as Record<string, any>
-    const originalPresets = Array.isArray(catalog.presets) ? catalog.presets : []
-    catalog.presets = encounters.map(encounter => {
-      const original = originalPresets.find((preset: any) => String(preset.id || '') === encounter.id) || {}
-      return {
-        ...original,
-        id: encounter.id,
-        difficulty: encounter.difficulty || 'standard',
-        enemies: encounter.enemies.map(enemy => {
-          const originalEnemy = (Array.isArray(original.enemies) ? original.enemies : []).find((item: any) => String(item.id || '') === enemy.id) || {}
-          return {
-            ...originalEnemy,
-            id: enemy.id,
-            profile_id: enemy.profile_id || originalEnemy.profile_id || enemy.id,
-            hp: Math.max(1, Number(enemy.hp || 1)),
-            armor_class: Math.max(1, Number(enemy.armor_class || 10)),
-            attacks: enemy.attacks.map(attack => {
-              const originalAttack = (Array.isArray(originalEnemy.attacks) ? originalEnemy.attacks : []).find((item: any) => String(item.id || '') === attack.id) || {}
-              return { ...originalAttack, id: attack.id, damage: attack.damage || '1d4', attack_bonus: Number(attack.attack_bonus || 0) }
-            }),
-          }
-        }),
-      }
-    })
-    const catalogId = String(catalog.id || catalogPath.split('/').pop()?.replace(/\.json$/, '') || 'adventure_encounters')
-    const encounterLocalePath = `locales/${locale.value}/encounters/${catalogId}.json`
-    const encounterLocale = (files[encounterLocalePath] ||= {
-      locale_schema_version: 1,
-      locale: locale.value,
-      target: { kind: 'encounter_catalog', id: catalogId },
-      fields: { name: catalogId, labels: { presets: {} } },
-    }) as Record<string, any>
-    const fields = (encounterLocale.fields ||= {}) as Record<string, any>
-    const labels = (fields.labels ||= {}) as Record<string, any>
-    const presetLabels = (labels.presets ||= {}) as Record<string, any>
-    encounters.forEach(encounter => {
-      presetLabels[encounter.id] = { ...(presetLabels[encounter.id] || {}), name: encounter.name, description: encounter.description }
-    })
-  }
-  tutorial.name = editorForm.value.name.trim()
-  tutorial.summary = editorForm.value.summary.trim()
-  tutorial.chapters ||= {}
-  for (const chapter of editorChapters.value) tutorial.chapters[chapter.id] = { ...(tutorial.chapters[chapter.id] || {}), name: chapter.name }
-  const oldSteps = tutorial.steps || {}
-  tutorial.steps = Object.fromEntries(editorSteps.value.map(step => [step.id, { ...(oldSteps[step.id] || {}), title: step.title, narration: step.narration, objective: step.objective, hint: step.hint }]))
-  const oldChoices = tutorial.choices || {}
-  tutorial.choices = Object.fromEntries(editorChoices.value.map(choice => [choice.id, { ...(oldChoices[choice.id] || {}), label: choice.label, description: choice.description }]))
-  editingFiles.value = files
-  filesJson.value = JSON.stringify(files, null, 2)
-}
-
-function addStep() {
-  const id = `step_${Date.now().toString(36)}`
-  const chapterId = editorChapters.value[0]?.id || 'chapter_1'
-  if (!editorChapters.value.length) editorChapters.value.push({ id: chapterId, name: '第一章' })
-  const previous = [...editorSteps.value].reverse().find(step => step.chapter_id === chapterId)
-  editorSteps.value.push({ id, chapter_id: chapterId, scene_ref: '', requires: 'none', encounter_preset_id: '', title: '新步骤', narration: '', objective: '', hint: '' })
-  if (previous) connectStepAfter(previous.id, id)
-}
-
-function newStep(chapterId: string): EditorStep {
-  return { id: `step_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`, chapter_id: chapterId, scene_ref: '', requires: 'none', encounter_preset_id: '', title: '新步骤', narration: '', objective: '', hint: '' }
-}
-
-function insertStep(stepId: string, offset: -1 | 1) {
-  const index = editorSteps.value.findIndex(step => step.id === stepId)
-  if (index < 0) return
-  const source = editorSteps.value[index]
-  const step = newStep(source.chapter_id)
-  editorSteps.value.splice(index + (offset > 0 ? 1 : 0), 0, step)
-  if (offset < 0) connectStepBefore(source.id, step.id)
-  else connectStepAfter(source.id, step.id)
-}
-
-function makeChoice(stepId: string, nextStepId: string, label = '继续'): EditorChoice {
-  return { id: `choice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`, step_id: stepId, next_step_id: nextStepId, label, description: '' }
-}
-
-/** Keep the graph connected when a user inserts a step in the visual order. */
-function connectStepBefore(sourceId: string, insertedId: string) {
-  const incoming = editorChoices.value.filter(choice => choice.next_step_id === sourceId)
-  if (incoming.length) {
-    incoming.forEach(choice => { choice.next_step_id = insertedId })
-  } else if (editorStartStepId.value === sourceId) {
-    editorStartStepId.value = insertedId
-  }
-  editorChoices.value.push(makeChoice(insertedId, sourceId))
-}
-
-function connectStepAfter(sourceId: string, insertedId: string) {
-  const outgoing = editorChoices.value.filter(choice => choice.step_id === sourceId)
-  if (!outgoing.length) {
-    editorChoices.value.push(makeChoice(sourceId, insertedId))
-    return
-  }
-  const continuations = outgoing.map(choice => ({
-    ...makeChoice(insertedId, choice.next_step_id, choice.label || '继续'),
-    description: choice.description,
-  }))
-  outgoing.forEach(choice => { choice.next_step_id = insertedId })
-  editorChoices.value.push(...continuations)
-}
-
-function moveStep(stepId: string, direction: -1 | 1) {
-  const index = editorSteps.value.findIndex(step => step.id === stepId)
-  if (index < 0) return
-  const chapterId = editorSteps.value[index].chapter_id
-  const siblings = editorSteps.value
-    .map((step, itemIndex) => ({ step, itemIndex }))
-    .filter(item => item.step.chapter_id === chapterId)
-  const siblingIndex = siblings.findIndex(item => item.step.id === stepId)
-  const target = siblings[siblingIndex + direction]
-  if (!target) return
-  const [moved] = editorSteps.value.splice(index, 1)
-  editorSteps.value.splice(target.itemIndex + (direction > 0 ? 0 : 0), 0, moved)
-}
-
-function addChoice(stepId: string) {
-  const id = `choice_${Date.now().toString(36)}`
-  editorChoices.value.push({ id, step_id: stepId, next_step_id: '', label: '新选项', description: '' })
-}
-
-function addChapter() {
-  const id = `chapter_${editorChapters.value.length + 1}`
-  editorChapters.value.push({ id, name: `第 ${editorChapters.value.length + 1} 章` })
-}
-
-function removeChapter(chapterId: string) {
-  if (editorChapters.value.length <= 1) return
-  const fallback = editorChapters.value.find(chapter => chapter.id !== chapterId)?.id || ''
-  editorSteps.value.forEach(step => { if (step.chapter_id === chapterId) step.chapter_id = fallback })
-  editorChapters.value = editorChapters.value.filter(chapter => chapter.id !== chapterId)
-}
-
-function removeStep(stepId: string) {
-  if (editorSteps.value.length <= 1) return
-  editorSteps.value = editorSteps.value.filter(step => step.id !== stepId)
-  editorChoices.value = editorChoices.value.filter(choice => choice.step_id !== stepId && choice.next_step_id !== stepId)
-  if (editorStartStepId.value === stepId) editorStartStepId.value = editorSteps.value[0]?.id || ''
-}
-
-function removeChoice(choiceId: string) {
-  editorChoices.value = editorChoices.value.filter(choice => choice.id !== choiceId)
-}
-
-function addEncounter() {
-  const catalogPath = editorEncounters.value[0]?.catalog_path || 'content/encounters/adventure_encounters.json'
-  editorEncounters.value.push({
-    id: `encounter_${Date.now().toString(36)}`,
-    name: '新遭遇', difficulty: 'standard', description: '', catalog_path: catalogPath,
-    enemies: [],
-  })
-}
-
-function removeEncounter(encounterId: string) {
-  editorEncounters.value = editorEncounters.value.filter(encounter => encounter.id !== encounterId)
-  editorSteps.value.forEach(step => { if (step.encounter_preset_id === encounterId) step.encounter_preset_id = '' })
-}
-
-function addEnemy(encounter: EditorEncounter) {
-  encounter.enemies.push({
-    id: `enemy_${Date.now().toString(36)}`,
-    profile_id: 'custom_enemy', hp: 10, armor_class: 12,
-    attacks: [{ id: 'attack', damage: '1d6+2', attack_bonus: 4 }],
-  })
-}
-
-function removeEnemy(encounter: EditorEncounter, enemyId: string) {
-  encounter.enemies = encounter.enemies.filter(enemy => enemy.id !== enemyId)
-}
-
-function addAttack(enemy: EditorEnemy) {
-  enemy.attacks.push({ id: `attack_${enemy.attacks.length + 1}`, damage: '1d6+2', attack_bonus: 4 })
-}
-
-function removeAttack(enemy: EditorEnemy, attackId: string) {
-  if (enemy.attacks.length <= 1) return
-  enemy.attacks = enemy.attacks.filter(attack => attack.id !== attackId)
-}
-
 async function savePackage() {
   if (!editing.value) return
   busy.value = true
   error.value = ''
   try {
-    if (!advancedOpen.value) syncStructuredEditor()
-    const files = JSON.parse(filesJson.value || '{}') as Record<string, unknown>
+    const graphV2 = editing.value.format === 'diceframe:adventure-graph-v2'
+    if (!graphV2 && !advancedOpen.value) syncStructuredEditor()
+    const files = graphV2 ? editingFiles.value : JSON.parse(filesJson.value || '{}') as Record<string, unknown>
     await api(`/adventures/${encodeURIComponent(editing.value.adventure_id)}`, {
       method: 'PUT',
       body: JSON.stringify({ files, language: locale.value }),
@@ -797,20 +512,29 @@ function policyLabel(policy: string) {
 
 <template>
   <section class="view archive-page rules-page adventures-page">
-    <header class="view-title archive-hero">
-      <div>
-        <span class="section-kicker">{{ t('adventurePackagesKicker') }}</span>
-        <h1>{{ t('adventurePackageManagement') }}</h1>
-        <p class="muted">{{ t('adventurePackageManagementHint') }}</p>
-      </div>
-      <div class="actions adventure-header-actions">
+    <ContentPageHeader
+      kicker="ADVENTURE COLLECTION"
+      :title="t('adventurePackageManagement')"
+      :description="t('adventurePackageManagementHint')"
+      data-testid="adventure-creation-header"
+    >
+      <template #actions>
+        <div class="actions adventure-header-actions">
         <input ref="importInput" hidden type="file" accept=".zip,.dfadventure" @change="importPackage">
         <button class="primary" @click="openCreate()">{{ t('newAdventurePackage') }}</button>
-        <button @click="openAiDraft">{{ t('aiGenerateAdventure') }}</button>
-        <button :disabled="busy" @click="importInput?.click()">{{ t('importAdventurePackage') }}</button>
-        <button @click="load">{{ t('refresh') }}</button>
-      </div>
-    </header>
+        <details class="adventure-header-more">
+          <summary>{{ String(locale).startsWith('zh') ? '更多操作' : 'More actions' }}</summary>
+          <div class="adventure-header-menu">
+            <button @click="openAiDraft">{{ t('aiGenerateAdventure') }}</button>
+            <button :disabled="busy" @click="importInput?.click()">{{ t('importAdventurePackage') }}</button>
+            <button :disabled="busy" @click="scriptImportOpen = true">{{ t('scriptImportTitle') }}</button>
+            <button :disabled="busy" @click="contentReviewOpen = true">{{ textReviewCopy(locale).title }}</button>
+            <button @click="load">{{ t('refresh') }}</button>
+          </div>
+        </details>
+        </div>
+      </template>
+    </ContentPageHeader>
 
     <p v-if="error" class="error-banner">{{ error }}</p>
 
@@ -885,6 +609,7 @@ function policyLabel(policy: string) {
           <small v-if="item.in_use" class="adventure-lock-note">{{ t('adventureBoundReadOnly') }}</small>
         </div>
         <div class="actions adventure-package-actions">
+          <a class="primary" :href="`#/create?adventure_id=${encodeURIComponent(item.adventure_id)}${item.source_kind === 'plugin' ? `&module_id=${encodeURIComponent(item.source_id || '')}` : ''}`">{{ t('moduleAdventureLaunch') }}</a>
           <button @click="openCopy(item)">{{ t('copyAndEdit') }}</button>
           <button @click="exportPackage(item)">{{ t('export') }}</button>
           <button v-if="item.custom" :disabled="!item.editable" @click="openEditor(item)">{{ t('edit') }}</button>
@@ -909,7 +634,14 @@ function policyLabel(policy: string) {
       </template>
     </Modal>
 
-    <Modal v-if="editing" :title="editingCreation ? `${t('editAdventurePackage')} · 3/3` : t('editAdventurePackage')" dialog-class="adventure-editor-dialog" @close="cancelEditor">
+    <ScriptImportDialog v-if="scriptImportOpen" @close="scriptImportOpen = false" @published="scriptImportOpen = false; toast.success(t('adventureImported')); load()" />
+    <ContentTextReviewDialog v-if="contentReviewOpen" @close="contentReviewOpen = false" @saved="load()" />
+    <Modal v-if="editing?.format === 'diceframe:adventure-graph-v2'" :title="t('editAdventurePackage')" dialog-class="adventure-editor-dialog" @close="closeEditor">
+      <AdventureGraphForm :files="graphFiles" @pending="graphDraftPending = $event" />
+      <p v-if="error" role="alert" class="error-text">{{ error }}</p>
+      <template #actions><button @click="closeEditor">{{ t('cancel') }}</button><button class="primary" :disabled="busy || graphDraftPending" @click="savePackage">{{ t('saveConfig') }}</button></template>
+    </Modal>
+    <Modal v-else-if="editing" :title="editingCreation ? `${t('editAdventurePackage')} · 3/3` : t('editAdventurePackage')" dialog-class="adventure-editor-dialog" @close="cancelEditor">
       <p class="muted">{{ t('adventureStructuredEditorHint') }}</p>
       <section class="adventure-editor-form">
         <nav class="adventure-editor-nav" aria-label="Adventure editor sections">

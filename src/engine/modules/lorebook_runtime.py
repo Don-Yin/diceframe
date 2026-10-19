@@ -1,11 +1,18 @@
-"""Lorebook runtime timers (sticky / cooldown / delay) as a module state slot."""
+"""Lorebook runtime timers (sticky / cooldown / delay) as a module state slot.
+
+The core flow reaches this module only through ``module_hooks``: timers tick
+at ``round.processing.begin``, clear at ``instance.reset``, and Lorebook
+retrieval reads them as ``lorebook_timers`` module state.  Without the module
+entries simply have no sticky / cooldown / delay state.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
+from src.engine import module_hooks
 from src.engine.module_state import ModuleStateSpec, get_module_state, register_module_state
-from src.lorebook.activation import migrate_timed_state
+from src.lorebook.activation import TIMED_COUNTER_KEYS, advance_timed_state, migrate_timed_state
 
 MODULE_NAME = "lorebook_runtime"
 SCHEMA_VERSION = 1
@@ -49,5 +56,43 @@ def replace_timers(instance: Any, value: Any) -> None:
     get_module_state(instance, MODULE_NAME)["timers"] = normalize_timers(value)
 
 
+def tick(instance: Any) -> None:
+    """Tick persisted Lorebook timers once per round, supporting the pre-v2 shape.
+
+    Called at the authoritative turn boundary (``round.processing.begin``);
+    the lifecycle *semantics* live in :mod:`src.lorebook.activation` so
+    ``sticky → cooldown`` ordering is testable without a GameInstance.
+    """
+    timed_state = timers(instance)
+    expired: list[str] = []
+    for entry_id, state in timed_state.items():
+        if not isinstance(state, dict):
+            expired.append(entry_id)
+            continue
+        if any(key in state for key in TIMED_COUNTER_KEYS):
+            if advance_timed_state(state):
+                expired.append(entry_id)
+            continue
+        remaining = max(0, int(state.get("remaining", 0) or 0) - 1)
+        if remaining <= 0:
+            expired.append(entry_id)
+        else:
+            state["remaining"] = remaining
+    for entry_id in expired:
+        timed_state.pop(entry_id, None)
+
+
+def clear(instance: Any) -> None:
+    timers(instance).clear()
+
+
+def read_state(instance: Any, kind: str) -> Any:
+    return timers(instance) if kind == module_hooks.LOREBOOK_TIMERS else None
+
+
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)
 register_module_state(SPEC)
+module_hooks.register(module_hooks.ROUND_PROCESSING_BEGIN, MODULE_NAME, tick)
+module_hooks.register(module_hooks.INSTANCE_RESET_PREFLIGHT, MODULE_NAME, timers)
+module_hooks.register(module_hooks.INSTANCE_RESET, MODULE_NAME, clear)
+module_hooks.register(module_hooks.STATE_READ, MODULE_NAME, read_state)

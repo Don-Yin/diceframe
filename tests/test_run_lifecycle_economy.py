@@ -25,7 +25,7 @@ from src.engine.economy import (
     resolve_proposal,
     set_proposal_status,
 )
-from src.engine.modules import economy_state, media, private_channels, session_stats, table_settings
+from src.engine.modules import economy_state, media, private_channels, session_stats
 from src.commands.economy_effects import (
     guard_unbacked_payment_narration,
     defer_narrative_effects,
@@ -403,17 +403,17 @@ def test_configure_session_reward_policy_normalization() -> None:
     instance.configure_session(
         economy_reward_policy={"mode": "auto_small_cash", "auto_reward_cap": 120},
     )
-    assert table_settings.economy_reward_policy(instance) == {
+    assert economy_state.reward_policy(instance) == {
         "mode": "auto_small_cash", "auto_reward_cap": 120,
     }
     # 空模式=显式清空，回退规则/全局默认。
     instance.configure_session(economy_reward_policy={"mode": ""})
-    assert table_settings.economy_reward_policy(instance) == {}
+    assert economy_state.reward_policy(instance) == {}
     # 重开拷贝语义：空 dict 幂等。
-    instance.configure_session(economy_reward_policy=dict(table_settings.economy_reward_policy(instance) or {}))
-    assert table_settings.economy_reward_policy(instance) == {}
+    instance.configure_session(economy_reward_policy=dict(economy_state.reward_policy(instance) or {}))
+    assert economy_state.reward_policy(instance) == {}
     instance.configure_session(economy_reward_policy={"mode": "gm_confirm"})
-    assert table_settings.economy_reward_policy(instance) == {"mode": "gm_confirm"}
+    assert economy_state.reward_policy(instance) == {"mode": "gm_confirm"}
     with pytest.raises(ValueError):
         instance.configure_session(economy_reward_policy={"mode": "auto_small_cash", "auto_reward_cap": -1})
     with pytest.raises(ValueError):
@@ -1887,7 +1887,7 @@ async def test_in_flight_narration_keeps_output_when_pending_proposal_resolves(
 
     monkeypatch.setattr(llm, "call", delayed_call)
     processing = asyncio.create_task(api._handler.process_round(instance))
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=10)
     declined = await api.resolve_payment(
         created["game_key"], proposal["id"], False, uid,
     )
@@ -1954,7 +1954,7 @@ async def test_in_flight_narration_is_discarded_after_rollback(
 
     monkeypatch.setattr(llm, "call", delayed_call)
     processing = asyncio.create_task(api._handler.process_round(instance))
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=10)
     # 生成期间回滚本轮：committed -> pending（结算回滚 reopen），必须判过期。
     reverse_round_economy(instance, instance.round_number)
     release.set()
@@ -2016,7 +2016,7 @@ async def test_in_flight_check_plan_is_discarded_after_economy_decision(
 
     monkeypatch.setattr("src.commands.round_processor.plan_round_checks", delayed_plan)
     planning = asyncio.create_task(api._handler.prepare_round_checks_ai(instance))
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=10)
     declined = await api.resolve_payment(
         created["game_key"], proposal["id"], False, uid,
     )
@@ -2077,7 +2077,7 @@ async def test_restart_rejects_old_payment_waiting_during_candidate_generation(
 
     monkeypatch.setattr(llm, "call", delayed_opening)
     restarting = asyncio.create_task(api.restart_game(created["game_key"]))
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=10)
     payment = asyncio.create_task(
         api.resolve_payment(created["game_key"], proposal["id"], True, uid)
     )
@@ -2262,7 +2262,7 @@ async def test_payment_cannot_interleave_with_swipe_rewrite(web_api) -> None:
     before = deepcopy(economy_state.state(instance))
     entered, release = asyncio.Event(), asyncio.Event()
     rewrite = asyncio.create_task(_hold_historical_rewrite(instance, entered, release))
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=10)
     result = await asyncio.wait_for(api.resolve_payment(created["game_key"], proposal["id"], True, uid), 1)
     assert result["code"] == "REWRITE_IN_PROGRESS"
     assert economy_state.state(instance) == before
@@ -2282,7 +2282,7 @@ async def test_pending_dice_confirmation_is_rejected_during_swipe(web_api) -> No
     before_action, before_ready = deepcopy(instance.action_queue[0]), set(instance.ready_players)
     entered, release = asyncio.Event(), asyncio.Event()
     rewrite = asyncio.create_task(_hold_historical_rewrite(instance, entered, release))
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=10)
     result = await asyncio.wait_for(api.resolve_pending_dice_for_game(created["game_key"], uid, "player"), 1)
     assert result["code"] == "REWRITE_IN_PROGRESS"
     assert instance.action_queue[0] == before_action
@@ -2299,7 +2299,7 @@ async def test_gm_resource_change_is_rejected_during_swipe(web_api) -> None:
     before = deepcopy(instance.players)
     entered, release = asyncio.Event(), asyncio.Event()
     rewrite = asyncio.create_task(_hold_historical_rewrite(instance, entered, release))
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=10)
     result = await asyncio.wait_for(api.gm_command(created["game_key"], "给Hero加金币5"), 1)
     assert result["code"] == "REWRITE_IN_PROGRESS"
     assert instance.players == before
@@ -2315,7 +2315,7 @@ async def test_character_update_is_rejected_during_swipe(web_api) -> None:
     before = deepcopy(instance.players[uid])
     entered, release = asyncio.Event(), asyncio.Event()
     rewrite = asyncio.create_task(_hold_historical_rewrite(instance, entered, release))
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=10)
     result = await asyncio.wait_for(api.update_character(created["game_key"], uid, {"background": "changed"}), 1)
     assert result["error_code"] == "REWRITE_IN_PROGRESS"
     assert instance.players[uid] == before

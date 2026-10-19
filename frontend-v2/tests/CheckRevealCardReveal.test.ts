@@ -26,6 +26,8 @@ describe('CheckRevealCard click-to-reveal presentation', () => {
     expect(wrapper.text()).not.toContain('23')
     expect(wrapper.text()).not.toContain('大成功')
     expect(wrapper.find('details').exists()).toBe(false)
+    expect(wrapper.classes()).not.toContain('critical')
+    expect(wrapper.classes()).not.toContain('success')
     const button = wrapper.get('button')
     expect(button.text()).toContain('点击揭示骰子')
     await button.trigger('click')
@@ -44,7 +46,7 @@ describe('CheckRevealCard click-to-reveal presentation', () => {
       },
     })
     expect(wrapper.text()).toContain('等待揭示')
-    expect(wrapper.find('button').exists()).toBe(false)
+    expect(wrapper.find('.check-reveal-actions button').exists()).toBe(false)
   })
 
   it('unmasks with a revealed-by caption once the record arrives', async () => {
@@ -73,10 +75,38 @@ describe('CheckRevealCard click-to-reveal presentation', () => {
     })
     expect(wrapper.text()).toContain('成功')
     expect(wrapper.text()).not.toContain('待揭示')
-    expect(wrapper.find('button').exists()).toBe(false)
+    expect(wrapper.find('.check-reveal-actions button').exists()).toBe(false)
   })
 
-  it('counts down and reveals locally when nobody reveals in time', async () => {
+  it('keeps completed rolls compact and lets the player reopen their dice tray', async () => {
+    const wrapper = mount(CheckRevealCard, {
+      attachTo: document.body,
+      global: { plugins: [i18n] },
+      props: { check: { check_id: 'done', dice: 'd20', roll: 14, verdict: '成功' } },
+    })
+    expect(wrapper.get('[data-testid="dice-tray"]').isVisible()).toBe(false)
+    await wrapper.get('[data-testid="dice-tray-toggle"]').trigger('click')
+    expect(wrapper.get('[data-testid="dice-tray-toggle"]').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('[data-testid="dice-tray"]').isVisible(), wrapper.html()).toBe(true)
+    expect(wrapper.get('[data-die-value]').attributes('data-die-value')).toBe('14')
+    wrapper.unmount()
+  })
+
+  it('retains a pending push draft while its dice presentation changes', async () => {
+    const check = { check_id: 'push', actor_uid: 'p', dice: 'd100', roll: 80, verdict: '失败',
+      push: { schema_version: 1, revision: 1, status: 'pending' as const, run_id: 'r', round: 1, reason: '', consequence: '' } }
+    const wrapper = mount(CheckRevealCard, {
+      global: { plugins: [i18n] }, props: { check, gameKey: 'g', actorId: 'p' },
+    })
+    await wrapper.get('textarea').setValue('我再仔细搜查一次')
+    expect(wrapper.get('[data-testid="dice-tray"]').isVisible()).toBe(true)
+    expect(wrapper.find('[data-testid="dice-tray-toggle"]').exists()).toBe(false)
+    await wrapper.setProps({ check: { ...check, rolls: [80] } })
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('我再仔细搜查一次')
+    wrapper.unmount()
+  })
+
+  it('keeps an unclicked spectator result masked until the shared reveal arrives', async () => {
     vi.useFakeTimers()
     const wrapper = mount(CheckRevealCard, {
       global: { plugins: [i18n] },
@@ -87,19 +117,18 @@ describe('CheckRevealCard click-to-reveal presentation', () => {
         canReveal: false,
       },
     })
-    expect(wrapper.text()).toContain('10 秒后自动揭示')
-    await vi.advanceTimersByTimeAsync(4000)
-    expect(wrapper.text()).toContain('6 秒后自动揭示')
+    expect(wrapper.text()).toContain('等待揭示')
+    await vi.advanceTimersByTimeAsync(60000)
     expect(wrapper.text()).not.toContain('17')
-    await vi.advanceTimersByTimeAsync(6000)
-    // 本地翻开：不请求服务端，所以不发 reveal 事件，也不显示揭示者。
-    expect(wrapper.text()).toContain('已自动揭示')
+    expect(wrapper.text()).not.toContain('秒后自动揭示')
+    expect(wrapper.emitted('reveal')).toBeUndefined()
+    await wrapper.setProps({ reveal: { by: 'gm', at: '2026-09-30T00:00:00Z' } })
     expect(wrapper.text()).toContain('17')
     expect(wrapper.text()).not.toContain('秒后自动揭示')
     expect(wrapper.emitted('reveal')).toBeUndefined()
   })
 
-  it('a real reveal before the timeout wins over the countdown', async () => {
+  it('shows the shared revealer and keeps the result revealed', async () => {
     vi.useFakeTimers()
     const wrapper = mount(CheckRevealCard, {
       global: { plugins: [i18n] },

@@ -9,7 +9,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from datetime import datetime, timezone
 
-from src.engine.modules import legacy_combat, ruleset_runtime
+from src.engine import module_hooks
+from src.engine.modules import game_config
+from src.engine.modules import ruleset_runtime
 from src.webui.ruleset_draft_validation import validate_draft_shape
 from src.webui.ruleset_rest_projection import public_rest_session, saved_rest_session
 
@@ -65,6 +67,21 @@ def resolve(
 
 def _failure(code: str, message: str, **extra: Any) -> dict[str, Any]:
     return {"ok": False, "code": code, "error": message, **extra}
+
+
+async def submit_live(
+    dependencies: LiveRulesetRestDependencies,
+    game_key: str,
+    user_id: str,
+    body: Any,
+) -> dict[str, Any]:
+    """Dispatch the authoritative live rest operation for this game mode."""
+    instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
+    if instance is None:
+        return _failure("GAME_NOT_FOUND", "游戏不存在")
+    if game_config.solo_mode(instance):
+        return await resolve_live(dependencies, game_key, user_id, body)
+    return await resolve_live_party(dependencies, game_key, user_id, body)
 
 
 def _set_rest_session(instance: Any, session: dict[str, Any]) -> None:
@@ -326,7 +343,7 @@ async def _resolve_live_party_authority(
     method = getattr(runtime, "complete_rest", None)
     if not callable(method):
         return _failure("RULESET_REST_UNAVAILABLE", "该规则尚未提供专业休息结算")
-    if legacy_combat.combat_active(instance) or legacy_combat.combat_state(instance) == "active":
+    if module_hooks.combat_view(instance)["combat_active"] or module_hooks.combat_view(instance)["combat_state"] == "active":
         return _failure("REST_NOT_AVAILABLE", "战斗进行中不能休息；请先结束战斗")
 
     async with instance._lock:

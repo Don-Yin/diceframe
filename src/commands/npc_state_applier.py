@@ -5,10 +5,13 @@
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
 import logging
 
 from src.engine.game_instance import GameInstance
-from src.engine.modules import progression_state, table_settings
+from src.engine.modules import progression_state
+from src.engine import module_hooks
 
 logger = logging.getLogger("trpg")
 
@@ -18,12 +21,15 @@ class NpcStateApplier:
 
     def apply_npcs(self, instance: GameInstance, npcs_update: dict) -> None:
         for npc_name, nud in npcs_update.items():
+            if not module_hooks.ask(module_hooks.NPC_ADMISSION, instance, npc_name, default=True):
+                logger.warning('Story policy rejected unadopted NPC: %s', npc_name)
+                continue
             if npc_name in instance.npcs:
                 instance.npcs[npc_name].update(nud)
             else:
                 # D10: NPC 默认战斗属性（按 tier 和难度推断，避免一击必杀）
                 tier = nud.get("tier", nud.get("relation", "neutral"))
-                diff = table_settings.difficulty(instance)
+                diff = game_config.difficulty(instance)
                 base_hp = {"friendly": 15, "neutral": 20, "hostile": 30, "boss": 60}.get(tier, 20)
                 if diff == "硬核":
                     base_hp = int(base_hp * 1.3)

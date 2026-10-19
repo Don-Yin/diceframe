@@ -216,4 +216,60 @@ describe('RulesView combat editor integration', () => {
       maximum: 10,
     }])
   })
+
+  it('keeps built-in templates distinct from professional runtimes and filters the list', async () => {
+    mocks.api.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/rules' && (!init || !init.method || init.method === 'GET')) return {
+        rules: [
+          { ...builtinRules().rules[0], ruleset_runtime: { id: 'dnd2024', version: 1 } },
+          { rule_id: 'story_template', rule_name: 'Story Template', custom: true },
+        ],
+      }
+      throw new Error(`unexpected api call: ${path} ${init?.method || 'GET'}`)
+    })
+    const wrapper = mount(RulesView, { global: { plugins: [i18n] } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('dnd2024')
+    expect(wrapper.text()).toContain('仅模板')
+    const search = wrapper.get('input[type="search"]')
+    await search.setValue('story_template')
+    expect(wrapper.findAll('.rule-card')).toHaveLength(1)
+    expect(wrapper.text()).toContain('Story Template')
+    expect(wrapper.text()).not.toContain('Classic Fantasy')
+    wrapper.unmount()
+  })
+
+  it('searches the localized display name used by the active locale', async () => {
+    i18n.global.locale.value = 'en'
+    mocks.api.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/rules' && (!init || !init.method || init.method === 'GET')) return {
+        rules: [{ rule_id: 'coc_template', rule_name: '模板', rule_name_en: 'Night Investigation', custom: false }],
+      }
+      throw new Error(`unexpected api call: ${path} ${init?.method || 'GET'}`)
+    })
+    const wrapper = mount(RulesView, { global: { plugins: [i18n] } })
+    await flushPromises()
+    await wrapper.get('input[type="search"]').setValue('night investigation')
+    expect(wrapper.findAll('.rule-card')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('keeps the editor and reports a rejected rule instead of showing success', async () => {
+    const original = mocks.api.getMockImplementation()!
+    mocks.api.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') return { ok: false, error: 'special_stats[0].max: invalid maximum' }
+      return original(path, init)
+    })
+    const wrapper = mount(RulesView, { global: { plugins: [i18n], stubs: { Modal: { template: '<div class="modal"><slot /><slot name="actions" /></div>' } } } })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('新建规则'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.rule-resources-editor').exists()).toBe(true)
+    await wrapper.findAll('button').find(button => button.text().includes('保存规则'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.error-banner').text()).toContain('special_stats[0].max')
+    expect(mocks.success).not.toHaveBeenCalled()
+    expect(wrapper.find('.rule-resources-editor').exists()).toBe(true)
+    wrapper.unmount()
+  })
 })

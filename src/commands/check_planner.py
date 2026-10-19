@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from src.engine.modules import game_config
+
+from src.engine import module_hooks
+
 import json
 import logging
 import re
@@ -14,7 +18,6 @@ from src.compat.characters import MAX_SKILL_EFFECT_CHARS
 from src.engine.check_channels import normalize_check_channels
 from src.engine.checks import (
     build_check_request,
-    detect_advantage_mode,
     find_action_opponent,
     is_explicit_attack_action,
     is_non_combat_declaration,
@@ -27,9 +30,8 @@ from src.engine.dice import d20_dc_cap
 from src.engine.economy import MAX_ECONOMY_AMOUNT
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text
-from src.engine.modules import (
-    economy_state, narrative_notes, progression_state, ruleset_runtime, table_settings,
-)
+from src.engine.modules import economy_state, progression_state, ruleset_runtime
+from src.engine.modules.check_modes import apply_grant
 from src.engine.world_events import MAX_ADVANCE_MINUTES
 from src.engine.world_legality import (
     MAX_ROUTE_HOPS,
@@ -60,7 +62,9 @@ _is_non_combat_declaration = is_non_combat_declaration
 
 
 def _prompt_text(language: str) -> str:
-    suffix = localized_text(language, {"en": "en", "zh-CN": "zh", "ja": "ja", "de": "de"})
+    suffix = localized_text(
+        language, {"en": "en", "zh-CN": "zh", "ja": "ja", "de": "de", "ru": "ru"}
+    )
     path = Path(__file__).resolve().parents[2] / "prompts" / f"check_planner_{suffix}.md"
     return path.read_text(encoding="utf-8")
 
@@ -454,13 +458,13 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
         ruleset["max_check_dc"] = d20_dc_cap(rule)
     payload = {
         "round": progression_state.round_value(instance),
-        "scene": str(narrative_notes.scene(instance) or "")[:500],
+        "scene": str(module_hooks.narrative_view(instance)["scene"] or "")[:500],
         "recent_narration": [
             sanitize_narration(str(entry.get("gm_response") or ""))[:1000]
             for entry in instance.log[-2:]
             if entry.get("gm_response")
         ],
-        "difficulty": table_settings.difficulty(instance),
+        "difficulty": game_config.difficulty(instance),
         "ruleset": ruleset,
         "players": players,
         # AI 队友作为可选检定主体：模型只负责选"谁执行/什么检定"，
@@ -722,7 +726,7 @@ def normalize_check_specs(
             target=target if dice_system == "d20" else None,
             modifier=modifier,
             advantage_mode=advantage_mode,
-            baseline_dc=rule.dc_for_difficulty(table_settings.difficulty(instance), "normal") if rule else None,
+            baseline_dc=rule.dc_for_difficulty(game_config.difficulty(instance), "normal") if rule else None,
             dc_cap=d20_dc_cap(rule),
             supports_advantage=rule is None or rule.supports_advantage_mode(advantage),
             dc_reason=str(raw.get("dc_reason") or ""),
@@ -999,31 +1003,29 @@ def _apply_d20_assistance(
                 assistants.append(assistant_uid)
         if assistants:
             request["assist"] = assistants[:5]
-            if not request.get("advantage_mode"):
-                request["advantage_mode"] = assistance_grant
+            automatic = str(request.get("advantage_mode") or "")
+            sources = {m for m in (automatic, assistance_grant) if m in {"advantage", "disadvantage"}}
+            request["check_mode_sources"] = sorted(sources)
+            request["advantage_mode"] = next(iter(sources)) if len(sources) == 1 else ""
+            if automatic != request["advantage_mode"]:
                 request["advantage_note"] = (
+                    "Assistance: advantage and disadvantage cancel" if len(sources) == 2 else
                     "协助：2d20 取高" if assistance_grant == "advantage" else "协助：2d20 取低"
                 )
         result.append((action, request))
     return result
 
 
-def _apply_explicit_advantage_modes(
+def _apply_granted_advantage_modes(
+    instance: GameInstance,
     rule: RuleSystem | None,
     planned: list[tuple[dict[str, Any], dict[str, Any]]],
 ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
-    """玩家明确写出的优势/劣势/奖惩骰覆盖模型的模糊推断。"""
-    if not rule:
+    """Combine scoped GM grants with the planner's adjudication and rule assistance."""
+    if not rule or rule.advantage_mechanic.get("type") not in {"coc_bonus_penalty", "d20_keep_high_low"}:
         return planned
-    for action, request in planned:
-        text = re.sub(r"\s+", "", str(action.get("text") or "")).casefold()
-        mode, note = detect_advantage_mode(text, action, rule)
-        if mode or "已抵消" in note:
-            request["advantage_mode"] = mode
-            request["advantage_note"] = note or None
-            # 奖惩骰本身已经表达情境，不再同时套模型猜出的 ±百分比修正。
-            if rule.advantage_mechanic.get("type") == "coc_bonus_penalty":
-                request["circumstance_modifier"] = 0
+    for _action, request in planned:
+        apply_grant(instance, request, f"round:{progression_state.round_value(instance)}")
     return planned
 
 
@@ -1269,8 +1271,8 @@ async def plan_round_checks(
             )
     planned, errors = normalize_check_specs(instance, rule, raw_checks)
     planned = _merge_safety_net_checks(instance, rule, planned)
-    planned = _apply_explicit_advantage_modes(rule, planned)
     planned = _apply_d20_assistance(instance, rule, planned)
+    planned = _apply_granted_advantage_modes(instance, rule, planned)
     economy_offers, economy_intents_unpriced, economy_errors = normalize_economy_actions(
         instance, raw_economy_actions, rule,
     )

@@ -97,3 +97,43 @@ async def test_player_share_cannot_manage_or_test_personal_tts():
 
     assert profiles.status == 403
     assert test_audio.status == 403
+
+
+class _AssistantApi(_FakeApi):
+    async def test_speech(self, text, voice, language, speed):
+        self.calls.append(("", text, voice, language, speed))
+        return SpeechAudio(b"reply", "audio/mpeg", "cache-key", cached=False)
+
+
+class _OwnerRequest(_Request):
+    def __init__(self, api, *, owner=True):
+        super().__init__(api, body={"text": "助手回复", "language": "zh-CN"})
+        self._owner = owner
+
+    def get(self, key, default=None):
+        if key == "owner_authenticated":
+            return self._owner
+        if key == "user_id":
+            return "owner"
+        return default
+
+
+@pytest.mark.asyncio
+async def test_assistant_speech_uses_configured_tts_for_owner():
+    api = _AssistantApi()
+
+    response = await speech.api_assistant_speech(_OwnerRequest(api))
+
+    assert response.status == 200
+    assert response.body == b"reply"
+    assert api.calls == [("", "助手回复", "", "zh-CN", 1.0)]
+
+
+@pytest.mark.asyncio
+async def test_assistant_speech_requires_owner():
+    api = _AssistantApi()
+
+    response = await speech.api_assistant_speech(_OwnerRequest(api, owner=False))
+
+    assert response.status == 401
+    assert api.calls == []
