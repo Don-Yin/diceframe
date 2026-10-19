@@ -35,6 +35,10 @@ Agent 启动时只加载基础 application 动作、当前页面 domain、当前
 
 routine 授权有效 4 小时，task 授权有效 1 小时；两者都有 `remaining_steps`，步数必须为 1..64。可选 domain 必须是 registry 中已知 domain；每个动作的 domain 必须匹配。可选 scope 只接受 `game_key`、`world_id`、`book_id`、`card_id`，每一个给出的键都必须出现在动作参数中并逐字相等；缺失或跨目标都 fail closed。授权过期、步数耗尽、owner 不符或 session 不符均不放行。
 
+整册 `set_lorebook_visibility` 是 `version=2` 的 `external` 动作，适用于 `gm`、`public` 和 `characters` audience；无论当前是 `task` 还是 `routine`，每次都必须取得具体人工批准。已有 task grant 不能绕过这项整册批准。单条资料册条目的 `disclosure` 仍按通常 task 语义处理，不改变全局授权规则。`suggest` 与撤销授权仍可用。
+
+前端 scope 只接受有效且非空白的 `game_key`、`world_id`、`book_id`、`card_id`。缺少目标 ID 时，对应选项保持禁用；routine/task 授权在用户明确选择“全部”之前保持阻止，前端不会自动替用户选择全部目标。scope/grant 的 HTTP 和持久化格式保持不变。
+
 确认计划绑定 owner、session、动作名、参数、guard、contract digest 和有效期。审批前会再次执行 schema、authorize、guard 和 preview；确认时还会重新检查动作 descriptor、授权、资源版本和计划摘要。客户端只能提交 session/approval ID、摘要和确认意图，不能改写参数。
 
 设置动作的 `patch_settings` 和插件启停被标为 `external`，不能由 routine/task 自动放行，必须人工确认。插件 descriptor 声明 `read_only` 或 `mutation` 时，宿主调用仍按 `external` 处理并人工确认；声明 `destructive` 时按 `destructive` 处理并人工确认。缺失、未知或不完整的声明 fail closed，回到手动插件流程；声明本身不是原生插件进程沙箱，也不是行为证明。
@@ -48,7 +52,7 @@ routine 授权有效 4 小时，task 授权有效 1 小时；两者都有 `remai
 ## 领域 authority 与隐私
 
 - 内容、资料册、恢复和游戏本局资料册动作复用各自 owning service 的校验、guard、快照/操作记录和权限边界；Agent 没有通用文件、SQL、shell 或任意 HTTP 写入能力。
-- 资料册可见性动作只修改既有 canonical entry 的 `visible_to` audience 字段，保留名称、正文和其它扩展字段。单条动作与 `set_lorebook_visibility` 整册动作都使用 canonical `book_id`；整册动作接受 `audience`，并可选 `game_key` 以解析当前 live roster 的角色 UID。它最多处理 1000 条目，预览返回 changed count 与 affected games；“所有资料册” 这类用户选择必须先解析成明确的 book ID 列表，再逐册调用一次。每册在一个 owning-store 事务中按 16 条目分批写入，但每批保留独立 undo operation ID，不承诺跨册全局原子性。指定角色时，服务器从 live game roster 取得 canonical UID，并由组合根进行游戏存在、owner/GM 范围校验；显示名不能代替 UID。目标不存在、UID 不属于当前 live roster 或无 GM 权限时拒绝。
+- 资料册可见性动作只修改既有 canonical entry 的 `visible_to` audience 字段，保留名称、正文和其它扩展字段。单条动作仍是 `disclosure`；整册 `set_lorebook_visibility` 使用 canonical `book_id`，`version=2`、effect 为 `external`，接受 `gm`、`public` 或 `characters` audience，并可选 `game_key` 以解析当前 live roster 的角色 UID。它最多处理 1000 条目，预览返回 changed count 与 affected games；“所有资料册”这类用户选择必须先解析成明确的 book ID 列表，再逐册调用一次，而且每册都要具体人工批准。每册在一个 owning-store 事务中按 16 条目分批写入，但每批保留独立 undo operation ID，不承诺跨册全局原子性。指定角色时，服务器从 live game roster 取得 canonical UID，并由组合根进行游戏存在、owner/GM 范围校验；显示名不能代替 UID。目标不存在、UID 不属于当前 live roster 或无 GM 权限时拒绝。
 - 世界事实可见性走正式 `worldops`（`apply_world_ops`、revision guard、权威写锁和保存），不在通用资料册或世界元数据里另造一个同名布尔字段。读取使用 viewer-safe world projection。
 - 规则结算、骰点、角色资源、回合和世界事实仍由现有规则/游戏 authority 执行；角色资源恢复复用 `ResourceRecoveryService`，内容撤销复用内容恢复服务，不形成第二套 mechanics 或权限模型。
 - HTTP 与 Agent 的专业休息共用 live-rest 应用命令，单人沿用单角色结算，多人收集符合资格角色的提交后协同结算；Agent 不直接绑定单角色路径，也不新增独立的时钟推进逻辑。
@@ -65,7 +69,7 @@ routine 授权有效 4 小时，task 授权有效 1 小时；两者都有 `remai
 
 当前持久化记录支持会话 TTL、重复确认、重启后的结果核对和不确定状态标记；它不是持久化工作流引擎，也没有跨模块的自动恢复、全局事务或万能 undo。跨文件/数据库操作必须依照具体 owning service 的 prepared、guard、receipt 和 recovery contract，无法证明结果时 fail closed。
 
-资料册可见性批次的恢复沿用现有 `kind=write_entries` 记录，并以 `visibility_only` 标记区分 audience-only patch。恢复预览会比较目标条目的内容、绑定、资料册语义元数据和其它受影响快照；只有该标记的新记录忽略资料册 `revision` 与 `updated_at` 这两个派生时间字段。批准前重新检查资料册内容、绑定和受影响对局，变化后必须重新预览。每批沿用 512 KiB 快照上限并预留撤销记录空间，超限则整册回滚；可改用明确条目小批次。冲突时拒绝覆盖后续编辑；它不把整册批次提升为跨资料册事务，也不重写条目正文。
+资料册可见性批次的恢复沿用现有 `kind=write_entries` 记录，并以 `visibility_only` 标记区分 audience-only patch。private-marker 扫描只属于校验，不构成发布同意或替代整册动作的具体批准。恢复预览会比较目标条目的内容、绑定、资料册语义元数据和其它受影响快照；只有该标记的新记录忽略资料册 `revision` 与 `updated_at` 这两个派生时间字段。批准前重新检查资料册内容、绑定和受影响对局，变化后必须重新预览。每批沿用 512 KiB 快照上限并预留撤销记录空间，超限则整册回滚；可改用明确条目小批次。冲突时拒绝覆盖后续编辑；它不把整册批次提升为跨资料册事务，也不重写条目正文。
 
 ## HTTP contract
 

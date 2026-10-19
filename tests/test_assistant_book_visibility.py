@@ -126,7 +126,7 @@ def test_authoring_registers_whole_book_visibility_only_with_recovery_callback()
         preview_book_visibility_with_recovery=preview,
     )
     tool = next(item for item in authoring_tools(deps) if item.name == "set_lorebook_visibility")
-    assert tool.effect == "disclosure"
+    assert tool.effect == "external" and tool.version == 2 and not tool.automatic
     assert set(tool.schema["properties"]) == {"book_id", "audience", "game_key", "character_ids"}
     summary = tool.preview({"book_id": "book", "audience": "public"}, "owner")
     assert summary["affected_games"] == ["game-1"]

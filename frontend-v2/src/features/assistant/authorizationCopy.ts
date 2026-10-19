@@ -12,6 +12,7 @@ export function assistantAuthorizationCopy(locale: string) {
     continueHint: zh ? '继续会开启新一轮预算；已过期或用完的授权仍需重新授予。' : 'Continuing starts a new budget window; expired or exhausted access must be granted again.',
     revoke: zh ? '撤回，改为建议' : 'Revoke, use suggestions',
     current: zh ? '当前页面对象' : 'Current page object',
+    currentUnavailable: zh ? '当前页面没有有效资源 ID；请明确选择“全部我的内容”。' : 'No valid page resource ID; choose All my content explicitly.',
     all: zh ? '全部我的内容' : 'All my content',
     steps: zh ? '步骤上限' : 'Step budget',
     active: zh ? '已授权' : 'Authorized',

@@ -32,14 +32,26 @@ const capabilityHasMore = ref(false)
 const capabilityDiscoveryHint = ref('')
 const capabilityRevision = ref('')
 let capabilityRequestId = 0
-const hasContext = computed(() => Object.keys(props.context).length > 0)
+const resourceKeys = ['game_key', 'world_id', 'book_id', 'card_id'] as const
+const currentScope = computed<Record<string, string>>(() => {
+  const normalized: Record<string, string> = {}
+  for (const key of resourceKeys) {
+    const value = props.context[key]
+    if (typeof value !== 'string') continue
+    const trimmed = value.trim()
+    if (trimmed && trimmed.length <= 500) normalized[key] = trimmed
+  }
+  return normalized
+})
+const hasValidCurrentScope = computed(() => Object.keys(currentScope.value).length > 0)
 const stepOptions = [8, 16, 32, 48, 64].map(value => ({ label: String(value), value }))
 const fallbackDomains = ['application', 'lorebook', 'worlds', 'games', 'adventures', 'recovery', 'ruleset', 'settings', 'plugins']
 const domainOptions = computed(() => [{ label: 'All', value: '' }, ...(capabilityDomains.value
   ? capabilityDomains.value.map(item => ({ label: item.domain, value: item.domain }))
   : fallbackDomains.map(value => ({ label: value, value })))])
-const scope = computed(() => scopeMode.value === 'all' ? {} : props.context)
-const scopeLabel = computed(() => scopeMode.value === 'all' || !hasContext.value ? copy.value.all : copy.value.current)
+const scope = computed(() => scopeMode.value === 'all' ? {} : currentScope.value)
+const currentScopeLabel = computed(() => hasValidCurrentScope.value ? copy.value.current : copy.value.currentUnavailable)
+const grantDisabled = computed(() => props.busy || (scopeMode.value === 'current' && !hasValidCurrentScope.value))
 function toggleAuthorization() {
   expanded.value = !expanded.value
   if (props.pendingApproval) props.onReview?.()
@@ -53,6 +65,8 @@ const progress = computed(() => {
   return `${props.task.completed_steps}${total}${tokens}`
 })
 async function choose(mode: AgentAuthorizationMode) {
+  if (props.disabled || props.busy) return
+  if ((mode === 'routine' || mode === 'task') && scopeMode.value === 'current' && !hasValidCurrentScope.value) return
   await props.onAuthorize?.(mode, scope.value, undefined, maxSteps.value)
   expanded.value = true
 }
@@ -119,7 +133,7 @@ function clearCapabilitySearch() {
       <div v-if="disabled" class="agent-authorization-disabled" role="status">{{ copy.disabled }}</div>
       <template v-else>
         <div class="agent-authorization-scope">
-          <label><input v-model="scopeMode" type="radio" value="current" :disabled="busy" /> {{ copy.current }} <small>{{ scopeLabel }}</small></label>
+          <label><input v-model="scopeMode" type="radio" value="current" :disabled="busy || !hasValidCurrentScope" /> {{ copy.current }} <small>{{ currentScopeLabel }}</small></label>
           <label><input v-model="scopeMode" type="radio" value="all" :disabled="busy" /> {{ copy.all }}</label>
         </div>
         <label class="agent-authorization-steps">{{ copy.steps }}
@@ -150,8 +164,8 @@ function clearCapabilitySearch() {
         </details>
         <div class="agent-authorization-actions">
           <NButton size="small" :disabled="busy" @click="choose('suggest')">{{ copy.suggest }}</NButton>
-          <NButton size="small" :disabled="busy" @click="choose('routine')">{{ copy.routine }}</NButton>
-          <NButton size="small" type="primary" :disabled="busy" @click="choose('task')">{{ copy.task }}</NButton>
+          <NButton size="small" :disabled="grantDisabled" @click="choose('routine')">{{ copy.routine }}</NButton>
+          <NButton size="small" type="primary" :disabled="grantDisabled" @click="choose('task')">{{ copy.task }}</NButton>
           <NButton v-if="authorization && authorization.mode !== 'suggest'" size="small" quaternary :disabled="busy" @click="choose('suggest')">{{ copy.revoke }}</NButton>
         </div>
         <p v-if="task" class="agent-authorization-task" role="status">{{ copy.taskStatus(task.status) }} · {{ progress }}<span v-if="task.error"> · {{ task.error }}</span></p>

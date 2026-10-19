@@ -32,6 +32,8 @@ Agent 初始只加载必要动作；运行时 compact catalog 最多提供 160 �
 
 连续授权的步数为 1..64；每个给定 scope 键必须在动作参数中精确匹配，domain 也必须匹配。`external`、`destructive`、未声明 effect 和不满足 guard 的动作 fail closed 或回到人工确认。设置 patch/插件启停属于 external；插件声明 read_only/mutation 仍走 external 人工确认，destructive 走 destructive 人工确认。插件 effect 声明不是沙箱。
 
+整册 `set_lorebook_visibility` 固定为 `version=2`、effect `external`，目标 audience 为 `gm`、`public` 或 `characters`；每次都需要具体人工批准，`task`/`routine` grant 不能绕过该批准。单条条目仍是通常的 `disclosure` task 行为，不改写全局授权规则。前端 scope 仅接受有效且非空白的 `game_key`、`world_id`、`book_id`、`card_id`；缺少目标 ID 时禁用选项，并在用户明确选择“全部”前阻止 routine/task grant，绝不自动选择全部。`suggest` 与 revoke 继续可用；HTTP 和持久化 grant 格式不变。
+
 本局纯展示偏好与影响规则/GM 决策权的策略分开注册。后者、语义包含策略变更的通用规则指令和确认游戏时间的休息操作均保留逐项审批，task 授权不能代替这些确认。专业休息与 HTTP 共用单人/多人分派命令，不允许 Agent 绕过多人收集流程。
 
 ### 4. 领域 authority 不被 Agent 取代
@@ -44,7 +46,7 @@ Agent 初始只加载必要动作；运行时 compact catalog 最多提供 160 �
 
 持久化计划不代表写入已经派发：取消清理未派发计划，并在开始通知及异步权限校验后重新核对 stop/plan identity；取消之后不得启动新的领域写入。
 
-资料册整册可见性使用 canonical `book_id` 与 `audience`，可选 `game_key` 仅用于解析 live character IDs；最多 1000 条目。预览提供 changed counts 和 affected games；“所有资料册” 必须先解析成明确 book IDs，再逐册调用。每册按 16 条目在 owning-store 事务中写入，并为每批保留独立 undo ID，因此不形成跨册全局原子事务。其恢复记录仍是 `write_entries` 加 `visibility_only` marker；恢复检查目标内容、绑定和资料册语义元数据冲突，仅对该新 marker 忽略 `revision`/`updated_at`。
+资料册整册可见性使用 canonical `book_id` 与 `audience`，`set_lorebook_visibility` 为 `version=2`、effect `external`，可选 `game_key` 仅用于解析 live character IDs；最多 1000 条目。每次整册操作都要具体人工批准，现有 task grant 不能绕过；private-marker 扫描只做校验，不构成发布同意。预览提供 changed counts 和 affected games；“所有资料册”必须先解析成明确 book IDs，再逐册调用。每册按 16 条目在 owning-store 事务中写入，并为每批保留独立 undo ID，因此不形成跨册全局原子事务。其恢复记录仍是 `write_entries` 加 `visibility_only` marker；恢复检查目标内容、绑定和资料册语义元数据冲突，仅对该新 marker 忽略 `revision`/`updated_at`。
 
 ### 6. 使用量语义
 

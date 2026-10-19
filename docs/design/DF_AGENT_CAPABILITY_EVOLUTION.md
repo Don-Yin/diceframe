@@ -18,6 +18,8 @@
 - `routine`：仅允许 `automatic=True`、带 guard 的普通 `write` 动作自动执行，授权 4 小时；
 - `task`：允许 scope/domain 内的普通 `write` 与 `disclosure` 连续执行，授权 1 小时；`external`、`destructive` 和未自动许可动作不能借此绕过人工确认。
 
+整册 `set_lorebook_visibility` 是 `version=2`、effect 为 `external` 的动作，适用于 `gm`、`public`、`characters` audience；Task 和 Routine 都必须逐次取得具体人工批准，已有 grant 不能绕过。单条 entry 的 `disclosure` 保持通常 task 行为，不改写全局权限。前端 scope 只接受有效且非空白的 `game_key`、`world_id`、`book_id`、`card_id`；缺少 ID 时禁用选项，routine/task grant 需等用户明确选择“全部”后才能继续，不自动全选。Suggest 与 revoke 保持可用，HTTP/持久化 grant 格式不变。
+
 两种连续授权的 `max_steps` 为 1..64，执行消耗 `remaining_steps`。scope 的每个键必须在动作参数中精确匹配；domain 也必须匹配。授权过期、owner/session 不符、动作 effect 不兼容、资源 guard 变化或 contract digest 变化时 fail closed。
 
 设置写入和插件宿主调用都涉及外部副作用。设置 patch/插件启停标为 `external`；插件声明 `read_only` 或 `mutation` 时也按外部动作人工确认，声明 `destructive` 时按 destructive 人工确认。未知、缺失或 malformed effect 不会降级放行。插件声明不是沙箱，也不替代宿主权限。
@@ -30,7 +32,7 @@ Agent 初始只接收必要的基础动作；其它能力由搜索命中或 desc
 
 ## 可见性与领域边界
 
-资料册 audience 变更是 disclosure：只更新既有条目的 `visible_to`，指定角色使用 live roster canonical UID 并通过 GM 校验。`set_lorebook_visibility` 使用 canonical `book_id`，可选 `game_key` 解析角色 UID，最多 1000 条目；预览返回 changed count 与 affected games。用户选择 “所有资料册” 时必须先得到明确 book IDs，再逐册调用一次。每册按 16 条目在单个 owning-store 事务内写入，每批产生独立 undo ID，不提供跨册全局原子性，也不重写正文。世界事实可见性使用正式 worldops；规则结算、骰点、资源、回合和恢复动作复用既有 authority。specific ruleset 不得反向污染 generic engine，也不能为 Agent 增加任意资源写入旁路。
+资料册 audience 变更通常是 disclosure：单条动作只更新既有条目的 `visible_to`，指定角色使用 live roster canonical UID 并通过 GM 校验。整册 `set_lorebook_visibility` 使用 canonical `book_id`，版本 2、effect 为 `external`，适用于 `gm`、`public`、`characters` audience，每次都要具体人工批准；task grant 不能绕过。可选 `game_key` 仅用于解析角色 UID，最多 1000 条目；预览返回 changed count 与 affected games。用户选择“所有资料册”时必须先得到明确 book IDs，再逐册调用一次。private-marker 扫描是校验，不是发布同意。每册按 16 条目在单个 owning-store 事务内写入，每批产生独立 undo ID，不提供跨册全局原子性，也不重写正文。世界事实可见性使用正式 worldops；规则结算、骰点、资源、回合和恢复动作复用既有 authority。specific ruleset 不得反向污染 generic engine，也不能为 Agent 增加任意资源写入旁路。
 
 整册可见性恢复复用 `kind=write_entries` 并加 `visibility_only` marker。恢复会拒绝目标内容、绑定或资料册语义元数据冲突；只有带该新 marker 的记录忽略 `revision` 与 `updated_at` 派生字段。它保持逐批独立回执，不能被描述为跨资料册全局回滚。
 

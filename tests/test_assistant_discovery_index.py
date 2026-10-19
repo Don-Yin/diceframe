@@ -7,6 +7,7 @@ import pytest
 from src.application_actions import ActionRegistry, ApplicationAction
 from src.llm.client import LLMToolResponse
 from src.webui.services.assistant_agent import AgentDependencies, AgentRuntime
+from tests.test_assistant_agent import Planner
 
 pytest_plugins = ['tests.webapi_harness']
 
@@ -182,4 +183,72 @@ async def test_whole_book_pending_plan_rejects_changed_scope_before_any_write(we
     with pytest.raises(ValueError):
         await api.assistant_agent_confirm('owner', sid, plan['approval_id'], plan['plan_digest'], True)
     assert all(row['visible_to'] == ['*'] for row in store.list_book_entries('stale-book'))
+    assert api.assistant_content_operations('owner')['operations'] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('audience', ['public', 'characters', 'gm'])
+@pytest.mark.parametrize('scope_kind', ['book', 'global'])
+async def test_task_grant_still_requires_explicit_whole_book_approval(web_api, audience, scope_kind):
+    api, store, registry, llm, _ = web_api
+    book_id = 'manual-visibility-book'
+    store.create_lorebook({'id': book_id, 'name': 'GM notes', 'source_kind': 'user'})
+    for index in range(35):
+        store.add_book_entry(book_id, {'id': f'manual-{index}', 'name': f'Clue {index}',
+            'content': f'Unmarked hidden clue {index}', 'visible_to': ['*'] if audience == 'gm' else [],
+            'extensions': {'keep': index}})
+    arguments = {'book_id': book_id, 'audience': audience}
+    if audience == 'characters':
+        game = registry.get_or_create(('web', 'visibility-room', 'owner'))
+        game.world_id = 'template_world'
+        game.players['uid-player'] = {'character_name': 'Investigator'}
+        arguments.update(game_key='web|visibility-room|owner', character_ids=['uid-player'])
+    llm.call_tools = Planner({'tool': 'set_lorebook_visibility', 'arguments': arguments},
+                             {'tool': 'respond', 'answer': 'Done'}).call_tools
+    scope = {'book_id': book_id} if scope_kind == 'book' else {}
+    grant = api.assistant_agent_authorize('owner', '', 'task', scope, ['lorebook'], 8)
+    before = store.list_book_entries(book_id)
+    events = []
+
+    async def emit(name, value):
+        events.append((name, deepcopy(value)))
+
+    await api.assistant_agent_run('owner', [{'role': 'user', 'content': 'Change the whole book audience'}],
+                                  'en', {'route': 'library'}, grant['session_id'], emit)
+    assert store.list_book_entries(book_id) == before, 'Task permission cannot publish hidden entries before approval'
+    assert api.assistant_content_operations('owner')['operations'] == []
+    snapshot = api.assistant_agent_session('owner', grant['session_id'])
+    assert snapshot['authorization']['remaining_steps'] == 8 and snapshot['receipts'] == []
+    plan = next(value for name, value in events if name == 'approval')
+    assert plan['preview']['audience'] == audience and plan['preview']['changed_count'] == 35
+    result = await api.assistant_agent_confirm('owner', grant['session_id'], plan['approval_id'], plan['plan_digest'], True)
+    assert result['ok'] and result['result']['changed_count'] == 35
+    expected = {'public': ['*'], 'characters': ['uid-player'], 'gm': []}[audience]
+    for original, current in zip(before, store.list_book_entries(book_id)):
+        assert current['visible_to'] == expected
+        assert current['content'] == original['content'] and current['extensions'] == original['extensions']
+    replay = await api.assistant_agent_confirm('owner', grant['session_id'], plan['approval_id'], plan['plan_digest'], True)
+    assert replay == result and len(api.assistant_content_operations('owner')['operations']) == 3
+
+
+@pytest.mark.asyncio
+async def test_rejecting_whole_book_disclosure_under_task_keeps_hidden_entries_private(web_api):
+    api, store, _registry, llm, _ = web_api
+    store.create_lorebook({'id': 'never-publish', 'name': 'Notes', 'source_kind': 'user'})
+    store.add_book_entry('never-publish', {'id': 'unmarked-secret', 'name': 'Clue',
+                                         'content': 'The harmless-looking clue is private', 'visible_to': []})
+    llm.call_tools = Planner({'tool': 'set_lorebook_visibility', 'arguments': {
+        'book_id': 'never-publish', 'audience': 'public'}}, {'tool': 'respond', 'answer': 'Done'}).call_tools
+    grant = api.assistant_agent_authorize('owner', '', 'task', {}, ['lorebook'], 8)
+    before = store.list_book_entries('never-publish')
+    events = []
+
+    async def emit(name, value):
+        events.append((name, deepcopy(value)))
+
+    await api.assistant_agent_run('owner', [{'role': 'user', 'content': 'Publish this book'}],
+                                  'en', {'route': 'library'}, grant['session_id'], emit)
+    plan = next(value for name, value in events if name == 'approval')
+    await api.assistant_agent_confirm('owner', grant['session_id'], plan['approval_id'], plan['plan_digest'], False)
+    assert store.list_book_entries('never-publish') == before
     assert api.assistant_content_operations('owner')['operations'] == []

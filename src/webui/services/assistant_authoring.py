@@ -273,10 +273,11 @@ def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
             obj({"book_id": string(minimum=1), "audience": string(20, ("gm", "public", "characters")),
                  "game_key": string(200, minimum=1), "character_ids": {"type": "array", "maxItems": 10,
                                  "items": string(200, minimum=1)}}, ("book_id", "audience")),
-            set_book_visibility, mutation=True, domain="lorebook", effect="disclosure",
+            set_book_visibility, mutation=True, domain="lorebook", effect="external", version=2,
             guard=book_visibility_guard,
             preview=book_visibility_preview,
-            instructions=("Changes only the audience of existing entries, never their text or world runtime facts. "
+            instructions=("Requires concrete approval for this whole-book operation, even with Task access. "
+                          "Changes only the audience of existing entries, never their text or world runtime facts. "
                           "Resolve the user's selection into explicit canonical book IDs first; for all selected books, "
                           "call once per book. Ask for the target audience if it is unclear. Each book supports at most "
                           "1000 entries; larger books need explicit entry batches. The preview shows affected counts "

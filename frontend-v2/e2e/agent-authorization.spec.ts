@@ -78,6 +78,26 @@ test('Agent access grants and revocations reach the real owner service', async (
   await expect(panel.locator('.agent-authorization-state').first()).toHaveText('建议')
 })
 
+test('Overview without a resource query requires an explicit global scope', async ({ page }) => {
+  await page.goto('/#/overview')
+  await page.getByTestId('assistant-shell-fab').click()
+  const panel = page.getByTestId('agent-authorization')
+  await expect(panel).toBeVisible()
+  await panel.locator('button.agent-authorization-toggle').click()
+
+  await expect(panel.locator('.agent-authorization-scope input[value="current"]')).toBeDisabled()
+  await expect(panel.locator('.agent-authorization-actions').getByRole('button', { name: '自动处理日常' })).toBeDisabled()
+  await expect(panel.locator('.agent-authorization-actions').getByRole('button', { name: '接管本次任务' })).toBeDisabled()
+  await expect(panel).toContainText('请明确选择“全部我的内容”')
+
+  await panel.locator('.agent-authorization-scope input[value="all"]').check()
+  const granted = page.waitForResponse(response => response.url().includes('/api/assistant/agent/authorization') && response.request().method() === 'POST')
+  await panel.locator('.agent-authorization-actions').getByRole('button', { name: '接管本次任务' }).click()
+  const response = await granted
+  expect(response.ok()).toBeTruthy()
+  expect((await response.json()).authorization).toMatchObject({ mode: 'task', scope: {} })
+})
+
 test('Agent authorization stays compact on mobile and clearly reports an unavailable capability endpoint', async ({ page }, info) => {
   test.skip(info.project.name !== 'mobile', 'Mobile compact layout contract.')
   await page.route('**/api/assistant/agent/capabilities*', route => route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'HTTP_404' }) }))

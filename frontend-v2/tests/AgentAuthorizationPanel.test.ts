@@ -23,6 +23,79 @@ describe('AgentAuthorizationPanel', () => {
     expect(authorize).toHaveBeenCalledWith('suggest', { game_key: 'g-1' }, undefined, 32)
   })
 
+  it.each([
+    ['empty context', {}],
+    ['blank resource id', { game_key: '   ' }],
+    ['overlong resource id', { game_key: 'x'.repeat(501) }],
+    ['metadata-only route', { unknownroute: 'overview', display: 'Overview' }],
+  ])('fails closed for %s until all content is explicitly selected', async (_label, context) => {
+    const authorize = vi.fn()
+    const wrapper = mount(AgentAuthorizationPanel, { props: { locale: 'en', context, onAuthorize: authorize } })
+    await wrapper.get('[data-testid="agent-authorization"] > button').trigger('click')
+
+    const current = wrapper.find('.agent-authorization-scope input[value="current"]')
+    expect(current.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('choose All my content explicitly')
+    expect(wrapper.findAll('.agent-authorization-actions button').find(button => button.text() === 'Handle routine work')!.attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('.agent-authorization-actions button').find(button => button.text() === 'Take over this task')!.attributes('disabled')).toBeDefined()
+
+    await (wrapper.vm as unknown as { choose: (mode: 'task') => Promise<void> }).choose('task')
+    expect(authorize).not.toHaveBeenCalled()
+
+    await wrapper.findAll('.agent-authorization-actions button').find(button => button.text() === 'Suggest')!.trigger('click')
+    expect(authorize).toHaveBeenCalledWith('suggest', {}, undefined, 32)
+
+    await wrapper.find('.agent-authorization-scope input[value="all"]').setValue(true)
+    expect(wrapper.findAll('.agent-authorization-actions button').find(button => button.text() === 'Take over this task')!.attributes('disabled')).toBeUndefined()
+    await wrapper.findAll('.agent-authorization-actions button').find(button => button.text() === 'Take over this task')!.trigger('click')
+    expect(authorize).toHaveBeenLastCalledWith('task', {}, undefined, 32)
+  })
+
+  it.each([
+    ['en', 'choose All my content explicitly'],
+    ['zh-CN', '请明确选择“全部我的内容”'],
+  ])('explains the unavailable current scope in %s', async (locale, message) => {
+    const wrapper = mount(AgentAuthorizationPanel, { props: { locale, context: {} } })
+    await wrapper.get('[data-testid="agent-authorization"] > button').trigger('click')
+    expect(wrapper.text()).toContain(message)
+  })
+
+  it('trims valid resource IDs and drops unknown context fields', async () => {
+    const authorize = vi.fn()
+    const wrapper = mount(AgentAuthorizationPanel, {
+      props: { locale: 'en', context: { game_key: '  game-1  ', unknownroute: 'overview', display: 'Game' }, onAuthorize: authorize },
+    })
+    await wrapper.get('[data-testid="agent-authorization"] > button').trigger('click')
+    await wrapper.findAll('.agent-authorization-actions button').find(button => button.text() === 'Handle routine work')!.trigger('click')
+    expect(authorize).toHaveBeenCalledWith('routine', { game_key: 'game-1' }, undefined, 32)
+  })
+
+  it('keeps current scope selected and fails closed when context disappears', async () => {
+    const authorize = vi.fn()
+    const wrapper = mount(AgentAuthorizationPanel, { props: { locale: 'en', context: { world_id: 'world-1' }, onAuthorize: authorize } })
+    await wrapper.get('[data-testid="agent-authorization"] > button').trigger('click')
+    await wrapper.setProps({ context: {} })
+    expect((wrapper.find('.agent-authorization-scope input[value="current"]').element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.find('.agent-authorization-scope input[value="current"]').attributes('disabled')).toBeDefined()
+    await (wrapper.vm as unknown as { choose: (mode: 'routine') => Promise<void> }).choose('routine')
+    expect(authorize).not.toHaveBeenCalled()
+  })
+
+  it('keeps revoke usable with no current resource context', async () => {
+    const authorize = vi.fn()
+    const wrapper = mount(AgentAuthorizationPanel, {
+      props: {
+        locale: 'en', context: {}, onAuthorize: authorize,
+        authorization: { mode: 'task', scope: {}, domains: [], expires_at: 1, max_steps: 32, remaining_steps: 10 },
+      },
+    })
+    await wrapper.get('[data-testid="agent-authorization"] > button').trigger('click')
+    const revoke = wrapper.findAll('.agent-authorization-actions button').find(button => button.text() === 'Revoke, use suggestions')!
+    expect(revoke.attributes('disabled')).toBeUndefined()
+    await revoke.trigger('click')
+    expect(authorize).toHaveBeenCalledWith('suggest', {}, undefined, 32)
+  })
+
   it('shows a readable capability error from an old server', async () => {
     capabilities.mockRejectedValueOnce(Object.assign(new Error('HTTP_404'), { code: 'HTTP_404' }))
     const wrapper = mount(AgentAuthorizationPanel, { props: { locale: 'en' } })
