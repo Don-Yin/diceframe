@@ -999,6 +999,9 @@ class WebAPI:
             list_cards=self.list_character_cards, update_card=self.update_character_card,
             adventure_detail=self.adventure_detail, get_rule=self.get_rule_template,
             write_entries_with_recovery=self._content_recovery.write_entries,
+            write_book_visibility_with_recovery=self._content_recovery.write_book_visibility,
+            preview_book_visibility_with_recovery=self._content_recovery.preview_book_visibility,
+            book_snapshot=self._lore.snapshot_lorebook,
             write_world_with_recovery=self._metadata_recovery.write_world,
             write_card_with_recovery=self._metadata_recovery.write_card,
             world_snapshot=world_snapshot, card_snapshot=card_snapshot,
@@ -1279,8 +1282,8 @@ class WebAPI:
     def assistant_agent_session(self, owner, session_id):
         return self._assistant_agent.snapshot(owner, session_id)
 
-    def assistant_agent_capabilities(self, owner, query='', domain=''):
-        return self._assistant_agent.capabilities(owner, query, domain)
+    def assistant_agent_capabilities(self, owner, query='', domain='', offset=0):
+        return self._assistant_agent.capabilities(owner, query, domain, offset)
 
     def assistant_agent_authorize(self, owner, session_id, mode, scope, domains, max_steps):
         return self._assistant_agent.authorize(owner, session_id, mode, scope, domains, max_steps)

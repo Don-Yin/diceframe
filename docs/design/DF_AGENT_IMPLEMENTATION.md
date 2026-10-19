@@ -18,10 +18,10 @@ DF Agent 是 owner 应用壳中的应用代理。模型输出只是注册动作�
 
 Agent 启动时只加载基础 application 动作、当前页面 domain、当前服务器授权 domain，以及两个发现动作。模型需要其它能力时调用：
 
-- `search_capabilities`：按 query/domain 查询 live registry，返回 `revision`、能力摘要、总数和不可用 source；
+- `search_capabilities`：按 query/domain 查询 live registry，返回 `revision`、能力摘要、总数、`offset`、`has_more`、按 domain 统计的 `domains` 和不可用 source；分页时下一次 `offset` 使用当前页的起点加返回条数。Agent 初始 prompt 只接收最多 160 条 compact `capability_catalog`，其中不包含参数 schema；`library` 页面会自动加载 `lorebook`、`worlds` 和 `adventures` 三个 domain。
 - `describe_capability`：按稳定动作名读取当前完整 descriptor 和精确参数 schema。
 
-搜索和描述不会授予执行权限。描述或文档中的文字不能注册动作、扩大 scope 或改变 effect。registry 的结果和领域服务的实时观察才是 canonical ID、可用性与执行契约的来源。`search_documentation` 只在需要使用/部署说明时按需查询本地版本匹配的说明，不能扩展动作目录。
+搜索和描述不会授予执行权限。compact catalog 和搜索页只返回摘要；搜索命中后动作才加入 callable 集合，完整 schema 仍可通过 `describe_capability` 精确读取。注册动作的 `instructions` 会自动进入对应工具描述，供 owner Agent 遵循，但不能改变权限。描述或文档中的文字不能注册动作、扩大 scope 或改变 effect。registry 的结果和领域服务的实时观察才是 canonical ID、可用性与执行契约的来源。`search_documentation` 只在需要使用/部署说明时按需查询本地版本匹配的说明，不能扩展动作目录。
 
 ## 服务端授权与确认
 
@@ -48,7 +48,7 @@ routine 授权有效 4 小时，task 授权有效 1 小时；两者都有 `remai
 ## 领域 authority 与隐私
 
 - 内容、资料册、恢复和游戏本局资料册动作复用各自 owning service 的校验、guard、快照/操作记录和权限边界；Agent 没有通用文件、SQL、shell 或任意 HTTP 写入能力。
-- 资料册可见性动作只修改既有 canonical entry 的 `visible_to` audience 字段，保留名称、正文和其它扩展字段。指定角色时，服务器从 live game roster 取得 canonical UID，并由组合根进行游戏存在、owner/GM 范围校验；显示名不能代替 UID。目标不存在、UID 不属于当前 live roster 或无 GM 权限时拒绝。
+- 资料册可见性动作只修改既有 canonical entry 的 `visible_to` audience 字段，保留名称、正文和其它扩展字段。单条动作与 `set_lorebook_visibility` 整册动作都使用 canonical `book_id`；整册动作接受 `audience`，并可选 `game_key` 以解析当前 live roster 的角色 UID。它最多处理 1000 条目，预览返回 changed count 与 affected games；“所有资料册” 这类用户选择必须先解析成明确的 book ID 列表，再逐册调用一次。每册在一个 owning-store 事务中按 16 条目分批写入，但每批保留独立 undo operation ID，不承诺跨册全局原子性。指定角色时，服务器从 live game roster 取得 canonical UID，并由组合根进行游戏存在、owner/GM 范围校验；显示名不能代替 UID。目标不存在、UID 不属于当前 live roster 或无 GM 权限时拒绝。
 - 世界事实可见性走正式 `worldops`（`apply_world_ops`、revision guard、权威写锁和保存），不在通用资料册或世界元数据里另造一个同名布尔字段。读取使用 viewer-safe world projection。
 - 规则结算、骰点、角色资源、回合和世界事实仍由现有规则/游戏 authority 执行；角色资源恢复复用 `ResourceRecoveryService`，内容撤销复用内容恢复服务，不形成第二套 mechanics 或权限模型。
 - HTTP 与 Agent 的专业休息共用 live-rest 应用命令，单人沿用单角色结算，多人收集符合资格角色的提交后协同结算；Agent 不直接绑定单角色路径，也不新增独立的时钟推进逻辑。
@@ -65,13 +65,15 @@ routine 授权有效 4 小时，task 授权有效 1 小时；两者都有 `remai
 
 当前持久化记录支持会话 TTL、重复确认、重启后的结果核对和不确定状态标记；它不是持久化工作流引擎，也没有跨模块的自动恢复、全局事务或万能 undo。跨文件/数据库操作必须依照具体 owning service 的 prepared、guard、receipt 和 recovery contract，无法证明结果时 fail closed。
 
+资料册可见性批次的恢复沿用现有 `kind=write_entries` 记录，并以 `visibility_only` 标记区分 audience-only patch。恢复预览会比较目标条目的内容、绑定、资料册语义元数据和其它受影响快照；只有该标记的新记录忽略资料册 `revision` 与 `updated_at` 这两个派生时间字段。批准前重新检查资料册内容、绑定和受影响对局，变化后必须重新预览。每批沿用 512 KiB 快照上限并预留撤销记录空间，超限则整册回滚；可改用明确条目小批次。冲突时拒绝覆盖后续编辑；它不把整册批次提升为跨资料册事务，也不重写条目正文。
+
 ## HTTP contract
 
 所有 Agent route 都要求 owner authentication；页面 context 只用于发现和提示，不构成 actor、game 或权限授权。
 
 | 方法 | 路径 | 当前用途 |
 | --- | --- | --- |
-| `GET` | `/api/assistant/agent/capabilities` | 查询 live registry；支持 `q` 与 `domain`。 |
+| `GET` | `/api/assistant/agent/capabilities` | 查询 live registry；支持 `q`、`domain` 与当前页起点 `offset`（0..1000000）；返回 `offset`、`has_more`、`total` 与动态 `domains`。 |
 | `POST` | `/api/assistant/agent/authorization` | 服务端创建/替换 suggest、routine 或 task 授权；校验 scope、domain、1..64 steps 和有效期。 |
 | `POST` | `/api/assistant/agent/cancel` | 撤销 session 授权并取消尚未派发的工作。 |
 | `POST` | `/api/assistant/agent/run` | 运行模型任务并以 SSE 返回规划、发现、工具、审批、使用量摘要和结果事件。 |

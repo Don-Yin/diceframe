@@ -52,6 +52,12 @@ def _digest(value) -> str:
 
 
 class ActionRegistry:
+    _MAX_SEARCH_OFFSET = 1_000_000
+    _DISCOVERY_HINT = (
+        "没有文本匹配不代表没有能力；请使用空 query + domain 浏览目录，"
+        "或使用 describe_capability 查询 canonical name。"
+    )
+
     def __init__(self, actions: Iterable[ApplicationAction] = ()):
         self._actions: dict[str, ApplicationAction] = {}
         self._sources: dict[str, Callable] = {}
@@ -136,17 +142,30 @@ class ActionRegistry:
             raise ValueError('Application capability unavailable')
         return action.descriptor()
 
-    def search(self, query: str = '', domain: str = '', *, limit: int = 80) -> dict:
+    def search(self, query: str = '', domain: str = '', *, limit: int = 80,
+               offset: int = 0) -> dict:
         if not isinstance(query, str) or len(query) > 200 or not isinstance(domain, str) or len(domain) > 40:
             raise ValueError('Invalid capability query')
+        if (type(offset) is not int or offset < 0 or
+                offset > self._MAX_SEARCH_OFFSET):
+            raise ValueError('Invalid capability search offset')
         words = query.casefold().split()
         matches = []
+        domain_counts: dict[str, int] = {}
         for action in sorted(self.values(), key=lambda item: item.name):
+            domain_counts[action.domain] = domain_counts.get(action.domain, 0) + 1
             haystack = f'{action.name} {action.label} {action.domain} {action.instructions}'.casefold()
             if (not domain or action.domain == domain) and all(word in haystack for word in words):
                 item = action.descriptor()
                 item.pop('parameters')
                 matches.append(item)
-        return {'ok': True, 'revision': self.revision, 'capabilities': matches[:limit],
+        page = matches[offset:offset + limit]
+        result = {'ok': True, 'revision': self.revision, 'capabilities': page,
                 'unavailable_sources': sorted(self._source_errors),
-                'total': len(matches)}
+                'total': len(matches), 'offset': offset,
+                'has_more': offset + len(page) < len(matches),
+                'domains': [{'domain': name, 'count': domain_counts[name]}
+                            for name in sorted(domain_counts)]}
+        if query and not matches:
+            result['discovery_hint'] = self._DISCOVERY_HINT
+        return result

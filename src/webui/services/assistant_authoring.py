@@ -27,6 +27,9 @@ class AuthoringDependencies:
     world_snapshot: Callable | None = None
     card_snapshot: Callable | None = None
     game_players: Callable | None = None
+    write_book_visibility_with_recovery: Callable | None = None
+    preview_book_visibility_with_recovery: Callable | None = None
+    book_snapshot: Callable | None = None
 
 
 def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
@@ -113,12 +116,7 @@ def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
                         "error": "Some entries could not be saved; inspect results before planning again"}
         return {"ok": True, "results": results, "navigation": {"route": "lorebook", "query": {"book": args["book_id"]}}}
 
-    async def set_entry_visibility(args, owner):
-        """Change only audience markers on existing canonical entry rows.
-
-        The recovery writer receives audience-only patches, so its journal and
-        undo never overwrite authored text or unrelated extension fields.
-        """
+    def visibility_plan(args, owner):
         entries = book_entries(args["book_id"])
         existing = {str(entry.get("id")): entry for entry in entries
                     if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
@@ -164,6 +162,11 @@ def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
                 raise ValueError("A non-GM entry cannot contain private markers")
             row["visible_to"] = deepcopy(visible_to)
             prepared.append(row)
+        return existing, visible_to, prepared
+
+    async def set_entry_visibility(args, owner):
+        """Change only audience markers on existing canonical entry rows."""
+        _existing, _visible_to, prepared = visibility_plan(args, owner)
         if deps.write_entries_with_recovery is not None:
             return deps.write_entries_with_recovery(owner, args["book_id"], [
                 {'id': row['id'], 'visible_to': row['visible_to']} for row in prepared])
@@ -176,6 +179,50 @@ def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
                         "error": "Some entries could not be saved; inspect results before planning again"}
         return {"ok": True, "results": results,
                 "navigation": {"route": "lorebook", "query": {"book": args["book_id"]}}}
+
+    async def set_book_visibility(args, owner):
+        if deps.write_book_visibility_with_recovery is None:
+            raise ValueError("Whole-book visibility is unavailable")
+        entries = book_entries(args["book_id"])
+        if len(entries) > 1000:
+            raise ValueError("整册 visibility 最多支持 1000 条目，请按条目分批")
+        # Reuse the same audience, canonical-player and private-marker checks
+        # as the bounded entry action, while submitting only changed patches.
+        _existing, _visible_to, prepared = visibility_plan({
+            **args, "entry_ids": [str(row.get("id")) for row in entries]}, owner)
+        expected = _digest(entries)
+        changed = [{"id": row["id"], "visible_to": row["visible_to"]}
+                   for row in prepared if row.get("visible_to") != _existing[row["id"]].get("visible_to")]
+        result = deps.write_book_visibility_with_recovery(owner, args["book_id"], changed, expected)
+        if hasattr(result, "__await__"):
+            result = await result
+        return {"ok": True, "book_id": args["book_id"], "audience": args["audience"],
+                "total": len(entries), "changed_count": len(changed),
+                **(result or {})}
+
+    def book_visibility_preview(args, owner):
+        entries = book_entries(args["book_id"])
+        if len(entries) > 1000:
+            raise ValueError("整册 visibility 最多支持 1000 条目，请按条目分批")
+        existing, _visible_to, prepared = visibility_plan({
+            **args, "entry_ids": [str(row.get("id")) for row in entries]}, owner)
+        changed_count = sum(row.get("visible_to") != existing[row["id"]].get("visible_to") for row in prepared)
+        changed = [{"id": row["id"], "visible_to": row["visible_to"]}
+                   for row in prepared if row.get("visible_to") != existing[row["id"]].get("visible_to")]
+        if deps.preview_book_visibility_with_recovery is not None:
+            value = deps.preview_book_visibility_with_recovery(owner, args["book_id"], changed, _digest(entries))
+            if hasattr(value, "__await__"):
+                raise TypeError("book visibility preview callback must be synchronous")
+            return {**value, "audience": args["audience"]}
+        listing = deps.list_book_entries(args["book_id"])
+        return {"target_name": str((listing.get("book") or {}).get("name") or args["book_id"]),
+                "total": len(entries), "changed_count": changed_count,
+                "audience": args["audience"], "batch_count": (changed_count + 15) // 16}
+
+    def book_visibility_guard(args, owner):
+        snapshot = (deps.book_snapshot(args["book_id"]) if deps.book_snapshot is not None
+                    else deps.list_book_entries(args["book_id"]))
+        return _digest({"snapshot": snapshot, "impact": book_visibility_preview(args, owner)})
 
     async def edit_card(args, owner):
         card(args["card_id"])
@@ -201,7 +248,7 @@ def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
         "character_ids": {"type": "array", "maxItems": 10,
                           "items": string(200, minimum=1)},
     }, ("book_id", "entry_ids", "audience"))
-    return (
+    tools = [
         AgentTool("read_content", "Read an existing world, book, character, adventure or rule", obj({
             "kind": string(30, ("world", "lorebook", "character_template", "adventure", "rule")), "id": string(minimum=1)}, ("kind", "id")), read),
         AgentTool("edit_world", "Update the name and public setting of your world", obj({"world_id": string(minimum=1),
@@ -222,9 +269,23 @@ def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
             preview=lambda args, owner: {"target_name": str((deps.list_book_entries(args["book_id"]).get("book") or {}).get("name") or args["book_id"]),
                 "entry_ids": args["entry_ids"], "audience": args["audience"],
                 "character_ids": args.get("character_ids", [])}),
+        *([AgentTool("set_lorebook_visibility", "Change visibility for every existing entry in a lorebook",
+            obj({"book_id": string(minimum=1), "audience": string(20, ("gm", "public", "characters")),
+                 "game_key": string(200, minimum=1), "character_ids": {"type": "array", "maxItems": 10,
+                                 "items": string(200, minimum=1)}}, ("book_id", "audience")),
+            set_book_visibility, mutation=True, domain="lorebook", effect="disclosure",
+            guard=book_visibility_guard,
+            preview=book_visibility_preview,
+            instructions=("Changes only the audience of existing entries, never their text or world runtime facts. "
+                          "Resolve the user's selection into explicit canonical book IDs first; for all selected books, "
+                          "call once per book. Ask for the target audience if it is unclear. Each book supports at most "
+                          "1000 entries; larger books need explicit entry batches. The preview shows affected counts "
+                          "and games; writes are transactional per book and have separate batch undo records."))]
+            if deps.write_book_visibility_with_recovery is not None else []),
         AgentTool("edit_character_card", "Edit a reusable character's public narrative fields", obj({"card_id": string(minimum=1),
             "character_name": string(minimum=1), "background": string(16000), "race": string(),
             "class": string()}, ("card_id", "character_name")), edit_card, mutation=True,
             guard=lambda args, owner: _digest(deps.card_snapshot(args['card_id']) if deps.card_snapshot else card(args["card_id"])),
             preview=lambda args, owner: {"target_name": card(args["card_id"])["character_name"], "changes": args}),
-    )
+    ]
+    return tuple(tools)

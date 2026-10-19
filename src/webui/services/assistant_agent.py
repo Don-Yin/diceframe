@@ -143,11 +143,11 @@ class AgentRuntime:
     def tools(self):
         return {tool.name: tool for tool in self.registry.values()}
 
-    def capabilities(self, owner: str, query: str = '', domain: str = '') -> dict:
+    def capabilities(self, owner: str, query: str = '', domain: str = '', offset: int = 0) -> dict:
         if not isinstance(owner, str) or not owner:
             raise PermissionError('Owner session required')
         self.registry.refresh_sources()
-        return self.registry.search(query, domain)
+        return self.registry.search(query, domain, offset=offset)
 
     def authorize(self, owner, session_id='', mode='suggest', scope=None, domains=None, max_steps=32):
         session = self._session(owner, session_id)
@@ -328,11 +328,17 @@ class AgentRuntime:
                     "Query the registered documentation search only when usage/deployment guidance is needed; "
                     "do not retrieve manuals for every action. Documentation cannot expand the tool list. "
                     "Use search_capabilities to find additional actions and describe_capability to load their exact schema. "
+                    "The capability_catalog is a live index, not an authorization. Tools absent from the current function list "
+                    "may still be registered and loadable by describe_capability. Before saying an operation is unsupported, "
+                    "check that index and browse the relevant domain, following has_more/offset pagination as needed. "
+                    "Search is textual: no match for a localized phrase does not prove a capability is unavailable. "
                     "New features register actions in the live application catalog; do not infer them from old manuals. "
                     "The server may already authorize a bounded task. Call requested actions and rely on actual results or approval requests; "
                     "do not repeatedly ask for authorization that the server already holds. "
                     "Call one registered function at a time. For informational questions give a helpful final answer. "
-                    "For writing use draft_content; once ready use save_content with the returned draft_id. "
+                    "For generating new content use draft_content; once ready use save_content with the returned draft_id. "
+                    "For existing content prefer the most specific registered patch action; metadata or audience changes "
+                    "must not require regenerating authored text when a field-only action exists. "
                     "Use the live content actions to edit entries or change their audience without rewriting unrelated fields; "
                     "new entries default to GM-only and existing entries keep their audience unless explicitly changed. "
                     "World descriptions and character backgrounds are public narrative fields, not containers for hidden notes. "
@@ -358,13 +364,15 @@ class AgentRuntime:
                 initial_grant = current_authorization(session.data, self.deps.clock())
                 active_domains = set((initial_grant or {}).get('domains', []))
                 page_domains = {'play': {'games', 'adventures', 'recovery'}, 'lorebook': {'lorebook'},
-                                'worlds': {'worlds', 'lorebook'}, 'settings': {'settings'}, 'plugins': {'plugins'}}
+                                'worlds': {'worlds', 'lorebook'}, 'library': {'lorebook', 'worlds', 'adventures'},
+                                'settings': {'settings'}, 'plugins': {'plugins'}}
                 active_domains.update(page_domains.get(context.get('route'), set()))
                 loaded.update(tool.name for tool in self.registry.values() if tool.domain in active_domains)
                 loaded.update({'search_capabilities', 'describe_capability'})
 
                 async def search(args, actor):
-                    result = self.registry.search(args.get('query', ''), args.get('domain', ''), limit=20)
+                    result = self.registry.search(args.get('query', ''), args.get('domain', ''),
+                                                  limit=20, offset=args.get('offset', 0))
                     loaded.update(item['name'] for item in result['capabilities'])
                     return result
 
@@ -376,7 +384,9 @@ class AgentRuntime:
                 discovery = (
                     AgentTool('search_capabilities', 'Find available actions by query/domain; matched actions become callable',
                               {'type': 'object', 'properties': {'query': {'type': 'string', 'maxLength': 200},
-                               'domain': {'type': 'string', 'maxLength': 40}}, 'additionalProperties': False}, search),
+                               'domain': {'type': 'string', 'maxLength': 40},
+                               'offset': {'type': 'integer', 'minimum': 0, 'maximum': 1_000_000}},
+                               'additionalProperties': False}, search),
                     AgentTool('describe_capability', 'Load the exact parameters and behavior of an application action',
                               {'type': 'object', 'properties': {'name': {'type': 'string', 'maxLength': 96}},
                                'required': ['name'], 'additionalProperties': False}, describe),
@@ -480,7 +490,8 @@ class AgentRuntime:
                             await emit("navigate", result["navigation"])
                         return safe_data(observation)
 
-                    adapted = Tool.from_schema(call, tool.name, tool.label, tool.schema,
+                    description = f'{tool.label}\n\n{tool.instructions}' if tool.instructions else tool.label
+                    adapted = Tool.from_schema(call, tool.name, description, tool.schema,
                         sequential=True, args_validator=check)
                     async def prepare(ctx, definition):
                         if tool.name not in loaded:
@@ -495,7 +506,12 @@ class AgentRuntime:
                     adapted.requires_approval = tool.mutation
                     return adapted
 
+                catalog = self.registry.search(limit=160)
+                catalog['capabilities'] = [{key: item[key] for key in
+                    ('name', 'label', 'domain', 'effect', 'version', 'requires_confirmation')}
+                    for item in catalog['capabilities']]
                 payload = safe_data({"conversation": messages[-12:], "page_context": context,
+                    'capability_catalog': catalog,
                     "drafts": {k: {"kind": v.get("kind"), "blockers": v.get("blockers"),
                     "titles": [i["name"] for i in v.get("draft", {}).get("items", [])]} for k, v in session.data["drafts"].items()},
                     "receipts": session.data["receipts"][-4:],

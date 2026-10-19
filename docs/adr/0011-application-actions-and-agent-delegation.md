@@ -20,7 +20,7 @@ DF Agent 需要调用多个 owning module 的真实业务能力，同时保持�
 
 ### 2. 动态发现按需加载
 
-Agent 初始只加载必要动作；`search_capabilities` 和 `describe_capability` 从 live registry 按需加载摘要和精确 schema。动态 source（当前为插件 descriptor）每次刷新并重新验证；失效 source 的动作移除并报告 unavailable。文档、聊天内容和模型输出不能改变 registry、canonical identity 或授权。
+Agent 初始只加载必要动作；运行时 compact catalog 最多提供 160 条摘要，并带 `has_more` 和按 domain 统计的 `domains`。`search_capabilities` 支持按 query/domain 分页，下一页从当前页起点加返回条数继续；`describe_capability` 从 live registry 按需加载精确 schema。`library` 页面自动加载 lorebook、worlds 和 adventures domains，动作 instructions 自动进入工具描述。动态 source（当前为插件 descriptor）每次刷新并重新验证；失效 source 的动作移除并报告 unavailable。文档、聊天内容和模型输出不能改变 registry、canonical identity 或授权。
 
 ### 3. 服务端有限授权
 
@@ -43,6 +43,8 @@ Agent 初始只加载必要动作；`search_capabilities` 和 `describe_capabili
 服务器保存计划和 receipt。取消撤销尚未派发步骤；已进入权威写入的确认受 shield 保护，客户端断开不等于写入取消。重复确认返回原 receipt；结果不确定时标记 `recovery_required`，禁止盲目重放。该模型不提供持久化工作流自动恢复、跨模块万能事务或通用 undo。
 
 持久化计划不代表写入已经派发：取消清理未派发计划，并在开始通知及异步权限校验后重新核对 stop/plan identity；取消之后不得启动新的领域写入。
+
+资料册整册可见性使用 canonical `book_id` 与 `audience`，可选 `game_key` 仅用于解析 live character IDs；最多 1000 条目。预览提供 changed counts 和 affected games；“所有资料册” 必须先解析成明确 book IDs，再逐册调用。每册按 16 条目在 owning-store 事务中写入，并为每批保留独立 undo ID，因此不形成跨册全局原子事务。其恢复记录仍是 `write_entries` 加 `visibility_only` marker；恢复检查目标内容、绑定和资料册语义元数据冲突，仅对该新 marker 忽略 `revision`/`updated_at`。
 
 ### 6. 使用量语义
 

@@ -46,6 +46,10 @@ export interface AgentCapability {
   instructions?: string
   requires_confirmation?: boolean
 }
+export interface AgentCapabilityDomain {
+  domain: string
+  count?: number
+}
 
 export interface AgentDraftReview {
   ok?: boolean
@@ -326,10 +330,11 @@ export function getAssistantAgentSession(sessionId: string): Promise<AgentSessio
   return agentJson<AgentSession>(`/assistant/agent/session/${encodeURIComponent(sessionId)}`)
 }
 
-export function getAssistantAgentCapabilities(query: { q?: string; domain?: string } = {}): Promise<{ ok: true; revision: string; capabilities: AgentCapability[]; total?: number }> {
+export function getAssistantAgentCapabilities(query: { q?: string; domain?: string; offset?: number } = {}): Promise<{ ok: true; revision: string; capabilities: AgentCapability[]; domains?: AgentCapabilityDomain[]; offset?: number; has_more?: boolean; total?: number; discovery_hint?: string }> {
   const params = new URLSearchParams()
   if (query.q?.trim()) params.set('q', query.q.trim())
   if (query.domain?.trim()) params.set('domain', query.domain.trim())
+  if (typeof query.offset === 'number' && query.offset > 0) params.set('offset', String(Math.floor(query.offset)))
   const suffix = params.toString() ? `?${params.toString()}` : ''
   return agentJson(`/assistant/agent/capabilities${suffix}`)
 }

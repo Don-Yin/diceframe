@@ -140,7 +140,8 @@ async def api_agent_capabilities(request):
     owner = _owner(request)
     try:
         return web.json_response(_get_api(request).assistant_agent_capabilities(
-            owner, request.query.get('q', ''), request.query.get('domain', '')))
+            owner, request.query.get('q', ''), request.query.get('domain', ''),
+            int(request.query.get('offset', '0'))))
     except (ValueError, TypeError) as exc:
         return web.json_response({'ok': False, 'error': str(exc)}, status=400)
 

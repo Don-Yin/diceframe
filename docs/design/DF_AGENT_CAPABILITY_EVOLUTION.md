@@ -6,7 +6,7 @@
 
 `ApplicationAction`/`ActionRegistry` 是能力扩展的唯一目录入口。owning feature/domain module 注册动作，动作公开稳定 name、version、domain、effect、schema、instructions、guard/preview 元数据和 handler。registry 计算整体 `revision`，每个 descriptor 计算 `contract_digest`；计划确认时重新检查动作契约，版本变化、删除或 source 刷新失败都会使旧计划失效或不可用。
 
-当前目录由应用、内容/世界、资料册、游戏/冒险、规则/恢复、本局资料册、设置和插件 source 组成。已注册的新动作会被 `GET /api/assistant/agent/capabilities` 发现，并可由 Agent 的 `search_capabilities`/`describe_capability` 按需加载完整 schema。动态插件 descriptor 在每次 source refresh 时重新读取；失效 source fail closed 并从目录移除其动作。
+当前目录由应用、内容/世界、资料册、游戏/冒险、规则/恢复、本局资料册、设置和插件 source 组成。已注册的新动作会被 `GET /api/assistant/agent/capabilities` 发现，并可由 Agent 的 `search_capabilities`/`describe_capability` 按需加载完整 schema。运行时 compact `capability_catalog` 最多携带 160 条摘要，并带 `has_more` 与 `domains`；搜索分页的下一次 `offset` 从当前页起点加返回条数计算。完整 schema 只在 describe 或搜索命中后按需加入 callable 集合；动作 `instructions` 会自动并入工具描述。`library` 页面自动覆盖 `lorebook`、`worlds` 和 `adventures` domain。动态插件 descriptor 在每次 source refresh 时重新读取；失效 source fail closed 并从目录移除其动作。
 
 “可发现”只表示动作已注册且当前 descriptor 可读，不表示模型拥有权限，也不表示系统能执行任意未注册的 route、Python 函数、HTTP、文件、SQL 或插件 API。实际 handler 和领域服务仍是最终 authority。
 
@@ -30,13 +30,15 @@ Agent 初始只接收必要的基础动作；其它能力由搜索命中或 desc
 
 ## 可见性与领域边界
 
-资料册 audience 变更是 disclosure：只更新既有条目的 `visible_to`，指定角色使用 live roster canonical UID 并通过 GM 校验。世界事实可见性使用正式 worldops；规则结算、骰点、资源、回合和恢复动作复用既有 authority。specific ruleset 不得反向污染 generic engine，也不能为 Agent 增加任意资源写入旁路。
+资料册 audience 变更是 disclosure：只更新既有条目的 `visible_to`，指定角色使用 live roster canonical UID 并通过 GM 校验。`set_lorebook_visibility` 使用 canonical `book_id`，可选 `game_key` 解析角色 UID，最多 1000 条目；预览返回 changed count 与 affected games。用户选择 “所有资料册” 时必须先得到明确 book IDs，再逐册调用一次。每册按 16 条目在单个 owning-store 事务内写入，每批产生独立 undo ID，不提供跨册全局原子性，也不重写正文。世界事实可见性使用正式 worldops；规则结算、骰点、资源、回合和恢复动作复用既有 authority。specific ruleset 不得反向污染 generic engine，也不能为 Agent 增加任意资源写入旁路。
+
+整册可见性恢复复用 `kind=write_entries` 并加 `visibility_only` marker。恢复会拒绝目标内容、绑定或资料册语义元数据冲突；只有带该新 marker 的记录忽略 `revision` 与 `updated_at` 派生字段。它保持逐批独立回执，不能被描述为跨资料册全局回滚。
 
 新动作必须明确 owner、actor、目标资源、domain、effect、并发/版本 guard、结果 receipt、取消和不确定结果语义。没有这些契约的能力应保持未注册或人工流程，而不是用提示词模拟权限。
 
 ## 运行预算与任务边界
 
-provider 返回的 `total_tokens` 在每次请求完成后检查，runtime 对各次响应求和。`max_tokens * steps` 是按步骤推导的观测/执行检查上限，不是费用、余额或 provider 账单的硬上限；请求、工具调用和每领域子调用仍由 framework 或 owning service 的预算控制。不能用无上限循环声称“全能”。
+provider 返回的 `total_tokens` 在每次请求完成后检查，runtime 对各次响应求和。`assistant_agent_task_max_tokens`（默认 256000）与单次回复 `assistant_agent_max_tokens`（默认 4096）独立；默认最多 24 次请求/工具迭代，显式授权可放宽至 64。任务预算不再由 `max_tokens * steps` 推导，也不是费用、余额或 provider 账单的硬上限；请求、工具调用和每领域子调用仍由 framework 或 owning service 的预算控制。
 
 当前 session 持久化草稿、审批计划、任务和 receipt，可处理重复确认、客户端断开和结果待核实；它不是持久化工作流自动恢复系统。取消只阻止尚未派发的步骤；已提交写入保持 receipt，未知结果进入 `recovery_required`，不得生成新 ID 盲目重试。没有跨模块通用事务或万能 undo。
 
