@@ -38,6 +38,8 @@ Agent 初始只接收必要的基础动作；其它能力由搜索命中或 desc
 
 整册可见性恢复由隐藏的 `kind=visibility_plan_book` 协调每册幂等 parent receipt；真正可撤销记录是 `kind=write_entries` 加 `visibility_only` marker。`prepared.payload` 上限 4 MiB、最多 128 册；每册 child receipt 可稳定恢复，重启不自动写入。恢复会拒绝目标内容、绑定或资料册语义元数据冲突；只有 visibility-only marker 的记录忽略 `revision` 与 `updated_at` 派生字段。它保持逐册独立回执，不能被描述为跨资料册全局回滚。
 
+首次未批准计划在 15 分钟后失效；已派发计划暂停后，owner 可以核对原封存的剩余目标并显式确认续跑，每次取得新的 15 分钟执行窗口，不改写原计划 `expires_at` 或续期 Task grant。最近持久化活动起 24 小时的会话保留限制仍有效，已提交目标依可信回执跳过。检查点须对照完整目标清单，尚有未执行目标时不能报告整体 `completed`。
+
 新动作必须明确 owner、actor、目标资源、domain、effect、并发/版本 guard、结果 receipt、取消和不确定结果语义。没有这些契约的能力应保持未注册或人工流程，而不是用提示词模拟权限。
 
 ## 运行预算与任务边界

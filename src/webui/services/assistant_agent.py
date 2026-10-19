@@ -126,6 +126,7 @@ class AgentRuntime:
     MAX_STEPS = DEFAULT_RUN_STEPS
     SESSION_TTL = 86400
     APPROVAL_TTL = 900
+    EXECUTION_TTL = 900
 
     def __init__(self, deps: AgentDependencies):
         self.deps = deps
@@ -658,7 +659,8 @@ class AgentRuntime:
         async def resume_locked():
             async with session.lock:
                 plan = session.data.get('pending') or {}
-                if not plan.get('resumable') or plan.get('approval_id') != approval_id:
+                if (not plan.get('resumable') or plan.get('approval_id') != approval_id
+                        or not isinstance(plan.get('execution_state'), dict)):
                     raise ValueError('No paused execution matches this plan')
                 session.stop.clear()
                 return await self._execute_plan(session, owner, approval_id, plan_digest, True, resume=True)
@@ -695,11 +697,16 @@ class AgentRuntime:
                 if report:
                     response['result'] = {**report, 'ok': False, 'status': 'cancelled'}
         else:
-            if plan["expires_at"] < self.deps.clock():
+            # Proposal expiry gates initial approval, not the retained history
+            # of an already dispatched command. Resume is fresh owner consent
+            # to the same sealed remaining targets, never a renewed Task grant.
+            if not resume and plan["expires_at"] <= self.deps.clock():
                 raise ValueError("Approval expired; cancel it and create a new plan")
             tool = self.tools.get(plan["tool"])
             if tool is None or not tool.mutation:
                 raise ValueError("Approval tool unavailable")
+            if resume and not tool.resumable:
+                raise ValueError('Action does not support receipt-based resume')
             if plan.get('contract_digest') != tool.contract_digest:
                 raise ValueError('Action contract changed; cancel and plan again')
             args = validate_arguments(plan["arguments"], tool.schema)
@@ -729,6 +736,7 @@ class AgentRuntime:
                 if (not grant or grant.get('expires_at', 0) <= self.deps.clock()
                         or not permits(grant, tool, args, stored_assessment(plan))):
                     raise PermissionError('Task authorization no longer covers this prepared command')
+            execution_deadline = self.deps.clock() + self.EXECUTION_TTL
             session.data["status"] = "executing"
             if tool.execute is not None:
                 plan.setdefault('execution_state', {})
@@ -742,8 +750,8 @@ class AgentRuntime:
                         live = self.registry.get(tool.name)
                         if live is None or live.contract_digest != plan['contract_digest']:
                             raise ActionExecutionStopped('Action contract changed')
-                        if plan['expires_at'] < self.deps.clock():
-                            raise ActionExecutionStopped('Plan authorization expired')
+                        if execution_deadline <= self.deps.clock():
+                            raise ActionExecutionStopped('Execution confirmation expired; confirm the remaining targets to resume')
                         if lease is not None:
                             current = session.data.get('authorization')
                             keys = ('mode', 'scope', 'domains', 'expires_at', 'max_steps')

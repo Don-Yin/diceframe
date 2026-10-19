@@ -1,6 +1,7 @@
 """Owner-prepared commands share one approval, scope check and durable receipt."""
 import asyncio
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 
@@ -137,7 +138,6 @@ async def test_restarted_executing_plan_is_paused_until_owner_resumes(tmp_path):
 
 @pytest.mark.asyncio
 async def test_automatic_plan_rechecks_live_grant_before_each_target(tmp_path):
-    from dataclasses import replace
     agent, sid, writes = runtime(tmp_path)
     tool = agent.registry.get('apply_selection')
     original = tool.execute
@@ -153,3 +153,104 @@ async def test_automatic_plan_rechecks_live_grant_before_each_target(tmp_path):
     await run(agent, sid)
     assert writes == ['a']
     assert agent.snapshot('owner', sid)['pending']['resumable']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('paused_seconds', [1800, 7200])
+async def test_owner_can_reconfirm_expired_partial_plan_after_restart_without_replaying_success(tmp_path, paused_seconds):
+    agent, sid, writes = runtime(tmp_path, visibility='public', interrupt=True)
+    now = [agent.deps.clock()]
+    agent.deps = replace(agent.deps, clock=lambda: now[0])
+    events = await run(agent, sid)
+    plan = next(value for name, value in events if name == 'approval')
+    paused = await agent.confirm('owner', sid, plan['approval_id'], plan['plan_digest'], True)
+    assert paused['pending']['resumable'] and writes == ['a']
+    original_payload = deepcopy(paused['pending']['prepared'])
+    now[0] += paused_seconds
+    restarted = AgentRuntime(agent.deps)
+    restored = restarted.snapshot('owner', sid)['pending']
+    assert restored['plan_digest'] == plan['plan_digest']
+    response = await restarted.resume('owner', sid, restored['approval_id'], restored['plan_digest'])
+    assert response['ok'] and writes == ['a', 'b']
+    assert restored['prepared'] == original_payload
+    assert restored['expires_at'] == plan['expires_at']
+    assert restarted.snapshot('owner', sid)['pending'] is None
+
+
+@pytest.mark.asyncio
+async def test_expired_unapproved_plan_cannot_use_resume_or_confirmation(tmp_path):
+    agent, sid, writes = runtime(tmp_path, visibility='public')
+    now = [agent.deps.clock()]
+    agent.deps = replace(agent.deps, clock=lambda: now[0])
+    events = await run(agent, sid)
+    plan = next(value for name, value in events if name == 'approval')
+    now[0] += 1800
+    with pytest.raises(ValueError, match='No paused execution'):
+        await agent.resume('owner', sid, plan['approval_id'], plan['plan_digest'])
+    with pytest.raises(ValueError, match='Approval expired'):
+        await agent.confirm('owner', sid, plan['approval_id'], plan['plan_digest'], True)
+    assert writes == []
+
+
+@pytest.mark.asyncio
+async def test_first_confirmation_gets_execution_window_independent_of_proposal_expiry(tmp_path):
+    agent, sid, writes = runtime(tmp_path, visibility='public')
+    now = [agent.deps.clock()]
+    agent.deps = replace(agent.deps, clock=lambda: now[0])
+    action = agent.registry.get('apply_selection')
+    original = action.execute
+    async def advance_between_targets(payload, owner, context):
+        persist = context.checkpoint
+        def checkpoint(state):
+            persist(state)
+            now[0] += 2
+        context.checkpoint = checkpoint
+        return await original(payload, owner, context)
+    agent.registry.unregister(action.name)
+    agent.registry.register(replace(action, execute=advance_between_targets))
+    plan = next(value for name, value in await run(agent, sid) if name == 'approval')
+    now[0] = plan['expires_at'] - 1
+    response = await agent.confirm('owner', sid, plan['approval_id'], plan['plan_digest'], True)
+    assert response['ok'] and writes == ['a', 'b']
+
+
+@pytest.mark.asyncio
+async def test_execution_window_expiry_retains_checkpoint_and_requires_fresh_owner_resume(tmp_path):
+    agent, sid, writes = runtime(tmp_path, visibility='public')
+    now = [agent.deps.clock()]
+    agent.deps = replace(agent.deps, clock=lambda: now[0])
+    action = agent.registry.get('apply_selection')
+    original = action.execute
+    async def expire_after_first(payload, owner, context):
+        persist = context.checkpoint
+        def checkpoint(state):
+            persist(state)
+            if state['completed'] == ['a']:
+                now[0] += agent.EXECUTION_TTL + 1
+        context.checkpoint = checkpoint
+        return await original(payload, owner, context)
+    agent.registry.unregister(action.name)
+    agent.registry.register(replace(action, execute=expire_after_first))
+    plan = next(value for name, value in await run(agent, sid) if name == 'approval')
+    paused = await agent.confirm('owner', sid, plan['approval_id'], plan['plan_digest'], True)
+    assert not paused['ok'] and paused['pending']['resumable'] and writes == ['a']
+    replay = await agent.confirm('owner', sid, plan['approval_id'], plan['plan_digest'], True)
+    assert replay == paused and writes == ['a']
+    response = await agent.resume('owner', sid, plan['approval_id'], plan['plan_digest'])
+    assert response['ok'] and writes == ['a', 'b']
+
+
+@pytest.mark.asyncio
+async def test_expired_resume_keeps_owner_and_sealed_target_integrity_checks(tmp_path):
+    agent, sid, writes = runtime(tmp_path, visibility='public', interrupt=True)
+    now = [agent.deps.clock()]
+    agent.deps = replace(agent.deps, clock=lambda: now[0])
+    plan = next(value for name, value in await run(agent, sid) if name == 'approval')
+    await agent.confirm('owner', sid, plan['approval_id'], plan['plan_digest'], True)
+    now[0] += 1800
+    with pytest.raises(PermissionError, match='another owner'):
+        await agent.resume('someone-else', sid, plan['approval_id'], plan['plan_digest'])
+    agent.sessions[sid].data['pending']['prepared']['targets'].append('outside')
+    with pytest.raises(ValueError, match='integrity'):
+        await agent.resume('owner', sid, plan['approval_id'], plan['plan_digest'])
+    assert writes == ['a']

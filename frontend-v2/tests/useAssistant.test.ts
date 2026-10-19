@@ -280,6 +280,27 @@ describe('useAssistant request history', () => {
     expect(assistant.pendingApproval.value).toBeNull()
   })
 
+  it('keeps an expired resumable plan available for explicit resume', async () => {
+    const pending = {
+      approval_id: 'a-expired-resume', plan_digest: 'digest-expired-resume', tool: 'set_lorebooks_visibility',
+      resumable: true, execution_status: 'partial', expires_at: Math.floor(Date.now() / 1000) - 30 * 60,
+      execution_state: { report: { status: 'partial', changed_count: 2 } },
+    }
+    mocks.agentStream.mockImplementationOnce(async (_messages: unknown, _locale: unknown, handlers: { onAgentEvent?: (event: string, payload: Record<string, unknown>) => void }) => {
+      handlers.onAgentEvent?.('session', { session_id: 's-expired-resume' })
+      handlers.onAgentEvent?.('approval', pending)
+    })
+    mocks.resume.mockResolvedValueOnce({ ok: true, result: { status: 'completed' } })
+    const assistant = useAssistant()
+
+    await assistant.send('继续暂停批量', 'zh-CN')
+    expect(assistant.pendingApproval.value).toMatchObject({ resumable: true })
+    expect(assistant.pendingApproval.value?.expired).not.toBe(true)
+
+    await assistant.resumeApproval()
+    expect(mocks.resume).toHaveBeenCalledWith('s-expired-resume', pending.approval_id, pending.plan_digest)
+  })
+
   it('caches an ok-false partial response with pending state without retrying confirm', async () => {
     const pending = { approval_id: 'a-ok-false', plan_digest: 'digest-ok-false', tool: 'write_lorebook_entries', resumable: true, execution_status: 'partial', execution_state: { report: { status: 'partial' } } }
     mocks.agentStream.mockImplementationOnce(async (_messages: unknown, _locale: unknown, handlers: { onAgentEvent?: (event: string, payload: Record<string, unknown>) => void }) => {
@@ -380,7 +401,9 @@ describe('useAssistant request history', () => {
     await assistant.send('rerun', 'en')
     expect(assistant.pendingApproval.value).toMatchObject({ approval_id: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', recovery_required: true, expired: true })
     await assistant.confirmApproval(true)
+    await assistant.resumeApproval()
     expect(mocks.confirm).toHaveBeenCalledTimes(1)
+    expect(mocks.resume).not.toHaveBeenCalled()
   })
 
   it('restores a failed receipt response after a confirmation network failure', async () => {

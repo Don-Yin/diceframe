@@ -336,27 +336,22 @@ async def test_restarted_runtime_reconciles_owner_receipt_before_finishing_batch
     original_execute = action.execute
     crashed = False
 
+    class ProcessInterrupted(BaseException):
+        pass
+
     async def crash_after_first_receipt(payload, owner, context):
         nonlocal crashed
-        real_check = context.check
         real_checkpoint = context.checkpoint
-        armed = False
 
         def checkpoint(state):
-            nonlocal armed
-            real_checkpoint(state)
-            if state.get("books", {}).get("restart-a", {}).get("status") == "succeeded":
-                armed = True
-
-        def check():
             nonlocal crashed
-            if armed and not crashed:
+            real_checkpoint(state)
+            if (not crashed
+                    and state.get("books", {}).get("restart-a", {}).get("status") == "succeeded"):
                 crashed = True
-                raise RuntimeError("simulated runtime restart")
-            return real_check()
+                raise ProcessInterrupted("simulated process restart")
 
         context.checkpoint = checkpoint
-        context.check = check
         return await original_execute(payload, owner, context)
 
     wrapped = replace(action, execute=crash_after_first_receipt)
@@ -364,15 +359,26 @@ async def test_restarted_runtime_reconciles_owner_receipt_before_finishing_batch
     registry.register(wrapped)
     planner = _group_planner(book_ids, "gm")
     grant = api.assistant_agent_authorize("owner", "", "task", {}, ["lorebook"], 8)
-    events = await _run(api, planner, session_id=grant["session_id"])
-    sid = _session_id(events)
+    sid = grant["session_id"]
+    with pytest.raises(ProcessInterrupted):
+        await _run(api, planner, session_id=sid)
+
     pending = old_runtime.snapshot("owner", sid)["pending"]
     assert pending and pending["execution_state"]["books"]["restart-a"]["status"] == "succeeded"
+    assert pending["execution_state"]["report"]["status"] != "completed"
+    assert pending["execution_state"]["report"]["success_count"] == 1
+    assert pending["execution_state"]["report"]["not_executed_count"] == 1
+    assert len(api.assistant_content_operations("owner")["operations"]) == 1
 
     registry.unregister(action.name)
     registry.register(action)
     restarted = AgentRuntime(replace(old_runtime.deps, tools=()))
     api._assistant_agent = restarted
+    recovered = restarted.snapshot("owner", sid)
+    assert recovered["status"] == "paused"
+    assert recovered["pending"]["execution_state"]["report"]["status"] == "partial"
+    assert recovered["pending"]["execution_state"]["report"]["success_count"] == 1
+    assert recovered["pending"]["execution_state"]["report"]["not_executed_count"] == 1
     resumed = await api.assistant_agent_resume("owner", sid, pending["approval_id"], pending["plan_digest"])
 
     assert resumed["result"]["status"] == "completed"

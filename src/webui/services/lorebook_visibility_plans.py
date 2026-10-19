@@ -313,8 +313,8 @@ class LorebookVisibilityPlans:
     def _checkpoint(cls, context: ActionExecutionContext, payload: dict, state: dict,
                     status: str, error: str | None = None) -> None:
         if status == "completed" and any(
-                book_state.get("status") != "succeeded"
-                for book_state in state["books"].values()):
+                state["books"].get(book.get("book_id"), {}).get("status") != "succeeded"
+                for book in payload.get("books", [])):
             status = "partial"
         state["report"] = cls._report(payload, state, status, error)
         context.checkpoint(state)

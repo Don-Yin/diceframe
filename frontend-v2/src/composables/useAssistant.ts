@@ -162,6 +162,10 @@ function safeNavigation(value: unknown): AssistantNavigation | null {
 }
 function approvalExpired(value: AgentApproval): boolean {
   if (value.recovery_required) return true
+  // A resumable plan has already been dispatched. Its original approval
+  // window must not prevent the owner from explicitly resuming the remaining
+  // targets in a fresh execution window.
+  if (value.resumable) return false
   if (value.expires_at === undefined || value.expires_at === null) return false
   const raw = typeof value.expires_at === 'number' || /^\d+(?:\.\d+)?$/.test(String(value.expires_at))
     ? Number(value.expires_at) * (Number(value.expires_at) < 10_000_000_000 ? 1000 : 1)
@@ -423,7 +427,7 @@ async function confirmApproval(approved = true): Promise<AgentConfirmResult | un
 async function resumeApproval(): Promise<AgentConfirmResult | undefined> {
   const pending = pendingApproval.value
   const currentSession = sessionId.value
-  if (!pending?.resumable || !currentSession || actionBusy.value) return undefined
+  if (!pending?.resumable || pending.expired || pending.recovery_required || !currentSession || actionBusy.value) return undefined
   const generation = requestGeneration
   actionBusy.value = true
   actionError.value = ''

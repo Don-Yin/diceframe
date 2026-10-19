@@ -105,6 +105,24 @@ def test_interrupted_report_keeps_running_books_unconfirmed():
     assert report["not_executed_count"] == 1
 
 
+def test_checkpoint_completion_requires_every_payload_book_successful():
+    _books, _writes, service = _fixture()
+    prepared = service.prepare({"book_ids": ["b1", "b2"], "audience": "gm"}, "owner")
+    captured = []
+    context = ActionExecutionContext(
+        plan_id="checkpoint-plan", state={}, persist=lambda value: captured.append(deepcopy(value)),
+        check_access=lambda: None,
+    )
+    service._checkpoint(
+        context, prepared.payload,
+        {"plan_digest": prepared.guard, "books": {"b1": {"status": "succeeded"}}},
+        "completed",
+    )
+    assert captured[-1]["report"]["status"] == "partial"
+    assert captured[-1]["report"]["success_count"] == 1
+    assert captured[-1]["report"]["not_executed_count"] == 1
+
+
 def _context(payload, *, state=None, checks=None):
     checks = checks if checks is not None else []
     persisted = []

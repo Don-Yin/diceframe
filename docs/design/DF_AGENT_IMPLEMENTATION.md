@@ -73,6 +73,8 @@ routine 授权有效 4 小时，task 授权有效 1 小时；两者都有 `remai
 
 资料册可见性批次由隐藏的 `kind=visibility_plan_book` 记录负责每册幂等协调 parent receipt；真正可撤销的子记录仍是 `kind=write_entries` 加 `visibility_only` marker。private-marker 扫描只属于校验，不构成发布同意。恢复预览会比较目标条目的内容、绑定、资料册语义元数据和其它受影响快照；只有该 marker 的 visibility-only 记录忽略资料册 `revision` 与 `updated_at` 这两个派生时间字段。批准前重新检查资料册内容、绑定和受影响对局，变化后必须重新预览。4 MiB 上限只约束 `prepared.payload`，最多 128 册；每册沿用 512 KiB 快照上限并预留撤销记录空间。冲突时拒绝覆盖后续编辑；它不把多册计划提升为跨资料册事务，也不重写条目正文。
 
+首次审批有效期与执行窗口分开：未批准的计划 15 分钟后不能直接确认；已派发并暂停的计划可在既有会话保留期内，由 owner 核对原封存剩余目标后显式续跑，每次确认给予新的 15 分钟执行窗口。首次 `expires_at` 和计划摘要保持不变，已提交目标通过可信回执跳过；续跑不续期或扩大 Task grant。会话沿用最近持久化活动起 24 小时的保留限制。中间检查点必须按原计划的全部目标判定，只有全部成功才能报告 `completed`。
+
 ## HTTP contract
 
 所有 Agent route 都要求 owner authentication；页面 context 只用于发现和提示，不构成 actor、game 或权限授权。

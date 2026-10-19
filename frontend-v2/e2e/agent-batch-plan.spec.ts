@@ -12,6 +12,7 @@ test('resumes a partial generic batch plan through /resume and keeps target repo
     label: 'Write lorebook entries',
     resumable: true,
     execution_status: 'partial',
+    expires_at: Math.floor(Date.now() / 1000) - 30 * 60,
     preview: {
       audience: 'gm',
       targets: [
@@ -62,6 +63,7 @@ test('resumes a partial generic batch plan through /resume and keeps target repo
   await expect(page.locator('[data-agent-approval]')).toBeVisible()
   await expect(page.getByTestId('agent-execution-summary')).toContainText('阿卡姆疑云')
   await expect(page.getByTestId('agent-execution-target-book-2')).toContainText('未执行')
+  await expect(page.getByTestId('agent-resume')).toBeEnabled()
   await page.getByTestId('agent-resume').click()
   await expect.poll(() => resumeBody).toMatchObject({ session_id: SESSION_ID, approval_id: approval.approval_id, plan_digest: approval.plan_digest })
   await expect(page.locator('[data-agent-approval]')).toHaveCount(0)
@@ -145,4 +147,35 @@ test('confirms one public twenty-lorebook plan and keeps the target list inside 
   await expect(finalSummary).toContainText('执行计划已完成')
   await expect(finalSummary).toContainText('成功 20')
   await expect(finalSummary).toContainText('未执行 0')
+})
+
+test('keeps an initially expired approval disabled instead of treating it as resumable', async ({ page }) => {
+  const approval = {
+    approval_id: 'fedcba9876543210fedcba9876543210',
+    plan_digest: `sha256:${'d'.repeat(64)}`,
+    tool: 'set_lorebooks_visibility',
+    label: 'Set lorebook visibility',
+    expires_at: Math.floor(Date.now() / 1000) - 30 * 60,
+    preview: {
+      audience: 'public',
+      targets: [{ id: 'book-expired', label: '已过期资料册', total: 1, changed_count: 1 }],
+    },
+  }
+  await page.addInitScript(({ sessionId }) => {
+    localStorage.setItem('diceframe_assistant_session_id', sessionId)
+    localStorage.setItem('diceframe_assistant_messages', JSON.stringify([{ role: 'user', content: '执行已过期计划' }, { role: 'assistant', content: '' }]))
+  }, { sessionId: SESSION_ID })
+  await page.route('**/api/assistant/agent/session/**', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ ok: true, session_id: SESSION_ID, pending: approval, drafts: {}, receipts: [], status: 'approval_required', authorization: null, task: { status: 'approval_required', completed_steps: 0, total_steps: 1 } }),
+  }))
+  await page.route('**/api/assistant/agent/capabilities*', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, revision: 'batch-e2e', capabilities: [] }),
+  }))
+
+  await page.goto('/#/overview?game=game-public')
+  await page.getByTestId('assistant-shell-fab').click()
+  await expect(page.locator('[data-agent-approval]')).toBeVisible()
+  await expect(page.getByRole('button', { name: '确认执行' })).toBeDisabled()
+  await expect(page.getByTestId('agent-resume')).toHaveCount(0)
 })

@@ -200,4 +200,22 @@ describe('DF Assistant runtime log entry', () => {
     expect(wrapper.get('[data-testid="agent-execution-summary"]').text()).toContain('阿卡姆疑云')
     wrapper.unmount()
   })
+
+  it('keeps an initial expired approval and recovery-required resume unavailable', () => {
+    pendingApproval.value = {
+      approval_id: 'expired-a', plan_digest: 'sha256:expired', tool: 'save_content',
+      expires_at: Math.floor(Date.now() / 1000) - 30 * 60, expired: true,
+    }
+    const expiredWrapper = mount(AssistantPanel, { attachTo: document.body })
+    expect(expiredWrapper.get('.assistant-approval-actions button').attributes('disabled')).toBeDefined()
+    expiredWrapper.unmount()
+
+    pendingApproval.value = {
+      approval_id: 'recovery-a', plan_digest: 'sha256:recovery', tool: 'set_lorebooks_visibility',
+      resumable: true, recovery_required: true, execution_status: 'partial',
+    }
+    const recoveryWrapper = mount(AssistantPanel, { attachTo: document.body })
+    expect(recoveryWrapper.get('[data-testid="agent-resume"]').attributes('disabled')).toBeDefined()
+    recoveryWrapper.unmount()
+  })
 })

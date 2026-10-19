@@ -48,6 +48,8 @@ Agent 初始只加载必要动作；运行时 compact catalog 最多提供 160 �
 
 `set_lorebooks_visibility(book_ids, audience, ...)` 只接受显式 1..128 个 canonical `book_id`；“全部”必须先从 live catalog 解析为 ID 列表，scope 绑定 owner 解析的每册 book target，`game_key` 只验证 live 角色，不构成 book 授权。owning module 先按每册最多 1000 条目准备并评估实际 audience，再生成带不可变 payload、assessment、版本和 `contract_digest` 的多册计划；只有 visibility-only `prepared.payload` 不含正文，普通 `write_lorebook_entries` payload 仍含待写正文。4 MiB 上限只约束 `prepared.payload`。private-marker 只产生校验警告，不构成同意。计划报告每册 success、failure、unconfirmed 或 not-executed，并提供 `unconfirmed_count`；支持册间取消。每册仍在 owning-store 事务中写入：`kind=visibility_plan_book` 隐藏记录负责幂等协调 parent book receipt，真正可撤销的子记录仍是 `kind=write_entries` 加 `visibility_only` marker，不形成跨册事务。重复 confirm 返回已存响应且绝不重试部分写入；重启不自动写入，`POST /api/assistant/agent/resume` 是 owner 对原封存剩余目标的显式确认，复核 plan/contract/TTL 和每个未完成目标；原 automatic 执行还逐册重新检查 live task grant，不依赖已撤销 grant，并跳过已有 committed receipts。只有注册的 resumable executor 可协调 owner receipts；未知突变仍进入 `recovery_required`。恢复检查目标内容、绑定和资料册语义元数据冲突，仅对 visibility-only 记录忽略派生 revision/time 字段。
 
+首次未批准计划的有效期为 15 分钟。已派发后暂停的计划不因首次审批过期而丢失续跑入口：owner 核对原封存计划并显式确认剩余目标后，取得新的 15 分钟执行窗口，已完成目标依可信回执跳过。续跑不续期或扩大 Task grant，仍检查 owner、计划完整性、动作版本和每个未完成目标；沿用最近持久化活动起 24 小时的会话保留限制。检查点只有在原计划全部目标成功时才能报告 `completed`，未初始化或尚未执行的目标也计入完成判定。
+
 ### 6. 使用量语义
 
 provider 报告的 `total_tokens` 在单次请求完成后检查并按响应累加用于任务观测。每次回复上限 `assistant_agent_max_tokens`（默认 4096）与单次任务预算 `assistant_agent_task_max_tokens`（默认 256000，范围 16000..2000000）独立，不再以回复上限乘步骤推导任务预算。默认请求/工具调用上限为 24，较大显式授权可提高至 64；写入授权余量仍独立约束。预算触顶保留结果、标明 token 或步骤原因，由用户手动继续，不自动重试。这不是费用、余额或 provider 账单硬上限；领域工具保留各自子调用预算。
