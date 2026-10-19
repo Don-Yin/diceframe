@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { i18n } from '../src/i18n'
 
 const mocks = vi.hoisted(() => ({
@@ -60,8 +60,14 @@ async function render() {
 }
 
 describe('OverviewView loading recovery', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   beforeEach(() => {
     clearOverviewGamesCache()
+    localStorage.removeItem('diceframe:onboarding:dismissed:v1')
+    localStorage.removeItem('diceframe:onboarding:collapsed:v1')
     i18n.global.locale.value = 'zh-CN'
     mocks.api.mockReset()
     mocks.confirm.mockReset()
@@ -93,6 +99,102 @@ describe('OverviewView loading recovery', () => {
     expect(wrapper.get('[data-testid="overview-adventure-library"]').attributes('href')).toContain('/library')
     expect(wrapper.find('[data-testid="overview-open-join"]').exists()).toBe(false)
     expect(wrapper.findAll('button').some(button => button.text() === '加入游戏')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('places the beginner entry between the header and the recent adventure', async () => {
+    mocks.api.mockResolvedValue({ games: [{ game_key: 'web|guide|gm', world_name: 'Existing adventure', state: 'ended' }] })
+    const wrapper = await render()
+    const main = wrapper.get('.overview-main')
+    const children = Array.from(main.element.children)
+    const guide = wrapper.get('[data-testid="getting-started-collapsed"]')
+    expect(children.indexOf(guide.element)).toBeGreaterThan(children.indexOf(wrapper.get('.overview-hero').element))
+    expect(children.indexOf(guide.element)).toBeLessThan(children.indexOf(wrapper.get('[data-testid="overview-featured"]').element))
+    expect(mocks.api).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('offers an expanded beginner card only after the first archive load succeeds', async () => {
+    let resolve!: (value: unknown) => void
+    mocks.api.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    const wrapper = await render()
+    expect(wrapper.find('[data-testid="getting-started-card"]').exists()).toBe(false)
+    resolve({ games: [] })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="getting-started-card"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="overview-empty"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('can dismiss and reopen the beginner guide from the title action', async () => {
+    mocks.api.mockResolvedValue({ games: [] })
+    const wrapper = await render()
+    const openGuide = wrapper.get('[data-testid="overview-open-guide"]')
+    expect(wrapper.find('[data-testid="getting-started-card"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="getting-started-close"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="getting-started-card"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="getting-started-collapsed"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(openGuide.element)
+    wrapper.unmount()
+
+    const remounted = await render()
+    expect(remounted.find('[data-testid="getting-started-card"]').exists()).toBe(false)
+    expect(remounted.find('[data-testid="getting-started-collapsed"]').exists()).toBe(false)
+    await remounted.get('[data-testid="overview-open-guide"]').trigger('click')
+    await flushPromises()
+    expect(remounted.find('[data-testid="getting-started-card"]').exists()).toBe(true)
+    expect(remounted.find('[data-testid="getting-started-collapsed"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(remounted.get('[data-testid="getting-started-start"]').element)
+    remounted.unmount()
+  })
+
+  it('reopens a dismissed existing-save guide as a full card', async () => {
+    mocks.api.mockResolvedValue({ games: [{ game_key: 'web|guide|saved', world_name: 'Saved adventure', state: 'ended' }] })
+    const wrapper = await render()
+    expect(wrapper.find('[data-testid="getting-started-collapsed"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="getting-started-close"]').trigger('click')
+    expect(wrapper.find('[data-testid="getting-started-collapsed"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="overview-open-guide"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="getting-started-card"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="getting-started-collapsed"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(wrapper.get('[data-testid="getting-started-start"]').element)
+    wrapper.unmount()
+
+    const remounted = await render()
+    expect(remounted.find('[data-testid="getting-started-card"]').exists()).toBe(true)
+    expect(remounted.find('[data-testid="getting-started-collapsed"]').exists()).toBe(false)
+    remounted.unmount()
+  })
+
+  it('honors a reopen request made while the archive is loading', async () => {
+    localStorage.setItem('diceframe:onboarding:dismissed:v1', '1')
+    let resolve!: (value: unknown) => void
+    mocks.api.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    const wrapper = await render()
+    await wrapper.get('[data-testid="overview-open-guide"]').trigger('click')
+    expect(wrapper.find('[data-testid="getting-started-card"]').exists()).toBe(false)
+    resolve({ games: [{ game_key: 'web|guide|loading', world_name: 'Loaded adventure', state: 'ended' }] })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="getting-started-card"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="getting-started-collapsed"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps close and reopen usable when localStorage is unavailable', async () => {
+    const storagePrototype = Object.getPrototypeOf(localStorage) as Storage
+    vi.spyOn(storagePrototype, 'getItem').mockImplementation(() => { throw new Error('storage denied') })
+    vi.spyOn(storagePrototype, 'setItem').mockImplementation(() => { throw new Error('storage denied') })
+    mocks.api.mockResolvedValue({ games: [] })
+    const wrapper = await render()
+    await wrapper.get('[data-testid="getting-started-close"]').trigger('click')
+    expect(wrapper.find('[data-testid="getting-started-card"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="getting-started-collapsed"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="overview-open-guide"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="getting-started-card"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="getting-started-collapsed"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
