@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   agentStream: vi.fn(),
   confirm: vi.fn(),
+  resume: vi.fn(),
   review: vi.fn(),
   session: vi.fn(),
   authorize: vi.fn(),
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../src/api/assistant', () => ({
   streamAssistantAgent: mocks.agentStream,
   confirmAssistantAgent: mocks.confirm,
+  resumeAssistantAgent: mocks.resume,
   reviewAssistantAgent: mocks.review,
   getAssistantAgentSession: mocks.session,
   authorizeAssistantAgent: mocks.authorize,
@@ -26,6 +28,7 @@ describe('useAssistant request history', () => {
     mocks.agentStream.mockReset()
     mocks.agentStream.mockResolvedValue(undefined)
     mocks.confirm.mockReset()
+    mocks.resume.mockReset()
     mocks.review.mockReset()
     mocks.session.mockReset()
     mocks.authorize.mockReset()
@@ -248,6 +251,65 @@ describe('useAssistant request history', () => {
     await assistant.send('失败一步', 'zh-CN')
     await assistant.confirmApproval(true)
     expect(assistant.task.value).toMatchObject({ status: 'failed', completed_steps: 0, error: 'write failed' })
+  })
+
+  it('keeps a partial batch plan pending and resumes it through the dedicated endpoint', async () => {
+    const pending = {
+      approval_id: 'a-batch', plan_digest: 'digest-batch', tool: 'write_lorebook_entries', resumable: true,
+      execution_status: 'partial', execution_state: { report: { status: 'partial', changed_count: 2 } },
+      preview: { targets: [{ id: 'book-1', label: 'Book 1' }] },
+    }
+    mocks.agentStream.mockImplementationOnce(async (_messages: unknown, _locale: unknown, handlers: { onAgentEvent?: (event: string, payload: Record<string, unknown>) => void }) => {
+      handlers.onAgentEvent?.('session', { session_id: 's-batch' })
+      handlers.onAgentEvent?.('task', { status: 'approval_required', completed_steps: 0, total_steps: 1 })
+      handlers.onAgentEvent?.('approval', { approval_id: 'a-batch', plan_digest: 'digest-batch', tool: 'write_lorebook_entries', preview: pending.preview })
+    })
+    mocks.confirm.mockResolvedValueOnce({ ok: true, partial: true, pending })
+    mocks.resume.mockResolvedValueOnce({ ok: true, result: { status: 'completed' } })
+    const assistant = useAssistant()
+
+    await assistant.send('批量执行', 'zh-CN')
+    await assistant.confirmApproval(true)
+    expect(assistant.pendingApproval.value).toMatchObject({ approval_id: 'a-batch', resumable: true })
+    expect(assistant.task.value).toMatchObject({ status: 'paused' })
+
+    await assistant.resumeApproval()
+    expect(mocks.confirm).toHaveBeenCalledOnce()
+    expect(mocks.resume).toHaveBeenCalledWith('s-batch', 'a-batch', 'digest-batch')
+    expect(assistant.pendingApproval.value).toBeNull()
+  })
+
+  it('keeps the report and resumable plan after a failed resume', async () => {
+    const pending = {
+      approval_id: 'a-retry', plan_digest: 'digest-retry', tool: 'write_lorebook_entries', resumable: true,
+      execution_state: { report: { status: 'partial', changed_count: 1 } },
+    }
+    mocks.agentStream.mockImplementationOnce(async (_messages: unknown, _locale: unknown, handlers: { onAgentEvent?: (event: string, payload: Record<string, unknown>) => void }) => {
+      handlers.onAgentEvent?.('session', { session_id: 's-retry' })
+      handlers.onAgentEvent?.('approval', pending)
+    })
+    mocks.resume.mockRejectedValueOnce(new Error('resume offline'))
+    const assistant = useAssistant()
+    await assistant.send('重试批量', 'zh-CN')
+    await assistant.resumeApproval()
+    expect(mocks.confirm).not.toHaveBeenCalled()
+    expect(assistant.pendingApproval.value).toMatchObject({ approval_id: 'a-retry', execution_state: pending.execution_state })
+    expect(assistant.actionError.value).toBe('resume offline')
+  })
+
+  it('sends an explicit rejection for a paused plan even when a cached partial receipt exists', async () => {
+    const pending = { approval_id: 'a-cancel', plan_digest: 'digest-cancel', tool: 'write_lorebook_entries', resumable: true, execution_status: 'partial' }
+    mocks.agentStream.mockImplementationOnce(async (_messages: unknown, _locale: unknown, handlers: { onAgentEvent?: (event: string, payload: Record<string, unknown>) => void }) => {
+      handlers.onAgentEvent?.('session', { session_id: 's-cancel' })
+      handlers.onAgentEvent?.('approval', pending)
+    })
+    mocks.confirm.mockResolvedValueOnce({ ok: true, partial: true, pending }).mockResolvedValueOnce({ ok: true, cancelled: true })
+    const assistant = useAssistant()
+    await assistant.send('取消暂停批量', 'zh-CN')
+    await assistant.confirmApproval(true)
+    await assistant.confirmApproval(false)
+    expect(mocks.confirm).toHaveBeenNthCalledWith(2, 's-cancel', 'a-cancel', 'digest-cancel', false)
+    expect(assistant.pendingApproval.value).toBeNull()
   })
 
   it('does not send context for nested module routes', async () => {

@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import {
   confirmAssistantAgent,
+  resumeAssistantAgent,
   authorizeAssistantAgent,
   cancelAssistantAgent,
   getAssistantAgentSession,
@@ -171,7 +172,19 @@ function normaliseApproval(value: unknown): AgentApproval | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const record = value as Record<string, unknown>
   if (typeof record.approval_id !== 'string' || typeof record.plan_digest !== 'string' || typeof record.tool !== 'string') return null
-  const approval = { approval_id: record.approval_id, plan_digest: record.plan_digest, tool: record.tool, label: typeof record.label === 'string' ? record.label : undefined, arguments: record.arguments, expires_at: typeof record.expires_at === 'number' || typeof record.expires_at === 'string' ? record.expires_at : undefined, preview: record.preview, recovery_required: record.recovery_required === true }
+  const approval = {
+    approval_id: record.approval_id,
+    plan_digest: record.plan_digest,
+    tool: record.tool,
+    label: typeof record.label === 'string' ? record.label : undefined,
+    arguments: record.arguments,
+    expires_at: typeof record.expires_at === 'number' || typeof record.expires_at === 'string' ? record.expires_at : undefined,
+    preview: record.preview,
+    recovery_required: record.recovery_required === true,
+    resumable: record.resumable === true,
+    execution_status: typeof record.execution_status === 'string' ? record.execution_status : undefined,
+    execution_state: record.execution_state && typeof record.execution_state === 'object' && !Array.isArray(record.execution_state) ? record.execution_state as AgentApproval['execution_state'] : undefined,
+  }
   const invalid = approvalExpired(approval)
   return { ...approval, ...(invalid ? { expired: true } : {}) }
 }
@@ -325,14 +338,38 @@ function addResult(result: AgentConfirmResult, tool = '') {
 function updateTaskAfterApproval(result: AgentConfirmResult, approved: boolean) {
   const current = task.value
   if (!current || current.status !== 'approval_required') return
-  if (result.ok && approved) {
+  if (approved && result.pending) {
+    task.value = { ...current, status: result.pending.execution_status === 'cancelled' ? 'cancelled' : 'paused', error: undefined }
+  } else if (result.ok && approved && !result.partial) {
     task.value = { ...current, status: 'completed', completed_steps: current.completed_steps + 1 }
+  } else if (result.ok && approved) {
+    task.value = { ...current, status: result.pending?.execution_status || 'partial', error: undefined }
   } else if (result.ok && !approved) {
     task.value = { ...current, status: 'cancelled' }
   } else {
     const recovery = result && typeof result === 'object' && (result as AgentConfirmResult & { recovery_required?: boolean }).recovery_required === true
     task.value = { ...current, status: recovery ? 'recovery_required' : 'failed', ...(result.error ? { error: result.error } : {}) }
   }
+}
+
+function applyApprovalResult(result: AgentConfirmResult, approval: AgentApproval, approved: boolean) {
+  // A partial/cancelled execution keeps the signed plan available for an
+  // explicit resume. Rejections still clear it as the user asked.
+  if (!approved) {
+    pendingApproval.value = null
+  } else if (result.pending) {
+    pendingApproval.value = markDirtyApproval(normaliseApproval(result.pending))
+  } else if (result.partial) {
+    // The server contract should include pending for resumable partial work.
+    // Retain the current plan if an older server omits it so a receipt cannot
+    // make the task appear complete or discard the report.
+    pendingApproval.value = markDirtyApproval(approval)
+  } else {
+    pendingApproval.value = null
+  }
+  addResult(result, approval.tool)
+  updateTaskAfterApproval(result, approved)
+  actionError.value = result.ok || result.pending ? '' : result.error || 'Assistant action failed.'
 }
 function receiptResponse(receipt: AgentSession['receipts'][number]): AgentConfirmResult {
   if (receipt.response && typeof receipt.response.ok === 'boolean') return receipt.response
@@ -343,13 +380,12 @@ function receiptResponse(receipt: AgentSession['receipts'][number]): AgentConfir
 async function confirmApproval(approved = true): Promise<AgentConfirmResult | undefined> {
   const pending = pendingApproval.value; const currentSession = sessionId.value; if (!pending || !currentSession || actionBusy.value) return undefined
   if (approved && (pending.expired || pending.recovery_required)) return undefined
-  const receipt = receipts.value.find(item => item.approval_id === pending.approval_id && item.plan_digest === pending.plan_digest)
+  const receipt = approved
+    ? receipts.value.find(item => item.approval_id === pending.approval_id && item.plan_digest === pending.plan_digest)
+    : undefined
   if (receipt) {
     const recovered = receiptResponse(receipt)
-    pendingApproval.value = null
-    addResult(recovered, pending.tool)
-    updateTaskAfterApproval(recovered, approved)
-    actionError.value = recovered.ok ? '' : recovered.error || 'Assistant action failed.'
+    applyApprovalResult(recovered, pending, approved)
     return recovered
   }
   actionBusy.value = true; actionError.value = ''
@@ -357,9 +393,8 @@ async function confirmApproval(approved = true): Promise<AgentConfirmResult | un
   try {
     const result = await confirmAssistantAgent(currentSession, pending.approval_id, pending.plan_digest, approved)
     if (generation !== requestGeneration) return undefined
-    pendingApproval.value = null
-    if (result.ok) { if (approved) receipts.value.push({ approval_id: pending.approval_id, plan_digest: pending.plan_digest, result: result.result, response: result }); addResult(result, pending.tool); updateTaskAfterApproval(result, approved) }
-    else { addResult(result, pending.tool); updateTaskAfterApproval(result, approved); actionError.value = result.error || 'Assistant action failed.' }
+    if (result.ok && approved) receipts.value.push({ approval_id: pending.approval_id, plan_digest: pending.plan_digest, result: result.result, response: result })
+    applyApprovalResult(result, pending, approved)
     persist(); return result
   } catch (error: unknown) {
     if (generation !== requestGeneration) return undefined
@@ -370,10 +405,7 @@ async function confirmApproval(approved = true): Promise<AgentConfirmResult | un
         const receipt = receipts.value.find(item => item.approval_id === pending.approval_id && item.plan_digest === pending.plan_digest)
         if (receipt) {
           const recovered = receiptResponse(receipt)
-          pendingApproval.value = null
-          addResult(recovered, pending.tool)
-          updateTaskAfterApproval(recovered, approved)
-          actionError.value = recovered.ok ? '' : recovered.error || 'Assistant action failed.'
+          applyApprovalResult(recovered, pending, approved)
           return recovered
         }
       }
@@ -381,6 +413,29 @@ async function confirmApproval(approved = true): Promise<AgentConfirmResult | un
     actionError.value = error instanceof Error ? error.message : 'Assistant action failed.'; return undefined
   }
   finally { if (generation === requestGeneration) actionBusy.value = false }
+}
+async function resumeApproval(): Promise<AgentConfirmResult | undefined> {
+  const pending = pendingApproval.value
+  const currentSession = sessionId.value
+  if (!pending?.resumable || !currentSession || actionBusy.value) return undefined
+  const generation = requestGeneration
+  actionBusy.value = true
+  actionError.value = ''
+  try {
+    const result = await resumeAssistantAgent(currentSession, pending.approval_id, pending.plan_digest)
+    if (generation !== requestGeneration || sessionId.value !== currentSession) return undefined
+    applyApprovalResult(result, pending, true)
+    persist()
+    return result
+  } catch (error: unknown) {
+    if (generation !== requestGeneration || sessionId.value !== currentSession) return undefined
+    // Keep the signed plan and its report visible after a failed resume so the
+    // owner can retry or reject it explicitly.
+    actionError.value = error instanceof Error ? error.message : 'Assistant action failed.'
+    return undefined
+  } finally {
+    if (generation === requestGeneration && sessionId.value === currentSession) actionBusy.value = false
+  }
 }
 async function cancelApproval() { stop(); return confirmApproval(false) }
 async function reviewDraft(draftId: string, draft: unknown) {
@@ -422,4 +477,4 @@ async function loadConversation(nextMessages: AssistantMessage[], nextSessionId:
   resetRuntime(); messages.value = storedConversationMessages(nextMessages); saveSessionId(nextSessionId?.trim() || null); persist()
   await restoreSession()
 }
-export function useAssistant() { return { messages, streaming, status, sessionId, pendingApproval, drafts, navigation, actionBusy, actionError, authorization, task, authorizationBusy, authorizationError, send, stop, retryLast, clear, loadConversation, restoreSession, confirmApproval, cancelApproval, reviewDraft, saveDraft, invalidateApproval, authorize } }
+export function useAssistant() { return { messages, streaming, status, sessionId, pendingApproval, drafts, navigation, actionBusy, actionError, authorization, task, authorizationBusy, authorizationError, send, stop, retryLast, clear, loadConversation, restoreSession, confirmApproval, resumeApproval, cancelApproval, reviewDraft, saveDraft, invalidateApproval, authorize } }

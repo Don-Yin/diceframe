@@ -75,6 +75,9 @@ export interface AgentApproval {
   expires_at?: number | string
   recovery_required?: boolean
   expired?: boolean
+  resumable?: boolean
+  execution_status?: string
+  execution_state?: { report?: unknown; [key: string]: unknown }
   preview?: unknown
 }
 
@@ -95,6 +98,7 @@ export interface AgentConfirmResult {
   navigation?: { route: string; query?: Record<string, unknown> }
   cancelled?: boolean
   partial?: boolean
+  pending?: AgentApproval | null
   error?: string
 }
 
@@ -311,6 +315,18 @@ export function confirmAssistantAgent(
     approval_id: approvalId,
     plan_digest: planDigest,
     approved,
+  })
+}
+
+export function resumeAssistantAgent(
+  sessionId: string,
+  approvalId: string,
+  planDigest: string,
+): Promise<AgentConfirmResult> {
+  return agentJson<AgentConfirmResult>('/assistant/agent/resume', {
+    session_id: sessionId,
+    approval_id: approvalId,
+    plan_digest: planDigest,
   })
 }
 

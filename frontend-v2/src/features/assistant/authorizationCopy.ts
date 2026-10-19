@@ -9,6 +9,8 @@ export function assistantAuthorizationCopy(locale: string) {
     pendingApproval: zh ? '1 项待确认操作' : '1 action awaiting confirmation',
     reviewPending: zh ? '查看待确认操作' : 'Review pending action',
     continueTask: zh ? '继续任务' : 'Continue task',
+    resumeTargets: zh ? '继续未完成的目标' : 'Resume remaining targets',
+    resumeHint: zh ? '已完成目标会保留，继续只处理未完成目标。' : 'Completed targets are retained; resume only processes unfinished targets.',
     continueHint: zh ? '继续会开启新一轮预算；已过期或用完的授权仍需重新授予。' : 'Continuing starts a new budget window; expired or exhausted access must be granted again.',
     revoke: zh ? '撤回，改为建议' : 'Revoke, use suggestions',
     current: zh ? '当前页面对象' : 'Current page object',
@@ -17,7 +19,7 @@ export function assistantAuthorizationCopy(locale: string) {
     steps: zh ? '步骤上限' : 'Step budget',
     active: zh ? '已授权' : 'Authorized',
     mode: (value: string) => ({ suggest: zh ? '建议' : 'Suggest', routine: zh ? '自动处理日常' : 'Routine', task: zh ? '本次任务' : 'This task' }[value] || value),
-    taskStatus: (value: string) => ({ pending: zh ? '等待中' : 'Pending', running: zh ? '执行中' : 'Running', completed: zh ? '已完成' : 'Completed', cancelled: zh ? '已取消' : 'Cancelled', failed: zh ? '失败' : 'Failed', approval_required: zh ? '等待授权' : 'Approval required', recovery_required: zh ? '结果待核实' : 'Outcome uncertain', interrupted: zh ? '已中断' : 'Interrupted', budget_reached: zh ? '已达到预算' : 'Budget reached' }[value] || value),
+    taskStatus: (value: string) => ({ pending: zh ? '等待中' : 'Pending', running: zh ? '执行中' : 'Running', completed: zh ? '已完成' : 'Completed', cancelled: zh ? '已取消' : 'Cancelled', failed: zh ? '失败' : 'Failed', partial: zh ? '部分完成' : 'Partially completed', paused: zh ? '已暂停' : 'Paused', approval_required: zh ? '等待授权' : 'Approval required', recovery_required: zh ? '结果待核实' : 'Outcome uncertain', interrupted: zh ? '已中断' : 'Interrupted', budget_reached: zh ? '已达到预算' : 'Budget reached' }[value] || value),
     disabled: zh ? '当前服务器不支持 Agent 授权控制。' : 'This server does not support Agent access controls.',
     error: zh ? '授权失败' : 'Authorization failed',
     effect: (mode: string) => mode === 'suggest'

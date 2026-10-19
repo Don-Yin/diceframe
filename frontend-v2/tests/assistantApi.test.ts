@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { authorizeAssistantAgent, cancelAssistantAgent, confirmAssistantAgent, getAssistantAgentCapabilities, getAssistantAgentSession, reviewAssistantAgent, streamAssistantAgent, streamAssistantChat, type AssistantSource } from '../src/api/assistant'
+import { authorizeAssistantAgent, cancelAssistantAgent, confirmAssistantAgent, getAssistantAgentCapabilities, getAssistantAgentSession, resumeAssistantAgent, reviewAssistantAgent, streamAssistantAgent, streamAssistantChat, type AssistantSource } from '../src/api/assistant'
 
 const encoder = new TextEncoder()
 
@@ -105,6 +105,16 @@ describe('assistant SSE client', () => {
     await expect(reviewAssistantAgent('s-1', 'd-1', { name: 'x' })).resolves.toMatchObject({ draft_id: 'd-1' })
     await expect(getAssistantAgentSession('s-1')).resolves.toMatchObject({ session_id: 's-1' })
     expect(fetch).toHaveBeenCalledTimes(3)
+  })
+
+  it('resumes a prepared plan through the dedicated endpoint', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true, partial: true, pending: null }), { status: 200 })))
+
+    await expect(resumeAssistantAgent('s-1', 'a-1', 'sha256:digest')).resolves.toMatchObject({ partial: true })
+    expect(fetch).toHaveBeenCalledWith('/api/assistant/agent/resume', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ session_id: 's-1', approval_id: 'a-1', plan_digest: 'sha256:digest' }),
+    }))
   })
 
   it('uses server authorization and capability contracts', async () => {

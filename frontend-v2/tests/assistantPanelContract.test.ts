@@ -9,6 +9,7 @@ const send = vi.fn().mockResolvedValue(undefined)
 const messages = ref<AssistantMessage[]>([])
 const pendingApproval = ref<AgentApproval | null>(null)
 const confirmApproval = vi.fn()
+const resumeApproval = vi.fn()
 const navigation = ref<{ route: string; query?: Record<string, string> } | null>(null)
 const streaming = ref(false)
 
@@ -44,6 +45,7 @@ vi.mock('@/composables/useAssistant', () => ({
     clear: vi.fn(),
     restoreSession: vi.fn(),
     confirmApproval,
+    resumeApproval,
     cancelApproval: vi.fn(),
     reviewDraft: vi.fn(),
     saveDraft: vi.fn(),
@@ -61,6 +63,7 @@ describe('DF Assistant runtime log entry', () => {
     streaming.value = false
     localStorage.clear()
     confirmApproval.mockClear()
+    resumeApproval.mockClear()
   })
 
   it('offers a named page for confirmed results and drops it once there, without a "continue previous task" shortcut', async () => {
@@ -181,6 +184,20 @@ describe('DF Assistant runtime log entry', () => {
     expect(wrapper.get('[data-agent-approval]').isVisible()).toBe(false)
     expect(confirmApproval).not.toHaveBeenCalled()
     expect(pendingApproval.value?.approval_id).toBe('a'.repeat(32))
+    wrapper.unmount()
+  })
+
+  it('offers resume for a resumable batch plan and does not send another confirm', async () => {
+    pendingApproval.value = {
+      approval_id: 'batch-a', plan_digest: 'sha256:batch', tool: 'write_lorebook_entries', resumable: true,
+      execution_status: 'partial', execution_state: { report: { status: 'partial', changed_count: 1 } },
+      preview: { targets: [{ id: 'book-1', label: '阿卡姆疑云', total: 2, changed_count: 1 }] },
+    }
+    const wrapper = mount(AssistantPanel, { attachTo: document.body })
+    await wrapper.get('[data-testid="agent-resume"]').trigger('click')
+    expect(resumeApproval).toHaveBeenCalledOnce()
+    expect(confirmApproval).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="agent-execution-summary"]').text()).toContain('阿卡姆疑云')
     wrapper.unmount()
   })
 })
