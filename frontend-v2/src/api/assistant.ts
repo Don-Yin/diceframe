@@ -46,6 +46,10 @@ export interface AgentCapability {
   instructions?: string
   requires_confirmation?: boolean
 }
+export interface AgentCapabilityDomain {
+  domain: string
+  count?: number
+}
 
 export interface AgentDraftReview {
   ok?: boolean
@@ -71,6 +75,9 @@ export interface AgentApproval {
   expires_at?: number | string
   recovery_required?: boolean
   expired?: boolean
+  resumable?: boolean
+  execution_status?: string
+  execution_state?: { report?: unknown; [key: string]: unknown }
   preview?: unknown
 }
 
@@ -91,6 +98,7 @@ export interface AgentConfirmResult {
   navigation?: { route: string; query?: Record<string, unknown> }
   cancelled?: boolean
   partial?: boolean
+  pending?: AgentApproval | null
   error?: string
 }
 
@@ -310,6 +318,18 @@ export function confirmAssistantAgent(
   })
 }
 
+export function resumeAssistantAgent(
+  sessionId: string,
+  approvalId: string,
+  planDigest: string,
+): Promise<AgentConfirmResult> {
+  return agentJson<AgentConfirmResult>('/assistant/agent/resume', {
+    session_id: sessionId,
+    approval_id: approvalId,
+    plan_digest: planDigest,
+  })
+}
+
 export function reviewAssistantAgent(
   sessionId: string,
   draftId: string,
@@ -326,10 +346,11 @@ export function getAssistantAgentSession(sessionId: string): Promise<AgentSessio
   return agentJson<AgentSession>(`/assistant/agent/session/${encodeURIComponent(sessionId)}`)
 }
 
-export function getAssistantAgentCapabilities(query: { q?: string; domain?: string } = {}): Promise<{ ok: true; revision: string; capabilities: AgentCapability[]; total?: number }> {
+export function getAssistantAgentCapabilities(query: { q?: string; domain?: string; offset?: number } = {}): Promise<{ ok: true; revision: string; capabilities: AgentCapability[]; domains?: AgentCapabilityDomain[]; offset?: number; has_more?: boolean; total?: number; discovery_hint?: string }> {
   const params = new URLSearchParams()
   if (query.q?.trim()) params.set('q', query.q.trim())
   if (query.domain?.trim()) params.set('domain', query.domain.trim())
+  if (typeof query.offset === 'number' && query.offset > 0) params.set('offset', String(Math.floor(query.offset)))
   const suffix = params.toString() ? `?${params.toString()}` : ''
   return agentJson(`/assistant/agent/capabilities${suffix}`)
 }

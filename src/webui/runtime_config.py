@@ -23,6 +23,7 @@ from src.ai_providers import (
     normalize_ai_providers,
     provider_secret_key,
 )
+from src.generation_limits import DEFAULT_TEXT_GEN_MAX_TOKENS
 from src.migrations.config import (
     DEFAULT_NARRATIVE_MAX_TOKENS,
     GENERATION_DEFAULTS_VERSION,
@@ -336,7 +337,7 @@ class ConfigStore:
             ),
             "text_gen_max_tokens": int(
                 env.get("TRPG_TEXT_GEN_MAX_TOKENS")
-                or saved.get("text_gen_max_tokens", 4096)
+                or saved.get("text_gen_max_tokens", DEFAULT_TEXT_GEN_MAX_TOKENS)
             ),
             "assistant_agent_max_tokens": int(
                 env.get("TRPG_ASSISTANT_AGENT_MAX_TOKENS")

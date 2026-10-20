@@ -31,15 +31,18 @@ def current_authorization(data, now):
     return deepcopy(value)
 
 
-def permits(grant, action, arguments):
-    if not grant or action.effective_effect in {'destructive', 'external'}:
+def permits(grant, action, arguments, assessment=None):
+    effect = assessment.effect if assessment is not None else action.effective_effect
+    if (not grant or effect in {'destructive', 'external'}
+            or (assessment is not None and assessment.requires_approval)):
         return False
     if grant['domains'] and action.domain not in grant['domains']:
         return False
     scope = grant['scope']
+    targets = assessment.targets if assessment is not None and assessment.targets else (arguments,)
     if scope:
-        if any(key not in arguments or scope[key] != arguments[key] for key in scope):
+        if any(any(key not in target or scope[key] != target[key] for key in scope) for target in targets):
             return False
     if grant['mode'] == 'routine':
-        return action.automatic and action.effective_effect == 'write'
-    return grant['mode'] == 'task' and action.effective_effect in {'write', 'disclosure'}
+        return action.automatic and effect == 'write'
+    return grant['mode'] == 'task' and effect in {'write', 'disclosure'}

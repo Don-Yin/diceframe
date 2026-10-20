@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from src.engine.modules import economy_state
 from src.assistant_agent_limits import DEFAULT_TASK_MAX_TOKENS
+from src.generation_limits import DEFAULT_TEXT_GEN_MAX_TOKENS
 
 import asyncio
 import json
@@ -150,7 +151,7 @@ class WebAPI:
                  handler=None, llm_client=None, worlds_dir: Path | None = None,
                  adventures_dir: Path | None = None,
                  character_gen_max_tokens: int = 4096,
-                 text_gen_max_tokens: int = 4096, plugin_host=None, hub_client=None,
+                 text_gen_max_tokens: int = DEFAULT_TEXT_GEN_MAX_TOKENS, plugin_host=None, hub_client=None,
                  speech_service=None, asr_service=None, imagegen_service=None,
                  ruleset_registry: RulesetRuntimeRegistry | None = None,
                  content_cache_dir: Path | None = None,
@@ -999,6 +1000,10 @@ class WebAPI:
             list_cards=self.list_character_cards, update_card=self.update_character_card,
             adventure_detail=self.adventure_detail, get_rule=self.get_rule_template,
             write_entries_with_recovery=self._content_recovery.write_entries,
+            write_book_visibility_with_recovery=self._content_recovery.write_book_visibility,
+            preview_book_visibility_with_recovery=self._content_recovery.preview_book_visibility,
+            book_snapshot=self._lore.snapshot_lorebook,
+            book_visibility_receipt=self._content_recovery.read_book_visibility_receipt,
             write_world_with_recovery=self._metadata_recovery.write_world,
             write_card_with_recovery=self._metadata_recovery.write_card,
             world_snapshot=world_snapshot, card_snapshot=card_snapshot,
@@ -1279,8 +1284,11 @@ class WebAPI:
     def assistant_agent_session(self, owner, session_id):
         return self._assistant_agent.snapshot(owner, session_id)
 
-    def assistant_agent_capabilities(self, owner, query='', domain=''):
-        return self._assistant_agent.capabilities(owner, query, domain)
+    def assistant_agent_capabilities(self, owner, query='', domain='', offset=0):
+        return self._assistant_agent.capabilities(owner, query, domain, offset)
+
+    async def assistant_agent_resume(self, owner, session_id, approval_id, plan_digest):
+        return await self._assistant_agent.resume(owner, session_id, approval_id, plan_digest)
 
     def assistant_agent_authorize(self, owner, session_id, mode, scope, domains, max_steps):
         return self._assistant_agent.authorize(owner, session_id, mode, scope, domains, max_steps)

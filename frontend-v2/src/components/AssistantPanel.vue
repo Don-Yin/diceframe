@@ -10,6 +10,7 @@ import { useAssistant } from '@/composables/useAssistant'
 import { useAssistantWorkspace } from '@/composables/useAssistantWorkspace'
 import { renderSafeMarkdown } from '@/utils/markdown'
 import AgentTaskCard from '@/components/assistant/AgentTaskCard.vue'
+import AgentExecutionSummary from '@/components/assistant/AgentExecutionSummary.vue'
 import AgentAuthorizationPanel from '@/components/assistant/AgentAuthorizationPanel.vue'
 import AssistantAvatar, { type AssistantAvatarMood } from '@/components/assistant/AssistantAvatar.vue'
 import { loadAssistantVoiceConfig, useAssistantVoice } from '@/composables/useAssistantVoice'
@@ -27,7 +28,7 @@ import { generatedImageUrl } from '@/api/generatedImages'
 const props = withDefaults(defineProps<{ expanded?: boolean; wide?: boolean; reviewRequest?: number }>(), { expanded: false, wide: false, reviewRequest: 0 })
 const emit = defineEmits<{ close: []; toggleExpanded: [] }>()
 const { t, locale } = useLocale()
-const { messages, streaming, send, stop, retryLast, pendingApproval, drafts, status, navigation, actionBusy, actionError, confirmApproval, cancelApproval, reviewDraft, saveDraft, invalidateApproval, authorization, task, authorizationBusy, authorizationError, authorize } = useAssistant()
+const { messages, streaming, send, stop, retryLast, pendingApproval, drafts, status, navigation, actionBusy, actionError, confirmApproval, resumeApproval, cancelApproval, reviewDraft, saveDraft, invalidateApproval, authorization, task, authorizationBusy, authorizationError, authorize } = useAssistant()
 const draftList = computed(() => Object.values(drafts.value))
 const eventList = computed(() => messages.value.flatMap(message => message.events || []))
 const agentCopy = computed(() => assistantCopy(locale.value))
@@ -118,6 +119,7 @@ const hasTasks = computed(() => draftList.value.length > 0 || pendingApproval.va
 const workspaceVisible = computed(() => hasTasks.value || (streaming.value && Boolean(status.value)) || props.expanded)
 const workspaceStatus = computed(() => {
   if (actionError.value || pendingApproval.value?.expired || pendingApproval.value?.recovery_required) return workspaceCopy.value.attention
+  if (pendingApproval.value?.resumable) return assistantAuthorizationCopy(locale.value).taskStatus(pendingApproval.value.execution_status || 'paused')
   if (pendingApproval.value) return agentCopy.value.statusApproval
   if (streaming.value || actionBusy.value) return workspaceCopy.value.working
   return draftList.value.length ? workspaceCopy.value.drafts(draftList.value.length) : agentCopy.value.statusIdle
@@ -458,7 +460,7 @@ function toggleTaskWorkspace() {
               class="assistant-bubble"
               :class="message.role"
             >
-              <span v-if="pendingApproval && index === messages.length - 1 && !message.content">{{ agentCopy.statusApproval }}</span>
+              <span v-if="pendingApproval && index === messages.length - 1 && !message.content">{{ pendingApproval.resumable ? assistantAuthorizationCopy(locale).resumeHint : agentCopy.statusApproval }}</span>
               <span
                 v-else-if="streaming && index === messages.length - 1 && !message.content"
                 class="assistant-thinking"
@@ -508,6 +510,11 @@ function toggleTaskWorkspace() {
                   alt="Generated result"
                   class="assistant-result-image"
                 >
+                <AgentExecutionSummary
+                  v-if="event.payload.tool !== 'navigate'"
+                  :result="event.payload.result"
+                  :locale="locale"
+                />
                 <details v-if="event.payload.tool !== 'navigate'" class="assistant-action-details">
                   <summary>{{ workspaceCopy.details }}</summary>
                   <pre>{{ eventResult(event.payload.result, true) }}</pre>
@@ -540,7 +547,7 @@ function toggleTaskWorkspace() {
         </button>
         <div :id="workspaceId" ref="tasksEl" v-show="!workspaceIsCollapsed" class="assistant-workspace-body">
           <p v-if="!hasTasks" class="assistant-tasks-empty">{{ agentCopy.workspaceHint }}</p>
-          <div v-if="pendingApproval || (streaming && status)" class="assistant-status" role="status">{{ agentCopy.status }}: {{ pendingApproval ? agentCopy.statusApproval : statusText(status) }}</div>
+          <div v-if="pendingApproval || (streaming && status)" class="assistant-status" role="status">{{ agentCopy.status }}: {{ pendingApproval ? (pendingApproval.resumable ? assistantAuthorizationCopy(locale).taskStatus(pendingApproval.execution_status || 'paused') : agentCopy.statusApproval) : statusText(status) }}</div>
 
           <AgentTaskCard v-for="task in draftList" :key="task.draft_id" :draft="task" :busy="actionBusy" :streaming="streaming" @edit="invalidateApproval" @review="reviewDraft($event.draft_id, $event.draft)" @save="saveDraftLocalized" />
 
@@ -560,12 +567,14 @@ function toggleTaskWorkspace() {
             <span>{{ toolLabel(pendingApproval.tool) }}</span>
             <strong v-if="approvalTarget">{{ agentCopy.target }}: {{ approvalTarget }}</strong>
             <span v-if="pendingApproval.expired || pendingApproval.recovery_required" class="assistant-approval-invalid">{{ agentCopy.approvalInvalid }}</span>
+            <AgentExecutionSummary :approval="pendingApproval" :locale="locale" />
             <details v-if="pendingApproval.preview || pendingApproval.arguments">
               <summary>{{ agentCopy.details }}</summary>
               <pre>{{ eventResult(pendingApproval.preview || pendingApproval.arguments, true) }}</pre>
             </details>
             <div class="assistant-approval-actions">
-              <NButton size="small" type="primary" :loading="actionBusy" :disabled="actionBusy || pendingApproval.expired || pendingApproval.recovery_required" @click="confirmApproval(true)">{{ agentCopy.approve }}</NButton>
+              <NButton v-if="!pendingApproval.resumable" size="small" type="primary" :loading="actionBusy" :disabled="actionBusy || pendingApproval.expired || pendingApproval.recovery_required" @click="confirmApproval(true)">{{ agentCopy.approve }}</NButton>
+              <NButton v-else size="small" type="primary" data-testid="agent-resume" :loading="actionBusy" :disabled="actionBusy || pendingApproval.expired || pendingApproval.recovery_required" @click="resumeApproval">{{ assistantAuthorizationCopy(locale).resumeTargets }}</NButton>
               <NButton size="small" quaternary :loading="actionBusy" :disabled="actionBusy" @click="cancelApproval">{{ agentCopy.cancel }}</NButton>
             </div>
           </article>
@@ -606,7 +615,7 @@ function toggleTaskWorkspace() {
       </NButton>
       <span v-if="voiceErrorText" class="assistant-composer-hint assistant-voice-error" role="alert">{{ voiceErrorText }}</span>
       <span v-else-if="speaking" class="assistant-composer-hint"><button type="button" class="assistant-stop-speaking" @click="voice.stopSpeaking()">{{ voiceCopy.stopSpeaking }}</button></span>
-      <span v-else class="assistant-composer-hint">{{ pendingApproval ? `${agentCopy.statusApproval} · ${toolLabel(pendingApproval.tool)}` : t('assistantInputHint') }}</span>
+      <span v-else class="assistant-composer-hint">{{ pendingApproval ? `${pendingApproval.resumable ? assistantAuthorizationCopy(locale).taskStatus(pendingApproval.execution_status || 'paused') : agentCopy.statusApproval} · ${toolLabel(pendingApproval.tool)}` : t('assistantInputHint') }}</span>
     </footer>
   </section>
 </template>

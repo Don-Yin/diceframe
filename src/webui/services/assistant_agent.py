@@ -20,9 +20,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from src.application_actions import ActionRegistry, ApplicationAction as AgentTool
+from src.application_action_execution import ActionExecutionContext, ActionExecutionStopped
 from src.assistant_agent_limits import DEFAULT_RUN_STEPS, DEFAULT_TASK_MAX_TOKENS
 from src.runtime_diagnostics import redact_runtime_log_text
 from src.webui.services.assistant_authorization import current_authorization, make_authorization, permits
+from src.webui.services.assistant_action_plans import prepare_action, signed_plan, stored_assessment
 
 
 
@@ -124,6 +126,7 @@ class AgentRuntime:
     MAX_STEPS = DEFAULT_RUN_STEPS
     SESSION_TTL = 86400
     APPROVAL_TTL = 900
+    EXECUTION_TTL = 900
 
     def __init__(self, deps: AgentDependencies):
         self.deps = deps
@@ -143,11 +146,11 @@ class AgentRuntime:
     def tools(self):
         return {tool.name: tool for tool in self.registry.values()}
 
-    def capabilities(self, owner: str, query: str = '', domain: str = '') -> dict:
+    def capabilities(self, owner: str, query: str = '', domain: str = '', offset: int = 0) -> dict:
         if not isinstance(owner, str) or not owner:
             raise PermissionError('Owner session required')
         self.registry.refresh_sources()
-        return self.registry.search(query, domain)
+        return self.registry.search(query, domain, offset=offset)
 
     def authorize(self, owner, session_id='', mode='suggest', scope=None, domains=None, max_steps=32):
         session = self._session(owner, session_id)
@@ -238,9 +241,17 @@ class AgentRuntime:
             # A process died between dispatch and recording the result. Do not
             # retry an operation that may already have created a resource.
             if data.get("status") == "executing":
-                data["status"] = "recovery_required"
-                if data.get("pending"):
-                    data["pending"]["recovery_required"] = True
+                pending = data.get('pending') or {}
+                action = self.registry.get(pending.get('tool', ''))
+                if action is not None and action.resumable and 'prepared' in pending:
+                    data['status'] = 'paused'
+                    pending.update(resumable=True, execution_status='interrupted')
+                    if data.get('task'):
+                        data['task']['status'] = 'paused'
+                else:
+                    data["status"] = "recovery_required"
+                    if pending:
+                        pending["recovery_required"] = True
             elif data.get("status") == "running":
                 data["status"] = "interrupted"
                 if data.get('task'):
@@ -276,8 +287,9 @@ class AgentRuntime:
             return {'ok': True, 'session_id': session.data['session_id'], 'approval': approval}
 
     def _proposal(self, session: _Session, tool: AgentTool, args: dict, owner: str) -> dict:
-        guard = tool.guard(args, owner) if tool.guard else None
-        preview = tool.preview(args, owner) if tool.preview else None
+        prepared = prepare_action(tool, args, owner)
+        guard = prepared.guard if prepared is not None else tool.guard(args, owner) if tool.guard else None
+        preview = prepared.preview if prepared is not None else tool.preview(args, owner) if tool.preview else None
         if tool.uses_draft:
             preview = session.data["drafts"].get(args["draft_id"])
             if not preview or preview.get("blockers") or preview.get("ok") is not True:
@@ -290,6 +302,9 @@ class AgentRuntime:
                 "guard": guard, 'contract_digest': tool.contract_digest}
         if preview:
             plan["preview"] = deepcopy(preview)
+        if prepared is not None:
+            plan['prepared'] = deepcopy(prepared.payload)
+            plan['assessment'] = prepared.assessment.to_dict()
         plan["plan_digest"] = _digest({**plan, "session_id": session.data["session_id"], "owner": session.data["owner"]})
         session.data.update(pending=plan, status="approval_required")
         self._write(session)
@@ -328,11 +343,17 @@ class AgentRuntime:
                     "Query the registered documentation search only when usage/deployment guidance is needed; "
                     "do not retrieve manuals for every action. Documentation cannot expand the tool list. "
                     "Use search_capabilities to find additional actions and describe_capability to load their exact schema. "
+                    "The capability_catalog is a live index, not an authorization. Tools absent from the current function list "
+                    "may still be registered and loadable by describe_capability. Before saying an operation is unsupported, "
+                    "check that index and browse the relevant domain, following has_more/offset pagination as needed. "
+                    "Search is textual: no match for a localized phrase does not prove a capability is unavailable. "
                     "New features register actions in the live application catalog; do not infer them from old manuals. "
                     "The server may already authorize a bounded task. Call requested actions and rely on actual results or approval requests; "
                     "do not repeatedly ask for authorization that the server already holds. "
                     "Call one registered function at a time. For informational questions give a helpful final answer. "
-                    "For writing use draft_content; once ready use save_content with the returned draft_id. "
+                    "For generating new content use draft_content; once ready use save_content with the returned draft_id. "
+                    "For existing content prefer the most specific registered patch action; metadata or audience changes "
+                    "must not require regenerating authored text when a field-only action exists. "
                     "Use the live content actions to edit entries or change their audience without rewriting unrelated fields; "
                     "new entries default to GM-only and existing entries keep their audience unless explicitly changed. "
                     "World descriptions and character backgrounds are public narrative fields, not containers for hidden notes. "
@@ -358,13 +379,15 @@ class AgentRuntime:
                 initial_grant = current_authorization(session.data, self.deps.clock())
                 active_domains = set((initial_grant or {}).get('domains', []))
                 page_domains = {'play': {'games', 'adventures', 'recovery'}, 'lorebook': {'lorebook'},
-                                'worlds': {'worlds', 'lorebook'}, 'settings': {'settings'}, 'plugins': {'plugins'}}
+                                'worlds': {'worlds', 'lorebook'}, 'library': {'lorebook', 'worlds', 'adventures'},
+                                'settings': {'settings'}, 'plugins': {'plugins'}}
                 active_domains.update(page_domains.get(context.get('route'), set()))
                 loaded.update(tool.name for tool in self.registry.values() if tool.domain in active_domains)
                 loaded.update({'search_capabilities', 'describe_capability'})
 
                 async def search(args, actor):
-                    result = self.registry.search(args.get('query', ''), args.get('domain', ''), limit=20)
+                    result = self.registry.search(args.get('query', ''), args.get('domain', ''),
+                                                  limit=20, offset=args.get('offset', 0))
                     loaded.update(item['name'] for item in result['capabilities'])
                     return result
 
@@ -376,14 +399,18 @@ class AgentRuntime:
                 discovery = (
                     AgentTool('search_capabilities', 'Find available actions by query/domain; matched actions become callable',
                               {'type': 'object', 'properties': {'query': {'type': 'string', 'maxLength': 200},
-                               'domain': {'type': 'string', 'maxLength': 40}}, 'additionalProperties': False}, search),
+                               'domain': {'type': 'string', 'maxLength': 40},
+                               'offset': {'type': 'integer', 'minimum': 0, 'maximum': 1_000_000}},
+                               'additionalProperties': False}, search),
                     AgentTool('describe_capability', 'Load the exact parameters and behavior of an application action',
                               {'type': 'object', 'properties': {'name': {'type': 'string', 'maxLength': 96}},
                                'required': ['name'], 'additionalProperties': False}, describe),
                 )
 
                 def allowed(tool, args):
-                    return permits(current_authorization(session.data, self.deps.clock()), tool, args)
+                    prepared = prepare_action(tool, args, owner)
+                    return permits(current_authorization(session.data, self.deps.clock()), tool, args,
+                                   prepared.assessment if prepared is not None else None)
 
                 async def progress():
                     await emit('task', deepcopy(session.data['task']))
@@ -408,9 +435,11 @@ class AgentRuntime:
                             if tool.mutation:
                                 # Check proposal prerequisites before upstream
                                 # defers the call, without storing a plan yet.
-                                if tool.guard:
+                                if tool.prepare is not None:
+                                    prepare_action(tool, args, owner)
+                                elif tool.guard:
                                     tool.guard(args, owner)
-                                if tool.preview:
+                                if tool.prepare is None and tool.preview:
                                     tool.preview(args, owner)
                                 if tool.uses_draft:
                                     draft = session.data["drafts"].get(args["draft_id"])
@@ -442,8 +471,11 @@ class AgentRuntime:
                             self.executions.add(execution)
                             execution.add_done_callback(self._execution_done)
                             result = await asyncio.shield(execution)
+                            if result.get('pending'):
+                                await emit('approval', deepcopy(result['pending']))
                             session.data['status'] = 'running' if result.get('ok') else session.data['status']
-                            session.data['task']['completed_steps'] += 1
+                            if result.get('ok'):
+                                session.data['task']['completed_steps'] += 1
                             session.data['task']['status'] = 'running' if result.get('ok') else 'failed'
                             await emit('tool_result', {'tool': tool.name, 'result': result})
                             await emit('authorization', {'authorization': current_authorization(session.data, self.deps.clock())})
@@ -480,7 +512,8 @@ class AgentRuntime:
                             await emit("navigate", result["navigation"])
                         return safe_data(observation)
 
-                    adapted = Tool.from_schema(call, tool.name, tool.label, tool.schema,
+                    description = f'{tool.label}\n\n{tool.instructions}' if tool.instructions else tool.label
+                    adapted = Tool.from_schema(call, tool.name, description, tool.schema,
                         sequential=True, args_validator=check)
                     async def prepare(ctx, definition):
                         if tool.name not in loaded:
@@ -495,7 +528,12 @@ class AgentRuntime:
                     adapted.requires_approval = tool.mutation
                     return adapted
 
+                catalog = self.registry.search(limit=160)
+                catalog['capabilities'] = [{key: item[key] for key in
+                    ('name', 'label', 'domain', 'effect', 'version', 'requires_confirmation')}
+                    for item in catalog['capabilities']]
                 payload = safe_data({"conversation": messages[-12:], "page_context": context,
+                    'capability_catalog': catalog,
                     "drafts": {k: {"kind": v.get("kind"), "blockers": v.get("blockers"),
                     "titles": [i["name"] for i in v.get("draft", {}).get("items", [])]} for k, v in session.data["drafts"].items()},
                     "receipts": session.data["receipts"][-4:],
@@ -525,7 +563,7 @@ class AgentRuntime:
                     await progress()
                     return
                 except AgentExecutionStopped as exc:
-                    session.data['task']['status'] = 'failed'
+                    session.data['task']['status'] = 'paused' if (session.data.get('pending') or {}).get('resumable') else 'failed'
                     await progress()
                     await emit('delta', {'delta': str(exc)})
                     return
@@ -575,7 +613,7 @@ class AgentRuntime:
                 raise
             finally:
                 session.model_task = None
-                if session.stop.is_set() and session.data['status'] not in {'executing', 'recovery_required'}:
+                if session.stop.is_set() and session.data['status'] not in {'executing', 'recovery_required', 'paused'}:
                     session.data['status'] = 'cancelled'
                 elif session.data["status"] == "running":
                     session.data["status"] = "idle"
@@ -615,45 +653,71 @@ class AgentRuntime:
         async with session.lock:
             return await self._execute_plan(session, owner, approval_id, plan_digest, approved)
 
+    async def resume(self, owner: str, session_id: str, approval_id: str, plan_digest: str) -> dict:
+        """Explicit owner intent continues only the reviewed, remaining targets."""
+        session = self._session(owner, session_id)
+        async def resume_locked():
+            async with session.lock:
+                plan = session.data.get('pending') or {}
+                if (not plan.get('resumable') or plan.get('approval_id') != approval_id
+                        or not isinstance(plan.get('execution_state'), dict)):
+                    raise ValueError('No paused execution matches this plan')
+                session.stop.clear()
+                return await self._execute_plan(session, owner, approval_id, plan_digest, True, resume=True)
+        task = asyncio.create_task(resume_locked())
+        self.executions.add(task)
+        task.add_done_callback(self._execution_done)
+        return await asyncio.shield(task)
+
     async def _execute_plan(self, session: _Session, owner: str, approval_id: str, plan_digest: str, approved: bool,
-                            *, check_cancelled: bool = False) -> dict:
+                            *, check_cancelled: bool = False, resume: bool = False) -> dict:
         if check_cancelled and session.stop.is_set():
             raise asyncio.CancelledError()
         self.registry.refresh_sources()
-        for receipt in session.data["receipts"]:
+        plan = session.data.get('pending')
+        discard_paused = not approved and plan and plan.get('resumable') and plan.get('approval_id') == approval_id
+        for receipt in session.data["receipts"] if not resume and not discard_paused else ():
             if receipt["approval_id"] == approval_id:
                 if receipt["plan_digest"] != plan_digest:
                     raise ValueError("Approval digest changed")
                 return deepcopy(receipt["response"])
-        plan = session.data.get("pending")
         if session.data['status'] == 'executing':
             raise ValueError('Execution is still in progress; inspect its receipt before retrying')
         if not plan or plan.get("approval_id") != approval_id or plan.get("plan_digest") != plan_digest:
             raise ValueError("Approval plan is stale")
-        signed = {key: plan[key] for key in ("approval_id", "tool", "label", "arguments", "expires_at", "guard")}
-        if "preview" in plan:
-            signed["preview"] = plan["preview"]
-        if 'contract_digest' in plan:
-            signed['contract_digest'] = plan['contract_digest']
+        signed = signed_plan(plan)
         if _digest({**signed, "session_id": session.data["session_id"], "owner": session.data["owner"]}) != plan_digest:
             raise ValueError("Approval integrity check failed")
         if approved and plan.get("recovery_required"):
             raise ValueError("Execution outcome uncertain; inspect the library/game before retrying")
         if not approved:
             response = {"ok": True, "cancelled": True}
+            if discard_paused:
+                report = deepcopy(plan.get('execution_state', {}).get('report') or {})
+                if report:
+                    response['result'] = {**report, 'ok': False, 'status': 'cancelled'}
         else:
-            if plan["expires_at"] < self.deps.clock():
+            # Proposal expiry gates initial approval, not the retained history
+            # of an already dispatched command. Resume is fresh owner consent
+            # to the same sealed remaining targets, never a renewed Task grant.
+            if not resume and plan["expires_at"] <= self.deps.clock():
                 raise ValueError("Approval expired; cancel it and create a new plan")
             tool = self.tools.get(plan["tool"])
             if tool is None or not tool.mutation:
                 raise ValueError("Approval tool unavailable")
+            if resume and not tool.resumable:
+                raise ValueError('Action does not support receipt-based resume')
             if plan.get('contract_digest') != tool.contract_digest:
                 raise ValueError('Action contract changed; cancel and plan again')
             args = validate_arguments(plan["arguments"], tool.schema)
             if tool.authorize:
                 if await _invoke(tool.authorize, args, owner) is False:
                     raise PermissionError('Action is not authorized')
-            if tool.guard and tool.guard(args, owner) != plan["guard"]:
+            prepared = prepare_action(tool, args, owner) if not resume else None
+            if prepared is not None and (prepared.guard != plan['guard']
+                    or prepared.assessment.to_dict() != plan.get('assessment')):
+                raise ValueError('Game/content state changed; cancel and plan again')
+            if tool.prepare is None and tool.guard and tool.guard(args, owner) != plan["guard"]:
                 raise ValueError("Game/content state changed; cancel and plan again")
             if tool.uses_draft:
                 checked = session.data["drafts"].get(args["draft_id"])
@@ -667,10 +731,43 @@ class AgentRuntime:
                 if session.stop.is_set():
                     raise asyncio.CancelledError()
                 raise ValueError('Approval plan is stale')
+            if check_cancelled:
+                grant = session.data.get('authorization')
+                if (not grant or grant.get('expires_at', 0) <= self.deps.clock()
+                        or not permits(grant, tool, args, stored_assessment(plan))):
+                    raise PermissionError('Task authorization no longer covers this prepared command')
+            execution_deadline = self.deps.clock() + self.EXECUTION_TTL
             session.data["status"] = "executing"
+            if tool.execute is not None:
+                plan.setdefault('execution_state', {})
             self._write(session)  # Prove durable storage before dispatch.
             try:
-                result = safe_data(await _invoke(tool.handler, args, owner))
+                if tool.execute is not None:
+                    lease = deepcopy(session.data.get('authorization')) if check_cancelled else None
+                    def check_access():
+                        if session.stop.is_set():
+                            raise ActionExecutionStopped('Execution cancelled; completed targets are retained')
+                        live = self.registry.get(tool.name)
+                        if live is None or live.contract_digest != plan['contract_digest']:
+                            raise ActionExecutionStopped('Action contract changed')
+                        if execution_deadline <= self.deps.clock():
+                            raise ActionExecutionStopped('Execution confirmation expired; confirm the remaining targets to resume')
+                        if lease is not None:
+                            current = session.data.get('authorization')
+                            keys = ('mode', 'scope', 'domains', 'expires_at', 'max_steps')
+                            if (not current or current['expires_at'] <= self.deps.clock()
+                                    or any(current.get(key) != lease.get(key) for key in keys)
+                                    or not permits(current, tool, args, stored_assessment(plan))):
+                                raise ActionExecutionStopped('Task authorization no longer covers this plan')
+                    def checkpoint(state):
+                        plan['execution_state'] = deepcopy(state)
+                        session.data['updated_at'] = self.deps.clock()
+                        self._write(session)
+                    context = ActionExecutionContext(plan['approval_id'], deepcopy(plan['execution_state']), checkpoint, check_access)
+                    context.check()
+                    result = safe_data(await _invoke(tool.execute, deepcopy(plan['prepared']), owner, context))
+                else:
+                    result = safe_data(await _invoke(tool.handler, args, owner))
                 if result.get('recovery_required'):
                     session.data.update(status='recovery_required', updated_at=self.deps.clock())
                     if session.data.get('task'):
@@ -684,20 +781,35 @@ class AgentRuntime:
             except (Exception, asyncio.CancelledError):
                 # Some adapters may write before failing. Retain the plan
                 # as uncertain, so a retry cannot duplicate that write.
-                session.data["status"] = "recovery_required"
-                if session.data.get('task'):
-                    session.data['task']['status'] = 'recovery_required'
-                plan["recovery_required"] = True
-                self._write(session)
-                raise
+                if tool.resumable:
+                    result = {**deepcopy(plan.get('execution_state', {}).get('report') or {}),
+                              'ok': False, 'status': 'interrupted',
+                              'error': 'Execution interrupted; resume to reconcile owner receipts'}
+                    response = {'ok': False, 'result': result}
+                else:
+                    session.data["status"] = "recovery_required"
+                    if session.data.get('task'):
+                        session.data['task']['status'] = 'recovery_required'
+                    plan["recovery_required"] = True
+                    self._write(session)
+                    raise
+        resumable = approved and tool.resumable and result.get('status') in {'partial', 'failed', 'cancelled', 'interrupted'}
+        if resumable:
+            plan.update(resumable=True, execution_status=result['status'])
+            response['pending'] = deepcopy(plan)
+        elif approved and tool.execute is not None:
+            response['pending'] = None
         task = session.data.get('task')
-        if task and task.get('status') == 'approval_required':
+        if task and (task.get('status') == 'approval_required' or resume or discard_paused):
             task['status'] = 'cancelled' if not approved else ('completed' if response['ok'] else 'failed')
             if approved and response['ok']:
                 task['completed_steps'] = task.get('completed_steps', 0) + 1
+        if resumable and task:
+            task['status'] = 'cancelled' if result.get('status') == 'cancelled' else 'paused'
+        session.data['receipts'] = [receipt for receipt in session.data['receipts'] if receipt['approval_id'] != approval_id]
         session.data["receipts"].append({"approval_id": approval_id, "plan_digest": plan_digest,
                                            "response": deepcopy(response), "result": response.get("result"), "at": self.deps.clock()})
-        session.data.update(pending=None, status="idle", updated_at=self.deps.clock())
+        session.data.update(pending=plan if resumable else None, status='paused' if resumable else 'idle', updated_at=self.deps.clock())
         try:
             self._write(session)
         except OSError:

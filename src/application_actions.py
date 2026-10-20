@@ -14,6 +14,29 @@ from typing import Callable, Iterable
 
 
 @dataclass(frozen=True)
+class ActionAssessment:
+    """Owner-derived impact; never supplied by model arguments or chat text."""
+
+    effect: str
+    requires_approval: bool = False
+    targets: tuple[dict, ...] = ()
+
+    def to_dict(self) -> dict:
+        return {'effect': self.effect, 'requires_approval': self.requires_approval,
+                'targets': deepcopy(list(self.targets))}
+
+
+@dataclass(frozen=True)
+class PreparedAction:
+    """An immutable reviewable command, with owner-private execution input."""
+
+    guard: str | None
+    preview: dict
+    payload: dict
+    assessment: ActionAssessment
+
+
+@dataclass(frozen=True)
 class ApplicationAction:
     name: str
     label: str
@@ -30,6 +53,9 @@ class ApplicationAction:
     automatic: bool = False
     instructions: str = ''
     authorize: Callable | None = None
+    prepare: Callable | None = None
+    execute: Callable | None = None
+    resumable: bool = False
 
     @property
     def effective_effect(self) -> str:
@@ -39,7 +65,8 @@ class ApplicationAction:
         return {'name': self.name, 'label': self.label, 'description': self.label,
                 'parameters': deepcopy(self.schema), 'requires_confirmation': self.mutation,
                 'domain': self.domain, 'effect': self.effective_effect, 'version': self.version,
-                'automatic': self.automatic, 'instructions': self.instructions}
+                'automatic': self.automatic, 'instructions': self.instructions,
+                'prepared_execution': self.prepare is not None, 'resumable_execution': self.resumable}
 
     @property
     def contract_digest(self) -> str:
@@ -52,6 +79,12 @@ def _digest(value) -> str:
 
 
 class ActionRegistry:
+    _MAX_SEARCH_OFFSET = 1_000_000
+    _DISCOVERY_HINT = (
+        "没有文本匹配不代表没有能力；请使用空 query + domain 浏览目录，"
+        "或使用 describe_capability 查询 canonical name。"
+    )
+
     def __init__(self, actions: Iterable[ApplicationAction] = ()):
         self._actions: dict[str, ApplicationAction] = {}
         self._sources: dict[str, Callable] = {}
@@ -69,6 +102,10 @@ class ActionRegistry:
                 or not isinstance(action.schema, dict) or action.schema.get('type') != 'object'
                 or not callable(action.handler)):
             raise ValueError('Invalid application action contract')
+        if ((action.prepare is not None and (not action.mutation or not callable(action.prepare)))
+                or (action.execute is not None and (action.prepare is None or not callable(action.execute)))
+                or type(action.resumable) is not bool or (action.resumable and action.execute is None)):
+            raise ValueError('Prepared execution requires an owning mutation planner')
         if action.automatic and (not action.mutation or action.effective_effect != 'write' or not action.guard):
             raise ValueError('Automatic actions require a guarded ordinary write')
 
@@ -136,17 +173,30 @@ class ActionRegistry:
             raise ValueError('Application capability unavailable')
         return action.descriptor()
 
-    def search(self, query: str = '', domain: str = '', *, limit: int = 80) -> dict:
+    def search(self, query: str = '', domain: str = '', *, limit: int = 80,
+               offset: int = 0) -> dict:
         if not isinstance(query, str) or len(query) > 200 or not isinstance(domain, str) or len(domain) > 40:
             raise ValueError('Invalid capability query')
+        if (type(offset) is not int or offset < 0 or
+                offset > self._MAX_SEARCH_OFFSET):
+            raise ValueError('Invalid capability search offset')
         words = query.casefold().split()
         matches = []
+        domain_counts: dict[str, int] = {}
         for action in sorted(self.values(), key=lambda item: item.name):
+            domain_counts[action.domain] = domain_counts.get(action.domain, 0) + 1
             haystack = f'{action.name} {action.label} {action.domain} {action.instructions}'.casefold()
             if (not domain or action.domain == domain) and all(word in haystack for word in words):
                 item = action.descriptor()
                 item.pop('parameters')
                 matches.append(item)
-        return {'ok': True, 'revision': self.revision, 'capabilities': matches[:limit],
+        page = matches[offset:offset + limit]
+        result = {'ok': True, 'revision': self.revision, 'capabilities': page,
                 'unavailable_sources': sorted(self._source_errors),
-                'total': len(matches)}
+                'total': len(matches), 'offset': offset,
+                'has_more': offset + len(page) < len(matches),
+                'domains': [{'domain': name, 'count': domain_counts[name]}
+                            for name in sorted(domain_counts)]}
+        if query and not matches:
+            result['discovery_hint'] = self._DISCOVERY_HINT
+        return result

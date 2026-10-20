@@ -14,6 +14,7 @@ from typing import Any
 
 from src.ai_providers import resolve_provider
 from src.assistant_agent_limits import DEFAULT_TASK_MAX_TOKENS
+from src.generation_limits import DEFAULT_TEXT_GEN_MAX_TOKENS
 from src.asr import AsrService
 from src.common_factory import TRPGSubsystems, create_trpg_subsystems
 from src.imagegen import ImageGenerationService
@@ -234,7 +235,7 @@ class RuntimeComposition:
             character_gen_max_tokens=int(
                 runtime_config.get("character_gen_max_tokens", 4096)
             ),
-            text_gen_max_tokens=int(runtime_config.get("text_gen_max_tokens", 1024)),
+            text_gen_max_tokens=int(runtime_config.get("text_gen_max_tokens", DEFAULT_TEXT_GEN_MAX_TOKENS)),
             assistant_agent_max_tokens=int(runtime_config.get("assistant_agent_max_tokens", 4096)),
             assistant_agent_task_max_tokens=int(runtime_config.get("assistant_agent_task_max_tokens", DEFAULT_TASK_MAX_TOKENS)),
             plugin_host=plugin_host,

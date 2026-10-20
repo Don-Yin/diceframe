@@ -1523,7 +1523,7 @@ export const zhCN = {
   summaryTokensHint: '用于生成对话与内容摘要的 Token 数',
   briefTokensHint: '用于生成任务简报与提示的 Token 数',
   analysisTokensHint: '用于生成分析、评估等内容的 Token 数',
-  textGenTokensHint: '用于生成文本内容的最大 Token 数',
+  textGenTokensHint: '世界、资料册和冒险草稿等内容的输出上限（默认 16,384），包括 Agent 调用；与 Agent 的回复和任务预算分开设置。',
   aboutDiceFrame: '关于 DiceFrame',
   aboutIntro1: 'DiceFrame 是一张可以自己开起来的 AI 跑团桌。你只要给出一个想玩的世界，AI 就能当 GM 带大家进入故事；玩家在浏览器或群聊里说“我想做什么”，剧情、骰子、角色状态和前情都会被一起整理好。',
   aboutIntro2: '它适合熟人小团、临时脑洞、长期连载，也适合一个人先试跑世界。你可以玩奇幻、克苏鲁、赛博朋克、武侠仙侠，也可以把规则和资料册换成自己的味道。',

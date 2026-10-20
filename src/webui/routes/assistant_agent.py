@@ -109,6 +109,21 @@ async def api_agent_review(request):
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
 
 
+async def api_agent_resume(request):
+    owner = _owner(request)
+    try:
+        body = _body(await request.json(), ('session_id', 'approval_id', 'plan_digest'))
+        sid, aid = _id(body.get('session_id')), _id(body.get('approval_id'))
+        digest = body.get('plan_digest')
+        if not isinstance(digest, str) or not re.fullmatch(r'sha256:[a-f0-9]{64}', digest):
+            raise ValueError('Invalid execution digest')
+        return web.json_response(await _get_api(request).assistant_agent_resume(owner, sid, aid, digest))
+    except PermissionError as exc:
+        return web.json_response({'ok': False, 'error': str(exc)}, status=403)
+    except (ValueError, TypeError) as exc:
+        return web.json_response({'ok': False, 'error': str(exc)}, status=400)
+
+
 async def api_agent_session(request):
     owner = _owner(request)
     try:
@@ -140,7 +155,8 @@ async def api_agent_capabilities(request):
     owner = _owner(request)
     try:
         return web.json_response(_get_api(request).assistant_agent_capabilities(
-            owner, request.query.get('q', ''), request.query.get('domain', '')))
+            owner, request.query.get('q', ''), request.query.get('domain', ''),
+            int(request.query.get('offset', '0'))))
     except (ValueError, TypeError) as exc:
         return web.json_response({'ok': False, 'error': str(exc)}, status=400)
 
@@ -177,5 +193,6 @@ def register_agent(app):
     app.router.add_get('/api/assistant/agent/content-operations', api_agent_content_operations)
     app.router.add_post("/api/assistant/agent/run", api_agent_run)
     app.router.add_post("/api/assistant/agent/confirm", api_agent_confirm)
+    app.router.add_post('/api/assistant/agent/resume', api_agent_resume)
     app.router.add_post("/api/assistant/agent/review", api_agent_review)
     app.router.add_get("/api/assistant/agent/session/{session_id}", api_agent_session)

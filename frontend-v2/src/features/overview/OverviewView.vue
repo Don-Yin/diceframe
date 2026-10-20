@@ -11,7 +11,7 @@ import { NIcon } from 'naive-ui'
 import {
   BookOutline, HourglassOutline, PeopleOutline, DiceOutline, TrophyOutline,
   CompassOutline, EnterOutline, RefreshOutline, DownloadOutline, TrashOutline,
-  LinkOutline, ImageOutline,
+  LinkOutline, ImageOutline, HelpCircleOutline,
   SearchOutline, GridOutline, ListOutline,
 } from '@vicons/ionicons5'
 import PeerConnectModal from '@/features/peer/PeerConnectModal.vue'
@@ -24,6 +24,9 @@ import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import GameSceneImageDialog from '@/components/common/GameSceneImageDialog.vue'
+import GettingStartedCard from '@/features/onboarding/GettingStartedCard.vue'
+import { gettingStartedCopy } from '@/features/onboarding/copy'
+import { useGettingStartedGuide } from '@/features/onboarding/useGettingStartedGuide'
 
 const router = useRouter()
 const overviewRoot = ref<HTMLElement | null>(null)
@@ -34,6 +37,8 @@ const coverTarget = ref<GameSummary | null>(null)
 const toast = useToast()
 const { confirm } = useConfirm()
 const { locale, t } = useLocale()
+const guideCopy = computed(() => gettingStartedCopy(locale.value))
+const { guideDismissed, guideCard, guideLauncher, dismissGuide, reopenGuide } = useGettingStartedGuide()
 const overviewCopy = computed(() => {
   const lang = locale.value
   if (lang === 'zh-CN') return { loading: '正在读取存档…', management: '存档管理', actions: '存档操作', selected: '已选择', adventureLibrary: '浏览内容' }
@@ -402,6 +407,11 @@ onBeforeUnmount(deactivateOverview)
           :heading-aria-label="t('overviewTitle')"
           :description="t('overviewSubtitle')"
         >
+          <template #title-actions>
+            <button ref="guideLauncher" type="button" class="overview-guide-launcher" data-df-ui="button" data-testid="overview-open-guide" @click="reopenGuide">
+              <NIcon :component="HelpCircleOutline" aria-hidden="true" />{{ guideCopy.reopen }}
+            </button>
+          </template>
           <template #actions>
             <div class="overview-actions" :class="{ 'overview-actions-peer': peerEntryVisible }">
               <template v-if="peerEntryVisible">
@@ -417,6 +427,15 @@ onBeforeUnmount(deactivateOverview)
             </div>
           </template>
         </ContentPageHeader>
+
+    <GettingStartedCard
+      v-if="!guideDismissed && !loading && !error"
+      ref="guideCard"
+      :has-games="games.length > 0"
+      :peer-available="peerEntryVisible"
+      @connect="peerModalOpen = true"
+      @dismiss="dismissGuide"
+    />
 
     <Card v-if="featuredGame" as="section" class="overview-featured" data-testid="overview-featured">
       <div class="overview-featured-art" :style="gameSceneStyle(featuredGame)" aria-hidden="true">
@@ -564,6 +583,23 @@ onBeforeUnmount(deactivateOverview)
   width: 100%;
   min-width: 0;
 }
+.overview-guide-launcher {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--df-radius-sm);
+  color: var(--df-text-muted);
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+.overview-guide-launcher:hover { color: var(--df-accent-strong); background: var(--df-hover); }
+.overview-guide-launcher:focus-visible { outline: 2px solid var(--df-interactive-strong); outline-offset: 2px; }
+.overview-guide-launcher .n-icon { font-size: 16px; }
 
 </style>
 

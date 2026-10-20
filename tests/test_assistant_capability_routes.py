@@ -8,6 +8,22 @@ from tests.test_assistant_agent import Planner
 
 
 @pytest.mark.asyncio
+async def test_capability_catalog_pages_and_rejects_invalid_offsets(tmp_path):
+    runtime = make_runtime(tmp_path, Planner(), [])
+    client = await client_for(True, SimpleNamespace(assistant_agent_capabilities=runtime.capabilities))
+    try:
+        response = await client.get('/api/assistant/agent/capabilities?domain=lorebook&offset=1')
+        assert response.status == 200
+        catalog = await response.json()
+        assert catalog['capabilities'] == [] and catalog['offset'] == 1
+        assert catalog['total'] == 1 and catalog['has_more'] is False
+        for offset in ('bad', '-1', '1000001'):
+            assert (await client.get('/api/assistant/agent/capabilities?offset=' + offset)).status == 400
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_capability_authorization_and_cancel_require_owner():
     client = await client_for(False, SimpleNamespace())
     try:

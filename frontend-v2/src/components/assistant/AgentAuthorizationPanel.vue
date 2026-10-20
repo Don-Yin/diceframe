@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { NButton, NInput, NSelect } from 'naive-ui'
-import { getAssistantAgentCapabilities, type AgentAuthorization, type AgentAuthorizationMode, type AgentCapability, type AgentTask } from '@/api/assistant'
+import { getAssistantAgentCapabilities, type AgentAuthorization, type AgentAuthorizationMode, type AgentCapability, type AgentCapabilityDomain, type AgentTask } from '@/api/assistant'
 import { assistantAuthorizationCopy } from '@/features/assistant/authorizationCopy'
 
 const props = withDefaults(defineProps<{
@@ -26,12 +26,32 @@ const capabilityDomain = ref('')
 const capabilities = ref<AgentCapability[]>([])
 const capabilitiesBusy = ref(false)
 const capabilitiesError = ref('')
+const capabilityDomains = ref<AgentCapabilityDomain[] | null>(null)
+const capabilityOffset = ref(0)
+const capabilityHasMore = ref(false)
+const capabilityDiscoveryHint = ref('')
+const capabilityRevision = ref('')
 let capabilityRequestId = 0
-const hasContext = computed(() => Object.keys(props.context).length > 0)
+const resourceKeys = ['game_key', 'world_id', 'book_id', 'card_id'] as const
+const currentScope = computed<Record<string, string>>(() => {
+  const normalized: Record<string, string> = {}
+  for (const key of resourceKeys) {
+    const value = props.context[key]
+    if (typeof value !== 'string') continue
+    const trimmed = value.trim()
+    if (trimmed && trimmed.length <= 500) normalized[key] = trimmed
+  }
+  return normalized
+})
+const hasValidCurrentScope = computed(() => Object.keys(currentScope.value).length > 0)
 const stepOptions = [8, 16, 32, 48, 64].map(value => ({ label: String(value), value }))
-const domainOptions = [{ label: 'All', value: '' }, ...['application', 'lorebook', 'worlds', 'games', 'adventures', 'recovery', 'ruleset', 'settings', 'plugins'].map(value => ({ label: value, value }))]
-const scope = computed(() => scopeMode.value === 'all' ? {} : props.context)
-const scopeLabel = computed(() => scopeMode.value === 'all' || !hasContext.value ? copy.value.all : copy.value.current)
+const fallbackDomains = ['application', 'lorebook', 'worlds', 'games', 'adventures', 'recovery', 'ruleset', 'settings', 'plugins']
+const domainOptions = computed(() => [{ label: 'All', value: '' }, ...(capabilityDomains.value
+  ? capabilityDomains.value.map(item => ({ label: item.domain, value: item.domain }))
+  : fallbackDomains.map(value => ({ label: value, value })))])
+const scope = computed(() => scopeMode.value === 'all' ? {} : currentScope.value)
+const currentScopeLabel = computed(() => hasValidCurrentScope.value ? copy.value.current : copy.value.currentUnavailable)
+const grantDisabled = computed(() => props.busy || (scopeMode.value === 'current' && !hasValidCurrentScope.value))
 function toggleAuthorization() {
   expanded.value = !expanded.value
   if (props.pendingApproval) props.onReview?.()
@@ -45,21 +65,57 @@ const progress = computed(() => {
   return `${props.task.completed_steps}${total}${tokens}`
 })
 async function choose(mode: AgentAuthorizationMode) {
+  if (props.disabled || props.busy) return
+  if ((mode === 'routine' || mode === 'task') && scopeMode.value === 'current' && !hasValidCurrentScope.value) return
   await props.onAuthorize?.(mode, scope.value, undefined, maxSteps.value)
   expanded.value = true
 }
-async function loadCapabilities() {
+async function loadCapabilities(reset = false) {
+  if (reset) {
+    capabilities.value = []
+    capabilityOffset.value = 0
+    capabilityHasMore.value = false
+    capabilityDiscoveryHint.value = ''
+  }
+  const requestedOffset = capabilityOffset.value
   const requestId = ++capabilityRequestId
   capabilitiesBusy.value = true; capabilitiesError.value = ''
   try {
-    const result = await getAssistantAgentCapabilities({ q: capabilityQuery.value, domain: capabilityDomain.value })
-    if (requestId === capabilityRequestId) capabilities.value = result.capabilities
+    const result = await getAssistantAgentCapabilities({ q: capabilityQuery.value, domain: capabilityDomain.value, offset: requestedOffset })
+    if (requestId === capabilityRequestId) {
+      if (capabilityRevision.value && result.revision !== capabilityRevision.value && requestedOffset > 0) {
+        capabilityRevision.value = result.revision
+        capabilities.value = []
+        capabilityOffset.value = 0
+        capabilityHasMore.value = false
+        void loadCapabilities(true)
+        return
+      }
+      const revisionChanged = capabilityRevision.value !== result.revision
+      capabilityRevision.value = result.revision
+      const seen = new Set(capabilities.value.map(item => `${item.name}:${item.version}`))
+      const page = result.capabilities.filter(item => {
+        const key = `${item.name}:${item.version}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      capabilities.value = revisionChanged || requestedOffset === 0 ? page : [...capabilities.value, ...page]
+      if (result.domains) capabilityDomains.value = result.domains
+      capabilityOffset.value = (typeof result.offset === 'number' ? result.offset : requestedOffset) + result.capabilities.length
+      capabilityHasMore.value = result.has_more === true
+      capabilityDiscoveryHint.value = typeof result.discovery_hint === 'string' ? result.discovery_hint : ''
+    }
   }
   catch (error: unknown) { if (requestId === capabilityRequestId) capabilitiesError.value = error instanceof Error ? error.message : copy.value.disabled }
   finally { if (requestId === capabilityRequestId) capabilitiesBusy.value = false }
 }
-watch(expanded, value => { if (value && !capabilities.value.length && !capabilitiesError.value) void loadCapabilities() })
-watch([capabilityQuery, capabilityDomain], () => { if (expanded.value) void loadCapabilities() })
+watch(expanded, value => { if (value && !capabilities.value.length && !capabilitiesError.value) void loadCapabilities(true) })
+watch([capabilityQuery, capabilityDomain], () => { if (expanded.value) void loadCapabilities(true) })
+function clearCapabilitySearch() {
+  capabilityQuery.value = ''
+  capabilityDomain.value = ''
+}
 </script>
 
 <template>
@@ -77,7 +133,7 @@ watch([capabilityQuery, capabilityDomain], () => { if (expanded.value) void load
       <div v-if="disabled" class="agent-authorization-disabled" role="status">{{ copy.disabled }}</div>
       <template v-else>
         <div class="agent-authorization-scope">
-          <label><input v-model="scopeMode" type="radio" value="current" :disabled="busy" /> {{ copy.current }} <small>{{ scopeLabel }}</small></label>
+          <label><input v-model="scopeMode" type="radio" value="current" :disabled="busy || !hasValidCurrentScope" /> {{ copy.current }} <small>{{ currentScopeLabel }}</small></label>
           <label><input v-model="scopeMode" type="radio" value="all" :disabled="busy" /> {{ copy.all }}</label>
         </div>
         <label class="agent-authorization-steps">{{ copy.steps }}
@@ -93,6 +149,7 @@ watch([capabilityQuery, capabilityDomain], () => { if (expanded.value) void load
           <div class="agent-capability-filters">
             <NInput v-model:value="capabilityQuery" size="small" :placeholder="locale.startsWith('zh') ? '搜索能力' : 'Search capabilities'" />
             <NSelect v-model:value="capabilityDomain" size="small" :options="domainOptions" />
+            <NButton v-if="capabilityQuery || capabilityDomain" size="small" quaternary @click="clearCapabilitySearch">{{ locale.startsWith('zh') ? '清空' : 'Clear' }}</NButton>
           </div>
           <p v-if="capabilitiesBusy">{{ locale.startsWith('zh') ? '加载中…' : 'Loading…' }}</p>
           <p v-else-if="capabilitiesError" class="agent-authorization-error" role="alert">{{ capabilitiesError }}</p>
@@ -101,13 +158,14 @@ watch([capabilityQuery, capabilityDomain], () => { if (expanded.value) void load
               <strong>{{ capability.label || capability.name }}</strong><small>{{ capability.domain }} · {{ capability.effect }}<span v-if="capability.requires_confirmation"> · {{ locale.startsWith('zh') ? '需确认' : 'confirmation required' }}</span></small>
               <span>{{ capability.description }}</span>
             </li>
-            <li v-if="!capabilities.length">{{ locale.startsWith('zh') ? '没有匹配能力' : 'No matching capabilities' }}</li>
+            <li v-if="!capabilities.length">{{ capabilityDiscoveryHint || (locale.startsWith('zh') ? '没有匹配能力' : 'No matching capabilities') }}</li>
           </ul>
+          <NButton v-if="capabilityHasMore" size="small" :loading="capabilitiesBusy" @click="loadCapabilities()">{{ locale.startsWith('zh') ? '加载更多' : 'Load more' }}</NButton>
         </details>
         <div class="agent-authorization-actions">
           <NButton size="small" :disabled="busy" @click="choose('suggest')">{{ copy.suggest }}</NButton>
-          <NButton size="small" :disabled="busy" @click="choose('routine')">{{ copy.routine }}</NButton>
-          <NButton size="small" type="primary" :disabled="busy" @click="choose('task')">{{ copy.task }}</NButton>
+          <NButton size="small" :disabled="grantDisabled" @click="choose('routine')">{{ copy.routine }}</NButton>
+          <NButton size="small" type="primary" :disabled="grantDisabled" @click="choose('task')">{{ copy.task }}</NButton>
           <NButton v-if="authorization && authorization.mode !== 'suggest'" size="small" quaternary :disabled="busy" @click="choose('suggest')">{{ copy.revoke }}</NButton>
         </div>
         <p v-if="task" class="agent-authorization-task" role="status">{{ copy.taskStatus(task.status) }} · {{ progress }}<span v-if="task.error"> · {{ task.error }}</span></p>
