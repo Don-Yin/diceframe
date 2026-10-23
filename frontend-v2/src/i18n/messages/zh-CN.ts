@@ -1100,6 +1100,7 @@ export const zhCN = {
   securityEnableConfirmIntro: '将生成本地自签证书并重启服务；旧的 http:// 地址会立即失效。',
   securityEnableConfirmAddress: '启用后请改用新的 https 地址，并把它重新发给玩家。',
   securityEnableConfirmTrust: '普通浏览器和玩家端都会提示“不安全”——连接已加密，属预期现象；请提前向玩家说明，以免他们不敢连接。',
+  securityEnableConfirmPlugin: '如果还要让插件、NapCat/QQ 等内部客户端连接，请保留或设置 TRPG_WEB_HTTP_PORT 提供明文内部 API；它们默认不会信任自签证书，否则可能出现 CERTIFICATE_VERIFY_FAILED。请勿将这个 HTTP 端口暴露到公网，外部玩家仍可使用 HTTPS。',
   securityEnableConfirmMobileApp: 'DiceFrame 移动端 App 当前无法连接使用自签证书的服务器。',
   securityAcmeSetupTitle: '申请配置',
   securityEnableConfirmAction: '启用并重启',

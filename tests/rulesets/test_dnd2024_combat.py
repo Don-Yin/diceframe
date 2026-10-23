@@ -2,15 +2,18 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
 from src.engine.game_instance import GameInstance
 from src.commands.round_effects import apply_revive_commands
+from src.rules.rule_system import RuleSystem
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.engine.modules import ruleset_runtime
+from src.webui.services.game_master import GameMasterDependencies, GameMasterService
 
 
 @dataclass
@@ -298,6 +301,46 @@ def test_revival_clears_canonical_death_save_state_and_invalidates_combat_action
     actions = engine.available_intents(instance, "gm")
     assert "death_save" not in [item["type"] for item in actions]
     assert any(item["type"] == "attack" for item in actions)
+
+
+@pytest.mark.asyncio
+async def test_gm_hp_heal_syncs_canonical_dead_state_when_legacy_flag_is_stale() -> None:
+    engine, instance = _instance()
+    runtime = Dnd2024Runtime()
+    _start(engine, instance)
+    sheet = instance.get_character_sheet("gm")
+    canonical = sheet["ruleset_character"]
+    canonical["resources"]["hp"] = 0
+    canonical["conditions"] = {
+        "dead": {"source": "death_saves"},
+        "unconscious": {"source": "zero_hp"},
+    }
+    sheet["hp"] = 0
+    # Reproduce the stale public projection seen by the GM resource editor.
+    sheet["deceased"] = False
+    rule = RuleSystem.load(str(Path(__file__).resolve().parents[2] / "templates" / "rules" / "dnd2024_srd.json"))
+    service = GameMasterService(GameMasterDependencies(
+        parse_game_key=lambda value: tuple(value.split("|")),
+        get_instance=lambda _key: instance,
+        save_instance=lambda _instance: _async_noop(),
+        load_rule=lambda _instance: rule,
+        load_runtime=lambda _instance: runtime,
+    ))
+
+    result = await service.command(
+        "test|dnd2024-combat|bot", "给gm加生命值5",
+    )
+
+    assert result["ok"] is True
+    assert result["resource_update"]["revived"] is True
+    updated = instance.get_character_sheet("gm")["ruleset_character"]
+    assert updated["resources"]["hp"] == 5
+    assert updated["conditions"] == {}
+    assert "death_save" not in [item["type"] for item in engine.available_intents(instance, "gm")]
+
+
+async def _async_noop() -> None:
+    return None
 
 
 def test_spell_targets_respect_hostile_and_allied_relationships() -> None:

@@ -9,6 +9,7 @@ from typing import Any
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
+from src.rulesets.dnd2024.spells.feat_spells import concentration_holder, restore_feat_free_casts
 
 
 class RestError(ValueError):
@@ -195,10 +196,12 @@ class Dnd2024RestEngine:
         resources["ability_score_reductions"] = {}
         self._recover_class_resources(character, "long", events)
         self._recover_spell_slots(character, "long", events)
-        class_magic = character.get("spellcasting", {}).get("class")
-        if isinstance(class_magic, dict) and class_magic.get("concentration") is not None:
+        for feat_ref in restore_feat_free_casts(character):
+            events.append({"type": "restore_feat_spell", "feat_ref": feat_ref})
+        holder = concentration_holder(character)
+        if holder.get("concentration") is not None:
             events.append({"type": "end_concentration", "reason": "long_rest"})
-            class_magic["concentration"] = None
+            holder["concentration"] = None
         return {
             "character": character,
             "events": events,

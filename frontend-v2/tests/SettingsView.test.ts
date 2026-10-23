@@ -16,6 +16,12 @@ const mocks = vi.hoisted(() => {
       setConfigField: vi.fn(), test: vi.fn(), saveAccessPassword: vi.fn(), clearProxy: vi.fn(), botToken: vi.fn(),
     },
     api: vi.fn().mockResolvedValue({}),
+    security: {
+      status: vi.fn().mockResolvedValue({ ok: true, tls_mode: 'off', scheme: 'http' }),
+      prepare: vi.fn().mockResolvedValue({ ok: true, token: 'test-token', certificate: { fingerprint_sha256: 'AA:BB:CC' } }),
+      activate: vi.fn(), disable: vi.fn(), regenerate: vi.fn(),
+    },
+    confirm: vi.fn().mockResolvedValue(false),
     replace: vi.fn(),
     updateStatus: null as Record<string, any> | null,
   }
@@ -23,7 +29,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('../src/stores/useSettingsStore', () => ({ useSettingsStore: () => mocks.store }))
 vi.mock('../src/composables/useToast', () => ({ useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }) }))
-vi.mock('../src/composables/useConfirm', () => ({ useConfirm: () => ({ confirm: vi.fn().mockResolvedValue(false) }) }))
+vi.mock('../src/composables/useConfirm', () => ({ useConfirm: () => ({ confirm: mocks.confirm }) }))
 vi.mock('../src/composables/useLocale', () => ({ useLocale: () => ({ t: (key: string) => key, locale: ref('en') }) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: { section: 'models' } }), useRouter: () => ({ push: vi.fn(), replace: mocks.replace }) }))
 vi.mock('../src/composables/useUpdateCheck', () => ({ useUpdateCheck: () => ({ updateInfo: ref(null), updateChecking: ref(false), checkForUpdates: vi.fn() }) }))
@@ -44,7 +50,7 @@ vi.mock('../src/utils/asr', () => ({ asrLanguageFor: vi.fn(), initializeAsr: vi.
 vi.mock('../src/api/client', () => ({ api: mocks.api, apiBlob: mocks.api, errorMessage: (e: unknown) => String(e), ApiError: class extends Error {} }))
 vi.mock('../src/api/speech', () => ({ speechApi: { voices: vi.fn().mockResolvedValue({ voices: [] }), test: vi.fn(), transcribeTest: vi.fn() } }))
 vi.mock('../src/api/plugins', () => ({ pluginApi: { hubPreferences: vi.fn().mockResolvedValue(null), updateHubPreferences: vi.fn(), deleteHubIdentity: vi.fn() } }))
-vi.mock('../src/api/security', () => ({ securityApi: { status: vi.fn().mockResolvedValue({}), prepare: vi.fn(), activate: vi.fn(), disable: vi.fn(), regenerate: vi.fn() } }))
+vi.mock('../src/api/security', () => ({ securityApi: mocks.security }))
 
 describe('SettingsView management navigation', () => {
   it('places a separate Game page directly after General', async () => {
@@ -61,7 +67,41 @@ describe('SettingsView management navigation', () => {
   beforeEach(() => {
     mocks.store.load.mockReset()
     mocks.api.mockClear()
+    mocks.confirm.mockClear()
+    mocks.security.status.mockClear()
+    mocks.security.prepare.mockClear()
     mocks.updateStatus = null
+  })
+
+  it('warns about self-signed TLS for plugin and internal clients', async () => {
+    const wrapper = shallowMount(SettingsView, {
+      global: {
+        stubs: {
+          Spin: { template: '<div><slot /></div>' },
+          Button: { template: '<button @click="$emit(\'click\')"><slot /></button>', emits: ['click'] },
+          NButton: { template: '<button @click="$emit(\'click\')"><slot /></button>', emits: ['click'] },
+          RouterLink: true,
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.get('.settings-nav [data-section="security"]').trigger('click')
+    await flushPromises()
+
+    const selfSignedRow = wrapper.findAll('.security-mode-row')[1]
+    await selfSignedRow!.get('button').trigger('click')
+    await flushPromises()
+
+    expect(mocks.security.prepare).toHaveBeenCalledWith('self_signed')
+    expect(mocks.confirm).toHaveBeenCalledWith(expect.objectContaining({
+      dialogClass: 'security-confirm-dialog',
+      contentClass: 'security-confirm-content',
+    }))
+    const options = mocks.confirm.mock.calls[0]![0]
+    const content = options.content()
+    expect(content.props.class).toBe('security-confirm-body')
+    expect(content.children[1].children[2].children).toBe('securityEnableConfirmPlugin')
+    wrapper.unmount()
   })
 
   it('lets the owner edit and save reply and task budgets independently', async () => {

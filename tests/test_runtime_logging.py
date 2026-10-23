@@ -26,6 +26,16 @@ def test_resolve_log_dir_for_portable_and_docker(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("TRPG_INSTALL_MODE", "docker-managed")
     assert resolve_runtime_log_dir(tmp_path / "data") == (tmp_path / "data" / "logs").resolve()
 
+    monkeypatch.setenv("TRPG_DOCKER_DATA_HOME", str(tmp_path / "host-data"))
+    assert resolve_runtime_log_dir(tmp_path / "versioned-data") == (
+        tmp_path / "host-data" / "logs"
+    ).resolve()
+
+    monkeypatch.setenv("TRPG_LOG_DIR", str(tmp_path / "explicit-logs"))
+    assert resolve_runtime_log_dir(tmp_path / "versioned-data") == (
+        tmp_path / "explicit-logs"
+    ).resolve()
+
 
 def test_runtime_logger_keeps_console_and_writes_file(tmp_path: Path):
     logger = logging.getLogger("test.runtime.logging")

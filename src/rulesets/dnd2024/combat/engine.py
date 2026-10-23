@@ -36,11 +36,13 @@ from .resolution import CombatResolutionMixin
 from .validation import CombatValidationMixin
 from .view import CombatViewMixin
 from .triggered_spells import CombatTriggeredSpellsMixin, HIT_SPELL_DECISION, hit_spell_decision
+from .reaction_spells import CombatReactionSpellsMixin, HIT_REACTION_DECISION
 
 
 @dataclass(slots=True)
 class Dnd2024CombatEngine(
     CombatValidationMixin, CombatResolutionMixin, CombatReducerMixin, CombatViewMixin, CombatTriggeredSpellsMixin,
+    CombatReactionSpellsMixin,
 ):
     bundle: LoadedRulesetBundle
     encounter_access: EncounterAccess = field(default_factory=EncounterAccess.blocked)
@@ -125,6 +127,16 @@ class Dnd2024CombatEngine(
             "expected_version": version,
         }] if actor_id in instance.players else []
         current = self._current_actor(combat)
+        # 被命中时的反应法术（护盾术）通常出现在敌人回合：防守方不必是当前行动者。
+        reactions = [
+            item for item in combat.get("pending_decisions", [])
+            if item.get("kind") == HIT_REACTION_DECISION and item.get("assigned_to") == actor_id
+        ]
+        if reactions:
+            return [*communication, {
+                "type": "decision.resolve", "label": "Reaction spell",
+                "expected_version": version, "decisions": deepcopy(reactions),
+            }]
         if current.startswith("enemy:"):
             return communication
         requested = _player_actor(actor_id)
@@ -247,6 +259,8 @@ class Dnd2024CombatEngine(
             decision = pending[0]
             if decision.get("kind") == HIT_SPELL_DECISION:
                 return self._automatic_hit_spell(instance, combat, decision, version)
+            if decision.get("kind") == HIT_REACTION_DECISION:
+                return self._automatic_hit_reaction(instance, combat, decision, version)
             threats = [str(item) for item in decision.get("threat_actor_ids") or []]
             option = (
                 "resolve"
@@ -1104,13 +1118,18 @@ class Dnd2024CombatEngine(
         ]
         for target_id in all_actor_ids:
             target_conditions = self._conditions(snapshot, combat, target_id)
-            for condition_id in [
-                key for key, value in target_conditions.items()
-                if isinstance(value, dict)
-                and value.get("duration") == "caster_turn_end"
-                and value.get("source_actor_id") == previous_actor_id
-            ]:
-                target_conditions.pop(condition_id, None)
+            for condition_id, value in list(target_conditions.items()):
+                if not isinstance(value, dict) or value.get("source_actor_id") != previous_actor_id:
+                    continue
+                duration = value.get("duration")
+                if duration == "caster_turn_end":
+                    target_conditions.pop(condition_id, None)
+                elif duration == "caster_next_turn_end":
+                    remaining = int(value.get("turns_remaining", 2) or 2)
+                    if remaining <= 1:
+                        target_conditions.pop(condition_id, None)
+                    else:
+                        value["turns_remaining"] = remaining - 1
 
     @staticmethod
     def _last_hostile_defeated(

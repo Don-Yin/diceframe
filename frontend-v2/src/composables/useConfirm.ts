@@ -1,11 +1,13 @@
-import { h } from 'vue'
+import { h, type VNodeChild } from 'vue'
 import type { DialogOptions } from 'naive-ui'
 import { getDialog } from './useNaiveBridge'
 import { useLocale } from './useLocale'
 
 export interface ConfirmOptions {
   title?: string
-  content?: string
+  content?: string | (() => VNodeChild)
+  contentClass?: string | string[]
+  dialogClass?: string | string[]
   positiveText?: string
   negativeText?: string
   type?: 'info' | 'success' | 'warning' | 'error'
@@ -19,8 +21,14 @@ export function useConfirm() {
       const danger = opts.type === 'error'
       const title = opts.title?.trim() || (danger ? t('confirmDangerTitle') : t('confirmTitle'))
       const cfg: DialogOptions = {
+        class: opts.dialogClass,
         title: () => h('div', { class: ['confirm-title', danger ? 'danger' : ''] }, title),
-        content: () => h('div', { class: 'confirm-content' }, opts.content || t('confirmContent')),
+        contentClass: opts.contentClass
+          ? ['confirm-content', ...(Array.isArray(opts.contentClass) ? opts.contentClass : [opts.contentClass])]
+          : undefined,
+        content: () => typeof opts.content === 'function'
+          ? opts.content()
+          : h('div', { class: 'confirm-content' }, opts.content || t('confirmContent')),
         positiveText: opts.positiveText ?? (danger ? t('confirmDelete') : t('ok')),
         negativeText: opts.negativeText ?? t('cancel'),
         maskClosable: false,

@@ -36,15 +36,16 @@ def hit_spell_decision(combat: dict[str, Any], actor_id: str) -> dict[str, Any] 
 
 
 def free_cast_resource(actor: dict[str, Any], spell_ref: str) -> dict[str, Any] | None:
-    grant = next(
-        (
-            row
-            for row in actor.get("spell_grants", [])
-            if row.get("spell_ref") == spell_ref
-        ),
-        None,
-    )
-    if not grant or not grant.get("resource_id"):
+    # 职业特性免费施放挂在 class resource 上；起源专长（魔法学徒）的
+    # 每长休一次免费施放挂在该专长条目上。两者都可能授予同一法术。
+    grants = [
+        row for row in actor.get("spell_grants", []) if row.get("spell_ref") == spell_ref
+    ]
+    feat_grant = next((row for row in grants if row.get("free_cast_available")), None)
+    if feat_grant is not None:
+        return {"kind": "feat", "feat_ref": feat_grant["feat_ref"]}
+    grant = next((row for row in grants if row.get("resource_id")), None)
+    if grant is None:
         return None
     return next(
         (
@@ -93,7 +94,8 @@ class CombatTriggeredSpellsMixin:
         ]
         return decision if choices else None
 
-    def _spell_cost_events(self, actor, spell, slot_level):
+    def _spell_cost_events(self, actor, spell, slot_level, *, spend_action=True):
+        # 反应法术（护盾术）不占用动作经济里的动作，由调用方另记 reaction.spent。
         events = [
             {
                 "type": "dnd2024.action.spent",
@@ -103,7 +105,7 @@ class CombatTriggeredSpellsMixin:
                 else "action",
                 "amount": 1,
             }
-        ]
+        ] if spend_action else []
         if int(spell["level"]) > 0:
             if slot_level > 0:
                 events.append(
@@ -118,6 +120,15 @@ class CombatTriggeredSpellsMixin:
                 resource = free_cast_resource(actor, f"spell:{spell['id']}")
                 if resource is None:
                     raise CombatIntentError("the free spell cast is not available")
+                if resource.get("kind") == "feat":
+                    events.append(
+                        {
+                            "type": "dnd2024.feat_spell.free_cast_spent",
+                            "actor_id": actor["actor_id"],
+                            "feat_ref": resource["feat_ref"],
+                        }
+                    )
+                    return events
                 events.append(
                     {
                         "type": "dnd2024.class_resource.spent",

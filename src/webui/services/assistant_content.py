@@ -22,8 +22,29 @@ _MAX_GENERATED_BYTES = 512 * 1024
 _HEADING = re.compile(r"^#{1,3}\s+(.+?)\s*$")
 _LEVEL_ONE_HEADING = re.compile(r"^#\s+.+$", re.IGNORECASE)
 _EXPLICIT_ID = re.compile(r"\s*\{#[a-z0-9][a-z0-9_.-]*\}\s*$")
-_PRIVATE_HEADING_MARKER = re.compile(r"(?i)(?:\bgm\b|gm\s*[- ]\s*only|\bsecrets?\b|秘密|机密|主持人)")
-_PRIVATE_TEXT_MARKER = re.compile(r"(?i)(?:\bgm\s*:\s*|gm\s*[- ]\s*only|\bsecrets?\b|秘密|机密|主持人)")
+# Public prose may legitimately mention a secret, a host, or a hidden rumor.
+# Treat only explicit section/line labels as visibility markers; a lexical
+# occurrence inside an ordinary sentence is not enough to reject the draft.
+_PRIVATE_HEADING_MARKER = re.compile(
+    r"(?i)^(?:"
+    r"gm(?:\s*[- ]\s*only)?(?:\s+(?:notes?|guidance|information|section))?|"
+    r"secret(?:s)?(?:\s+(?:notes?|information|section))?|"
+    r"private(?:\s+(?:notes?|information|section))?|"
+    r"hidden(?:\s+(?:notes?|information|section))?|"
+    r"秘密(?:信息|笔记|内容|段落|提示)?|"
+    r"机密(?:信息|笔记|内容|段落|提示)?|"
+    r"主持人(?:备注|笔记|信息|内容|段落|提示)?"
+    r")\s*[:：]?\s*$"
+)
+_PRIVATE_TEXT_MARKER = re.compile(
+    r"(?i)^(?:"
+    r"gm\s*:\s*|"
+    r"gm\s*[- ]\s*only(?=\s|[:：]|$)|"
+    r"gm\s+(?:notes?|guidance|information|section)\s*[:：]\s*|"
+    r"(?:secret(?:s)?|private|hidden)(?:\s+(?:notes?|information|section))?\s*[:：]\s*|"
+    r"(?:秘密|机密|主持人(?:备注|笔记|信息|内容|段落|提示)?)\s*[:：]\s*"
+    r")"
+)
 
 
 @dataclass(frozen=True)
@@ -67,7 +88,7 @@ def _generated_failure(kind: str, error: object) -> dict[str, Any]:
 
 
 def _has_private_markers(text: str) -> bool:
-    """Reject ambiguous private prose before it reaches a public content owner."""
+    """Reject explicit private markers before text reaches a public owner."""
 
     for line in text.splitlines():
         stripped = line.strip()

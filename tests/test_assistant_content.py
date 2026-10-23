@@ -35,8 +35,9 @@ async def test_non_text_draft_generates_one_reviewable_fragment():
 @pytest.mark.parametrize("text", [
     "# Harbor\nGM: The bell is cursed.",
     "# Harbor\n## GM-only\nThe bell is cursed.",
+    "# Harbor\nGM-only The bell is cursed.",
     "# Harbor\n## 秘密\nThe bell is cursed.",
-    "# Harbor\nThe secret is the bell.",
+    "# Harbor\nSecret: The bell is cursed.",
 ])
 @pytest.mark.asyncio
 async def test_public_content_rejects_hidden_markers_before_review(text):
@@ -55,6 +56,24 @@ async def test_public_content_rejects_hidden_markers_before_review(text):
     assert result["ok"] is False
     assert "private or hidden" in result["error"]
     assert review_calls == []
+
+
+@pytest.mark.asyncio
+async def test_public_content_can_mention_secrets_without_private_labels():
+    reviewed = []
+
+    async def generate(prompt, system_hint, language):
+        return {"ok": True, "text": "# Harbor\nThe secret of the bell is a public rumor among sailors."}
+
+    def review_content(body):
+        reviewed.append(body)
+        return {"ok": True, "draft": body, "plan_digest": "sha256:" + "e" * 64, "blockers": []}
+
+    tools = AgentContentTools(AgentContentDependencies(generate, review_content, lambda body: body))
+    result = await tools.draft("world", "A harbor with a famous rumor", "en")
+
+    assert result["ok"] is True
+    assert reviewed
 
 
 @pytest.mark.asyncio

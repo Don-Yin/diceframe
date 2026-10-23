@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch, type Component } from 'vue'
+import { computed, h, nextTick, onMounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NInput, NInputNumber, NSelect, NSwitch, NTag, NIcon, NSpin, NProgress, NModal, NCollapse, NCollapseItem } from 'naive-ui'
 import {
@@ -794,15 +794,23 @@ async function enableLocalHttps() {
       return
     }
     const fingerprint = prepared.certificate.fingerprint_sha256
-    const confirmLines = [
-      t('securityEnableConfirmIntro'),
-      t('securityEnableConfirmAddress'),
-      t('securityEnableConfirmTrust'),
-      t('securityEnableConfirmMobileApp'),
-    ].map((line, index) => `${index + 1}. ${line}`)
     const confirmed = await confirm({
       title: t('securityEnableLocalHttps'),
-      content: `${confirmLines.join('\n')}\n\n${t('securityFingerprintLabel')}: ${fingerprint}`,
+      dialogClass: 'security-confirm-dialog',
+      contentClass: 'security-confirm-content',
+      content: () => h('div', { class: 'security-confirm-body' }, [
+        h('p', { class: 'security-confirm-lead' }, t('securityEnableConfirmIntro')),
+        h('ol', { class: 'security-confirm-steps' }, [
+          h('li', t('securityEnableConfirmAddress')),
+          h('li', t('securityEnableConfirmTrust')),
+          h('li', t('securityEnableConfirmPlugin')),
+          h('li', t('securityEnableConfirmMobileApp')),
+        ]),
+        h('div', { class: 'security-confirm-fingerprint' }, [
+          h('span', t('securityFingerprintLabel')),
+          h('code', fingerprint),
+        ]),
+      ]),
       type: 'warning',
       positiveText: t('securityEnableConfirmAction'),
       negativeText: t('cancel'),

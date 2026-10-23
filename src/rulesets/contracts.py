@@ -253,6 +253,13 @@ class CharacterRevivalRuntime(Protocol):
 
 
 @runtime_checkable
+class CharacterDeathStateRuntime(Protocol):
+    """Optional read capability for canonical death state checks."""
+
+    def character_needs_revival(self, instance: Any, user_id: str) -> bool: ...
+
+
+@runtime_checkable
 class LiveAdvancementPolicyRuntime(Protocol):
     """Optional lifecycle hooks for a ruleset-owned live advancement policy."""
 

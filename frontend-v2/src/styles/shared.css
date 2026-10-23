@@ -1006,6 +1006,72 @@ details:not([open])>:not(summary) {
   white-space: pre-line;
 }
 
+.security-confirm-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+}
+
+.security-confirm-dialog .security-confirm-content {
+  padding-top: 2px;
+}
+
+.security-confirm-body {
+  display: grid;
+  gap: 14px;
+}
+
+.security-confirm-lead {
+  margin: 0;
+  color: var(--df-text);
+  font-weight: 650;
+}
+
+.security-confirm-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 22px;
+  color: var(--df-text-secondary);
+}
+
+.security-confirm-steps li {
+  padding-left: 4px;
+  line-height: 1.55;
+}
+
+.security-confirm-fingerprint {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--df-border);
+  border-radius: 10px;
+  background: var(--df-surface-2);
+}
+
+.security-confirm-fingerprint span {
+  color: var(--df-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.security-confirm-fingerprint code {
+  color: var(--df-text);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .security-confirm-dialog {
+    width: calc(100vw - 20px);
+    max-width: calc(100vw - 20px);
+  }
+
+  .security-confirm-steps {
+    padding-left: 20px;
+  }
+}
+
 .form-row {
   display: flex;
   align-items: center;

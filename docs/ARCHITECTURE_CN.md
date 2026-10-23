@@ -5352,6 +5352,8 @@ src/runtime_logging.py
 - Docker：`data/logs`
 - retention：30 days
 
+托管 Docker 使用 `TRPG_DOCKER_DATA_HOME` 指向的持久化宿主数据目录保存日志；未设置时沿用传入的数据目录。日志写入、状态、清理、导出及助手诊断共用同一目录解析，不随业务数据版本副本切换。显式 `TRPG_LOG_DIR` 与 `TRPG_INSTALL_ROOT` 仍保留原有优先级。
+
 业务 service 不应各自发明独立 log retention。
 
 ---

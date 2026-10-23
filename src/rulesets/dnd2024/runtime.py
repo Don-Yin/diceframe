@@ -927,6 +927,14 @@ class Dnd2024Runtime:
             updated["ruleset_operation_log"] = operation_log[-32:]
             instance.set_character_sheet(str(user_id), updated)
 
+    def character_needs_revival(self, instance: Any, user_id: str) -> bool:
+        """Read the canonical death condition for generic GM health commands."""
+
+        sheet = instance.get_character_sheet(str(user_id))
+        canonical = sheet.get("ruleset_character") if isinstance(sheet, dict) else None
+        conditions = canonical.get("conditions") if isinstance(canonical, dict) else None
+        return isinstance(conditions, dict) and "dead" in conditions
+
     @staticmethod
     def preflight_narrative_health(instance: Any) -> None:
         ruleset_runtime.require_writable(instance)

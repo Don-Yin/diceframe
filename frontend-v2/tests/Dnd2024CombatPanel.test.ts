@@ -129,6 +129,30 @@ describe('D&D 2024 combat panel', () => {
     wrapper.unmount()
   })
 
+  it('lets a hit defender cast Shield as a reaction or take the hit', async () => {
+    mocks.locale = 'zh-CN'
+    const data = response('active') as any
+    const decision = {
+      decision_id: 'hit-reaction:1', kind: 'hit_reaction_spell', assigned_to: 'gm', options: ['cast', 'decline'],
+      actor_id: 'player:gm', attacker_id: 'enemy:goblin-1', attack_total: 14, armor_class: 12,
+      spells: [{ spell_ref: 'spell:shield', name: '护盾术', level: 1, mode: 'reaction_defense', available_slot_levels: [0, 1], armor_class_bonus: 5 }],
+    }
+    data.gameplay.combat.pending_decisions = [decision]
+    data.available_actions = [{ type: 'decision.resolve', expected_version: 1, decisions: [decision] }]
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = wrapper.get('.decision-card')
+    expect(card.text()).toContain('你被攻击命中了')
+    expect(card.text()).toContain('攻击总值 14')
+    expect(card.text()).toContain('本次攻击将落空')
+    await card.get('.combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.decide).toHaveBeenCalledOnce()
+    expect(mocks.decide.mock.calls[0][2]).toMatchObject({ option: 'cast', spell_ref: 'spell:shield', slot_level: 0 })
+    wrapper.unmount()
+  })
+
   it('offers the free use and exact hit target while a melee-hit decision is pending', async () => {
     mocks.locale = 'zh-CN'
     const data = response('active') as any
@@ -147,7 +171,7 @@ describe('D&D 2024 combat panel', () => {
     expect(wrapper.get('.decision-card').text()).toContain('不追加法术，结算攻击')
     expect(wrapper.get('.decision-card').findAll('button')).toHaveLength(1)
     const card = wrapper.get('[data-testid=combat-spell-card]')
-    expect(card.text()).toContain('职业免费次数')
+    expect(card.text()).toContain('免费施放（长休恢复）')
     expect(card.findAll('select').at(-1)?.findAll('option')).toHaveLength(1)
     await card.get('button').trigger('click')
     await wrapper.get('.confirm-card .combat-primary').trigger('click')

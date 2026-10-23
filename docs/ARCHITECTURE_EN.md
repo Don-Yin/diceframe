@@ -5423,6 +5423,8 @@ Defaults:
 - Docker: `data/logs`
 - retention: 30 days
 
+Managed Docker keeps logs in the persistent host data directory identified by `TRPG_DOCKER_DATA_HOME`, falling back to the supplied data directory when unset. Writing, status, clearing, export, and Assistant diagnosis share the same directory resolver across business-data version switches. Explicit `TRPG_LOG_DIR` and `TRPG_INSTALL_ROOT` retain their existing precedence.
+
 Business services should not each invent their own log-retention policy.
 
 ---

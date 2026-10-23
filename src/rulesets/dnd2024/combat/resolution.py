@@ -23,6 +23,7 @@ from .primitives import (
     enemy_actor as _enemy_actor,
     player_actor as _player_actor,
 )
+from .reaction_spells import HIT_REACTION_DECISION, effective_armor_class
 from .triggered_spells import HIT_SPELL_DECISION
 
 
@@ -164,19 +165,20 @@ class CombatResolutionMixin:
         if "blessed" in actor["conditions"]:
             bless_bonus = int(rng.randint(1, 4))
         total = natural + attack_bonus + bless_bonus
-        target_ac = target["armor_class"] + (2 if "shield_of_faith" in target["conditions"] else 0)
+        target_ac = effective_armor_class(target)
         critical = natural == 20
         hit = natural != 1 and (critical or total >= target_ac)
         events: list[dict[str, Any]] = (
             [self._attack_cost_event(combat, actor)] if spend_attack_action else []
         )
-        events.append({
+        check_event = {
             "type": "check.resolved", "kind": "attack", "actor_id": actor_id,
             "advantage_mode": check_mode["mode"], "advantage_sources": check_mode["sources"],
             "target_id": target_id, "rolls": [value for value in (first, second) if value],
             "natural": natural, "modifier": attack_bonus, "bless_bonus": bless_bonus,
             "total": total, "target": target_ac, "success": hit, "critical": critical,
-        })
+        }
+        events.append(check_event)
         if hit:
             # 伤害骰经通用公式 AST 求值（Issue 212）：主骰 → 附加骰（魔化）
             # → 属性修正；重击翻倍仍由本层在 AST 上显式表达。
@@ -199,8 +201,12 @@ class CombatResolutionMixin:
                 "critical": critical, "rolls": rolls,
             }
             offer = self._hit_spell_offer(instance, combat, actor, weapon, target_id, damage_event, intent)
-            if offer:
-                events.append({"type": "dnd2024.decision.pending", **offer})
+            reaction = self._hit_reaction_offer(
+                instance, combat, actor, target, check_event, damage_event, intent,
+                next_decision=offer,
+            )
+            if reaction or offer:
+                events.append({"type": "dnd2024.decision.pending", **(reaction or offer)})
             else:
                 events.append(damage_event)
                 events.extend(self._concentration_events(target, damage, rng))
@@ -212,8 +218,9 @@ class CombatResolutionMixin:
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
     ) -> list[dict[str, Any]]:
         actor_id = str(intent["actor_id"])
-        actor = self._actor_view(instance, combat, actor_id)
         spell_ref = str(intent["spell_ref"])
+        # 起源专长授予的法术按专长自己的施法属性结算命中、DC 与治疗加值。
+        actor = self._spell_caster(self._actor_view(instance, combat, actor_id), spell_ref)
         spell = self.spells.get(spell_ref)
         if spell is None:  # pragma: no cover - validation guards this
             raise CombatIntentError("spell is missing")
@@ -255,12 +262,13 @@ class CombatResolutionMixin:
                 roll = max(rolls) if check_mode["mode"] == "advantage" else min(rolls)
                 bonus = int(actor["spell_attack_bonus"])
                 total = roll + bonus
-                succeeded = roll != 1 and (roll == 20 or total >= target["armor_class"])
+                target_ac = effective_armor_class(target)
+                succeeded = roll != 1 and (roll == 20 or total >= target_ac)
                 events.append({
                     "type": "check.resolved", "kind": "spell_attack", "actor_id": actor_id,
                     "target_id": target_id, "rolls": rolls, "natural": roll,
                     "advantage_mode": check_mode["mode"], "advantage_sources": check_mode["sources"],
-                    "modifier": bonus, "total": total, "target": target["armor_class"],
+                    "modifier": bonus, "total": total, "target": target_ac,
                     "success": succeeded, "critical": roll == 20,
                 })
                 if succeeded:
@@ -336,10 +344,21 @@ class CombatResolutionMixin:
                 if effect.get("add_spell_ability"):
                     healing_node = heal_ability_modifier_node(healing_node, actor)
                 healing, rolls = roll_damage_node(healing_node, rng)
+                healing = max(1, healing)
+                # 颤栗之触：目标在施法者回合结束前无法恢复生命值。
+                blocked = "cannot_regain_hp" in target["conditions"]
                 events.append({
                     "type": "resource.changed", "resource": "hp", "target_id": target_id,
-                    "delta": max(1, healing), "amount": max(1, healing), "healing": True,
-                    "rolls": rolls,
+                    "delta": 0 if blocked else healing, "amount": 0 if blocked else healing,
+                    "healing": True, "rolls": rolls,
+                    **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
+                })
+                succeeded = True
+            elif mode == "stabilize":
+                events.append({
+                    "type": "condition.applied", "target_id": target_id,
+                    "condition": "stable", "duration": "until_healed",
+                    "source_actor_id": actor_id,
                 })
                 succeeded = True
             elif mode in {"buff", "debuff"}:
@@ -596,6 +615,8 @@ class CombatResolutionMixin:
         )
         if decision.get("kind") == HIT_SPELL_DECISION:
             return self._finish_hit_spell(instance, combat, decision, rng)
+        if decision.get("kind") == HIT_REACTION_DECISION:
+            return self._finish_hit_reaction(instance, combat, decision, intent, rng)
         movement = decision["movement"]
         events: list[dict[str, Any]] = [{
             "type": "dnd2024.decision.cleared", "decision_id": decision["decision_id"],
@@ -606,6 +627,7 @@ class CombatResolutionMixin:
             threat = self._actor_view(instance, combat, threat_id)
             attack = threat["attacks"][0]
             attack_intent = {
+                "intent_id": f"{decision['decision_id']}:attack",
                 "actor_id": threat_id,
                 "target_id": str(movement["actor_id"]),
                 "attack_id": str(attack["id"]),

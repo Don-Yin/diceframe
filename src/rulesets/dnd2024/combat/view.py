@@ -9,6 +9,7 @@ from .triggered_spells import free_cast_resource
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.features import CombatCapabilityView
 from src.rulesets.dnd2024.features.combat import martial_arts_profile
+from src.rulesets.dnd2024.spells.feat_spells import feat_spell_grants
 
 from .primitives import (
     CombatIntentError,
@@ -114,6 +115,11 @@ class CombatViewMixin:
         # 职业资源与 feature-derived 攻击参数在此一次性投影：后面的 combat 代码
         # 只消费结果，不再各自解析职业等级或 level -> 武艺骰。
         feature_projection = self.features.actor_projection(character)
+        # 起源专长（魔法学徒）授予的戏法/1 环法术与职业特性授予并列：
+        # 各自带施法属性、攻击加值与 DC，结算时按法术来源取值。
+        spell_grants = [
+            *feature_projection["spell_grants"], *feat_spell_grants(character),
+        ]
         return {
             "actor_id": _player_actor(uid), "kind": "player", "id": uid, "side": "party",
             "hp": int(resources.get("hp", 0) or 0),
@@ -133,16 +139,23 @@ class CombatViewMixin:
             "spell_refs": list(dict.fromkeys([
                 *list(class_magic.get("cantrip_refs") or []),
                 *list(class_magic.get("prepared_spell_refs") or []),
-                *[row["spell_ref"] for row in feature_projection["spell_grants"]],
+                *[row["spell_ref"] for row in spell_grants],
+            ])),
+            "class_spell_refs": list(dict.fromkeys([
+                *list(class_magic.get("cantrip_refs") or []),
+                *list(class_magic.get("prepared_spell_refs") or []),
             ])),
             "slots": deepcopy(class_magic.get("slots_current") or {}),
-            "spell_grants": deepcopy(feature_projection["spell_grants"]),
+            "spell_grants": deepcopy(spell_grants),
             "spell_attack_bonus": int(
                 character.get("derived", {}).get("spell_attack_bonus", 0) or 0
             ),
             "spell_save_dc": int(character.get("derived", {}).get("spell_save_dc", 0) or 0),
             "spell_ability": str(class_magic.get("ability") or ""),
-            "concentration": deepcopy(class_magic.get("concentration")),
+            "concentration": deepcopy(
+                class_magic.get("concentration") if class_magic
+                else (character.get("spellcasting") or {}).get("concentration")
+            ),
             "conditions": deepcopy(conditions),
             "death_saves": deepcopy(conditions.get("death_saves") or {}),
             "build": deepcopy(character.get("build") or {}),
@@ -152,6 +165,32 @@ class CombatViewMixin:
             "martial_arts_weapon_refs": list(
                 feature_projection["martial_arts_weapon_refs"]
             ),
+        }
+
+    @staticmethod
+    def _spell_caster(actor: dict[str, Any], spell_ref: str) -> dict[str, Any]:
+        """The actor as the caster of one spell.
+
+        A class spell uses the class spellcasting numbers; a spell known only
+        through an origin feat uses that feat's chosen spellcasting ability.
+        """
+
+        if spell_ref in actor.get("class_spell_refs", []):
+            return actor
+        grant = next(
+            (
+                row for row in actor.get("spell_grants", [])
+                if row.get("spell_ref") == spell_ref and row.get("source") == "feat"
+            ),
+            None,
+        )
+        if grant is None:
+            return actor
+        return {
+            **actor,
+            "spell_ability": grant["spell_ability"],
+            "spell_attack_bonus": int(grant["spell_attack_bonus"]),
+            "spell_save_dc": int(grant["spell_save_dc"]),
         }
 
     def _project_character(self, character: dict[str, Any]) -> dict[str, Any]:
@@ -227,6 +266,8 @@ class CombatViewMixin:
                 reason = "not_automated"
             elif not is_current:
                 reason = "not_your_turn"
+            elif effect["mode"] == "reaction_defense":
+                reason = "requires_being_hit"
             elif effect["mode"] == "triggered_damage" and not trigger:
                 reason = "requires_melee_hit"
             elif trigger and effect["mode"] != "triggered_damage":
@@ -346,6 +387,9 @@ class CombatViewMixin:
             if spell is None or effect is None:
                 continue
             if effect["mode"] == "triggered_damage" and not trigger:
+                continue
+            if effect["mode"] == "reaction_defense":
+                # 只能在被攻击命中时，通过 hit_reaction_spell 决策施放。
                 continue
             cost = "bonus_action" if str(spell["casting_time"]).startswith("Bonus Action") else "action"
             if int(economy.get(cost, 0) or 0) < 1:

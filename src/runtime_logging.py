@@ -27,6 +27,9 @@ def resolve_runtime_log_dir(data_dir: Path) -> Path:
 
     install_mode = str(os.getenv("TRPG_INSTALL_MODE") or "").strip().lower()
     if install_mode.startswith("docker"):
+        docker_data_home = str(os.getenv("TRPG_DOCKER_DATA_HOME") or "").strip()
+        if docker_data_home:
+            return Path(docker_data_home).expanduser().resolve() / "logs"
         return data_dir.resolve() / "logs"
 
     return Path(__file__).resolve().parent.parent / "logs"

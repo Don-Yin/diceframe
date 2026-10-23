@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from src.rulesets.dnd2024.spells.feat_spells import concentration_holder, spend_feat_free_cast
 from src.rulesets.events import EventBatchError
 from .primitives import actor_kind as _actor_kind
 
@@ -211,10 +212,21 @@ class CombatReducerMixin:
             slots[level] -= 1
             combat["economy"]["slot_spell_cast"] = True
             return
+        if event_type == "dnd2024.feat_spell.free_cast_spent":
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion feat spells are canonical")
+            try:
+                spend_feat_free_cast(
+                    self._canonical_of(snapshot, kind, raw_id), str(event["feat_ref"]),
+                )
+            except ValueError as exc:
+                raise EventBatchError(str(exc)) from exc
+            return
         if event_type == "dnd2024.concentration.started":
             kind, raw_id = _actor_kind(str(event["actor_id"]))
             if kind in {"player", "companion"}:
-                self._canonical_of(snapshot, kind, raw_id)["spellcasting"]["class"][
+                concentration_holder(self._canonical_of(snapshot, kind, raw_id))[
                     "concentration"
                 ] = {
                     "spell_ref": event["spell_ref"], "target_ids": deepcopy(event["target_ids"]),
@@ -224,7 +236,7 @@ class CombatReducerMixin:
             owner = str(event["actor_id"])
             kind, raw_id = _actor_kind(owner)
             if kind in {"player", "companion"}:
-                self._canonical_of(snapshot, kind, raw_id)["spellcasting"]["class"][
+                concentration_holder(self._canonical_of(snapshot, kind, raw_id))[
                     "concentration"
                 ] = None
             self._remove_concentration_conditions(snapshot, combat, owner)

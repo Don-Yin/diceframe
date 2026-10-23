@@ -181,6 +181,17 @@ function modifier(score: unknown): string {
 function spellRefs(key: string): string[] {
   return ((classMagic.value[key] as string[] | undefined) || []).map(refName)
 }
+// 起源专长（魔法学徒）授予的戏法与 1 环法术：独立于职业法术，按所选施法属性施放。
+const featSpellRows = computed(() => {
+  const rows = (spellcasting.value.magic_initiate as JsonObject[] | undefined) || []
+  return rows.map(row => ({
+    feat: refName(row.feat_ref),
+    ability: abilityName(String(row.spellcasting_ability || '')),
+    cantrips: ((row.cantrip_ids as string[] | undefined) || []).map(refName),
+    spell: row.level_1_spell_id ? refName(row.level_1_spell_id) : '',
+    freeCastUsed: Boolean(row.free_cast_used),
+  }))
+})
 
 const spellSlotRows = computed(() => {
   const current = (classMagic.value.slots_current as Record<string, unknown> | undefined) || {}
@@ -378,6 +389,13 @@ async function completeRest(): Promise<void> {
       </section>
       <h3>{{ text('戏法', 'Cantrips') }}</h3><div class="tag-list"><span v-for="spell in spellRefs('cantrip_refs')" :key="spell">{{ spell }}</span><i v-if="!spellRefs('cantrip_refs').length">{{ text('此职业当前没有职业戏法', 'No class cantrips at this level') }}</i></div>
       <h3>{{ text('已准备法术', 'Prepared spells') }}</h3><div class="tag-list"><span v-for="spell in spellRefs('prepared_spell_refs')" :key="spell">{{ spell }}</span><i v-if="!spellRefs('prepared_spell_refs').length">{{ text('此职业当前没有准备法术', 'No prepared spells at this level') }}</i></div>
+      <template v-for="row in featSpellRows" :key="row.feat">
+        <h3>{{ text('起源专长法术', 'Origin feat spells') }} · {{ row.feat }}<small> · {{ text('施法属性', 'Spellcasting ability') }} {{ row.ability }}</small></h3>
+        <div class="tag-list">
+          <span v-for="spell in row.cantrips" :key="spell">{{ spell }} · {{ text('戏法', 'Cantrip') }}</span>
+          <span v-if="row.spell">{{ row.spell }} · {{ row.freeCastUsed ? text('免费施放已用（长休恢复）', 'Free cast used (Long Rest)') : text('可免费施放 1 次', '1 free cast ready') }}</span>
+        </div>
+      </template>
       <section v-if="target === 'game'" ref="restCenter" class="rest-center">
         <div><h3>{{ text('需要恢复？在这里完成休息', 'Need to recover? Complete a rest here') }}</h3><p>{{ text('你只选择休息类型和要花几颗生命骰；实际骰点、生命值、法术位和职业资源都由服务端计算。', 'Choose the rest type and how many Hit Dice to spend. The server rolls and updates HP, spell slots, and class resources.') }}</p></div>
         <div v-if="restSession?.active || restSession?.status === 'completed'" class="party-rest-status" role="status">

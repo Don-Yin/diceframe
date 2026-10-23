@@ -15,6 +15,7 @@ DICE_RE = re.compile(r"^[1-9]\d*d(?:4|6|8|10|12|20)(?:\+[1-9]\d*)?$")
 FLAT_DAMAGE_RE = re.compile(r"^[1-9]\d{0,3}$")
 SPELL_MODES = frozenset({
     "spell_attack", "saving_throw", "healing", "automatic_damage", "buff", "debuff", "triggered_damage",
+    "stabilize", "reaction_defense",
 })
 
 
@@ -67,6 +68,12 @@ class Dnd2024CombatCatalog:
                     )
             if effect["mode"] == "triggered_damage" and (effect.get("trigger") != "melee_hit" or not effect.get("damage")):
                 raise CombatCatalogError(f"combat spell trigger is invalid: {spell_id}")
+            if effect["mode"] == "reaction_defense" and (
+                effect.get("trigger") != "hit_by_attack"
+                or not 1 <= int(effect.get("armor_class_bonus", 0) or 0) <= 10
+                or not effect.get("condition")
+            ):
+                raise CombatCatalogError(f"combat reaction spell is invalid: {spell_id}")
             if "extra_damage_creature_types" in effect and (
                 not isinstance(effect["extra_damage_creature_types"], list)
                 or any(not isinstance(kind, str) or kind not in {"fiend", "undead"} for kind in effect["extra_damage_creature_types"])

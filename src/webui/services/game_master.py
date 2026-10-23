@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import time
 import uuid
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
@@ -28,11 +29,12 @@ from src.engine.game_instance import GameState
 from src.engine.health import record_health_event
 from src.engine.modules import progression_state
 from src.rules.rule_system import RuleSystem
-from src.rulesets.contracts import CharacterRevivalRuntime
+from src.rulesets.contracts import CharacterDeathStateRuntime, CharacterRevivalRuntime
 
 GameKey = tuple[str, ...]
 RecapGenerator = Callable[[Any], Awaitable[dict[str, Any]]]
 EconomyOutboxDrainer = Callable[[Any], Awaitable[bool]]
+logger = logging.getLogger("trpg")
 
 _GM_RESOURCE_ALIASES = {
     "生命值": "hp",
@@ -147,7 +149,7 @@ def _parse_currency_delta(
 
 
 def _parse_gm_resource_change(
-    instance: Any, command: str, rule: RuleSystem | None,
+    instance: Any, command: str, rule: RuleSystem | None, runtime: Any | None = None,
 ) -> dict[str, Any] | None:
     compact = re.sub(r"\s+", "", command).lower()
     resource_aliases = _resource_aliases_for_rule(rule)
@@ -256,7 +258,10 @@ def _parse_gm_resource_change(
     after = apply_resource_delta(character_sheet, resource_key, delta, rule)
     actual_delta = after - before
     revived = False
-    if resource_key == "hp" and after > 0 and character_sheet.get("deceased"):
+    canonical_dead = False
+    if isinstance(runtime, CharacterDeathStateRuntime):
+        canonical_dead = runtime.character_needs_revival(instance, user_id)
+    if resource_key == "hp" and after > 0 and (character_sheet.get("deceased") or canonical_dead):
         character_sheet["deceased"] = False
         character_sheet.pop("death_round", None)
         revived = True
@@ -391,10 +396,13 @@ class GameMasterService:
             self._dependencies.parse_game_key(game_key)
         )
 
-    def _sync_revived_character(self, instance: Any, user_id: str) -> None:
-        if self._dependencies.load_runtime is None:
-            return
-        runtime = self._dependencies.load_runtime(instance)
+    def _sync_revived_character(
+        self, instance: Any, user_id: str, runtime: Any | None = None,
+    ) -> None:
+        if runtime is None:
+            if self._dependencies.load_runtime is None:
+                return
+            runtime = self._dependencies.load_runtime(instance)
         if isinstance(runtime, CharacterRevivalRuntime):
             runtime.on_character_revived(instance, str(user_id))
 
@@ -472,12 +480,18 @@ class GameMasterService:
             return {"ok": False, "error": "请输入 GM 指令"}
 
         rule = self._dependencies.load_rule(instance)
-        resource_change = _parse_gm_resource_change(instance, command, rule)
+        runtime = None
+        if self._dependencies.load_runtime is not None:
+            try:
+                runtime = self._dependencies.load_runtime(instance)
+            except Exception:  # noqa: BLE001 - a missing adapter must not block legacy GM commands
+                logger.warning("规则运行时加载失败，跳过 canonical 复活检查", exc_info=True)
+        resource_change = _parse_gm_resource_change(instance, command, rule, runtime)
         if resource_change:
             if resource_change.get("error"):
                 return {"ok": False, "error": resource_change["error"]}
             if resource_change.get("revived"):
-                self._sync_revived_character(instance, str(resource_change["uid"]))
+                self._sync_revived_character(instance, str(resource_change["uid"]), runtime)
             record_health_event(
                 instance,
                 component="gm_control",

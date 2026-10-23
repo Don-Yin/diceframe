@@ -219,6 +219,31 @@ describe('ProfessionalCharacterCenter', () => {
     expect(wrapper.text()).not.toContain('slots_current')
   })
 
+  it('lists origin feat cantrips and spell even without class spellcasting', async () => {
+    const featCharacter = {
+      ...character,
+      ruleset_character: {
+        ...character.ruleset_character,
+        spellcasting: {
+          magic_initiate: [{
+            feat_ref: 'feat:magic_initiate_wizard', spellcasting_ability: 'wis',
+            cantrip_ids: ['fire_bolt', 'chill_touch'], level_1_spell_id: 'shield', free_cast_used: true,
+          }],
+        },
+      },
+    }
+    const wrapper = mount(ProfessionalCharacterCenter, {
+      props: { character: featCharacter, target: 'card', cardId: 'card-1', ruleId: 'dnd2024_srd', language: 'zh-CN' },
+      global: { stubs: { PortraitPicker: true } },
+    })
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    expect(wrapper.text()).toContain('起源专长法术')
+    expect(wrapper.text()).toContain('fire bolt')
+    expect(wrapper.text()).toContain('chill touch')
+    expect(wrapper.text()).toContain('shield')
+    expect(wrapper.text()).toContain('免费施放已用')
+  })
+
   it('keeps the action footer outside the only scrolling content region', async () => {
     const wrapper = mount(ProfessionalCharacterCenter, {
       props: {

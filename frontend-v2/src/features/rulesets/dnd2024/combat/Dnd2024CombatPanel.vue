@@ -459,6 +459,8 @@ function localizedTerm(value: unknown): string {
     dead: ['死亡', 'Dead'], defeated: ['已击败', 'Defeated'], death_saves: ['死亡豁免记录', 'Death Saves'],
     slowed_10: ['速度降低 10 尺', 'Speed reduced by 10 ft'], next_attack_advantage: ['下次攻击有优势', 'Next attack has advantage'],
     next_attack_disadvantage: ['下次攻击有劣势', 'Next attack has disadvantage'], faerie_fire: ['妖火标记', 'Faerie Fire'],
+    shield: ['护盾术（AC +5）', 'Shield (+5 AC)'], cannot_regain_hp: ['无法恢复生命', 'Cannot regain HP'],
+    hit_reaction_spell: ['被命中反应', 'Reaction when hit'], reaction_defense: ['反应防御', 'Reaction defense'],
   }
   const pair = labels[key]
   return pair ? (locale.value.startsWith('zh') ? pair[0] : pair[1]) : raw.replaceAll('_', ' ')
@@ -531,7 +533,7 @@ function targetsFor(spell?: RulesetCombatSpell): RulesetCombatTarget[] {
   const targets = spellAction.value?.targets || attackAction.value?.targets || []
   if (!spell || !currentActor.value) return targets
   if (spell.trigger_target_id) return targets.filter(target => target.actor_id === spell.trigger_target_id)
-  const allied = spell.mode === 'healing' || spell.mode === 'buff'
+  const allied = spell.mode === 'healing' || spell.mode === 'buff' || spell.mode === 'stabilize'
   return targets.filter(target => allied
     ? target.kind === currentActor.value?.kind
     : target.kind !== currentActor.value?.kind)
@@ -942,13 +944,27 @@ async function toggleReady(): Promise<void> {
   })
 }
 
-async function decide(decision: RulesetPendingDecision, option: string): Promise<void> {
+const reactionSpellRef = ref('')
+const reactionSlot = ref(0)
+const reactionSpells = computed(() => pendingDecision.value?.kind === 'hit_reaction_spell'
+  ? (pendingDecision.value.spells as RulesetCombatSpell[] | undefined) || []
+  : [])
+const reactionSpell = computed(() => (
+  reactionSpells.value.find(item => item.spell_ref === reactionSpellRef.value) || reactionSpells.value[0] || null
+))
+watch(reactionSpell, spell => {
+  if (!spell) return
+  reactionSpellRef.value = spell.spell_ref
+  if (!spell.available_slot_levels.includes(reactionSlot.value)) reactionSlot.value = spell.available_slot_levels[0] ?? 0
+}, { immediate: true })
+
+async function decide(decision: RulesetPendingDecision, option: string, extra: JsonObject = {}): Promise<void> {
   const gameKey = props.gameKey
   busy.value = true
   try {
     const payload = {
       type: 'decision.resolve', decision_id: decision.decision_id,
-      intent_id: intentId(), expected_version: gameplay.value?.state_version ?? 0, option,
+      intent_id: intentId(), expected_version: gameplay.value?.state_version ?? 0, option, ...extra,
     }
     const response = await resolveRulesetDecision(gameKey, decision.decision_id, payload)
     if (props.gameKey !== gameKey) return
@@ -1327,9 +1343,28 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
         </div>
 
         <section v-if="pendingDecision" class="decision-card" aria-live="assertive">
-          <strong>{{ pendingDecision.kind === 'melee_hit_spell' ? spellText.hit : `${copy.reaction} · ${localizedTerm(pendingDecision.kind)}` }}</strong>
+          <strong>{{ pendingDecision.kind === 'melee_hit_spell' ? spellText.hit : pendingDecision.kind === 'hit_reaction_spell' ? spellText.hitReaction : `${copy.reaction} · ${localizedTerm(pendingDecision.kind)}` }}</strong>
           <p v-if="pendingDecision.kind === 'melee_hit_spell'">{{ spellText.hitHint }}</p>
-          <div>
+          <template v-if="pendingDecision.kind === 'hit_reaction_spell'">
+            <p>{{ spellText.hitReactionHint(targetName(String(pendingDecision.attacker_id || '')), Number(pendingDecision.attack_total), Number(pendingDecision.armor_class)) }}</p>
+            <label v-if="reactionSpells.length > 1">{{ copy.spell }}
+              <select v-model="reactionSpellRef">
+                <option v-for="spell in reactionSpells" :key="spell.spell_ref" :value="spell.spell_ref">{{ spell.name }}</option>
+              </select>
+            </label>
+            <label v-if="reactionSpell && reactionSpell.available_slot_levels.length > 1">{{ copy.slot }}
+              <select v-model.number="reactionSlot">
+                <option v-for="slot in reactionSpell.available_slot_levels" :key="slot" :value="slot">{{ slot === 0 ? spellText.featFree : `${slot}` }}</option>
+              </select>
+            </label>
+            <div>
+              <button v-if="reactionSpell" class="combat-primary" :disabled="busy" @click="decide(pendingDecision, 'cast', { spell_ref: reactionSpell.spell_ref, slot_level: reactionSlot })">
+                {{ spellText.castReaction(reactionSpell.name, Number(reactionSpell.armor_class_bonus || 0), Number(pendingDecision.attack_total) < Number(pendingDecision.armor_class) + Number(reactionSpell.armor_class_bonus || 0)) }}
+              </button>
+              <button :disabled="busy" @click="decide(pendingDecision, 'decline')">{{ spellText.declineReaction }}</button>
+            </div>
+          </template>
+          <div v-else>
             <button v-if="pendingDecision.options.includes('resolve')" class="combat-primary" :disabled="busy" @click="decide(pendingDecision, 'resolve')">{{ copy.resolve }}</button>
             <button :disabled="busy" @click="decide(pendingDecision, 'decline')">{{ pendingDecision.kind === 'melee_hit_spell' ? spellText.decline : copy.decline }}</button>
           </div>

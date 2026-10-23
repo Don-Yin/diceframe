@@ -18,6 +18,7 @@ from .primitives import (
     canonical as _canonical,
 )
 from .readiness import required_encounter_player_ids
+from .reaction_spells import HIT_REACTION_DECISION
 from .triggered_spells import HIT_SPELL_DECISION, free_cast_resource, hit_spell_decision
 
 
@@ -207,6 +208,8 @@ class CombatValidationMixin:
             raise CombatIntentError("combat is not active")
         if any(row.get("kind") == HIT_SPELL_DECISION for row in combat.get("pending_decisions", [])) and intent_type not in {"cast_spell", "decision.resolve", "combat.message"}:
             raise CombatIntentError("resolve the melee hit spell decision first")
+        if any(row.get("kind") == HIT_REACTION_DECISION for row in combat.get("pending_decisions", [])) and intent_type not in {"decision.resolve", "combat.message"}:
+            raise CombatIntentError("waiting for the defender's reaction spell decision")
         if intent_type == "combat.message":
             if submitted_by not in instance.players:
                 raise CombatIntentError("only a party member can send a combat message")
@@ -228,11 +231,14 @@ class CombatValidationMixin:
             )
             if decision is None or intent.get("option") not in decision.get("options", []):
                 raise CombatIntentError("pending decision or option is invalid")
-            if decision.get("kind") == HIT_SPELL_DECISION:
+            if decision.get("kind") in {HIT_SPELL_DECISION, HIT_REACTION_DECISION}:
                 kind, raw_id = _actor_kind(str(decision.get("actor_id") or ""))
                 expected_owner = gm_uid if kind == "companion" or (kind == "player" and is_ai_controlled(instance, raw_id)) else decision.get("assigned_to")
                 if submitted_by != expected_owner:
                     raise CombatIntentError("only the assigned actor can resolve this spell decision")
+                if decision.get("kind") == HIT_REACTION_DECISION:
+                    self._validate_hit_reaction(instance, combat, decision, intent)
+                    return
             elif submitted_by != gm_uid:
                 raise CombatIntentError("only the assigned GM can resolve this reaction")
             if intent.get("option") == "resolve":
@@ -383,6 +389,8 @@ class CombatValidationMixin:
             raise CombatIntentError("spell is not deterministically automated yet")
         if spell_ref not in actor["spell_refs"]:
             raise CombatIntentError("spell is not prepared or known by the actor")
+        if effect["mode"] == "reaction_defense":
+            raise CombatIntentError("this spell is cast as a reaction when you are hit")
         trigger = hit_spell_decision(combat, actor["actor_id"])
         if effect["mode"] == "triggered_damage" and trigger is None:
             raise CombatIntentError("this spell requires a pending melee hit")
@@ -421,14 +429,19 @@ class CombatValidationMixin:
             target = self._actor_view(instance, combat, target_id)
             actor_side = str(actor.get("side") or "")
             target_side = str(target.get("side") or "")
-            if effect["mode"] in {"healing", "buff"}:
+            if effect["mode"] in {"healing", "buff", "stabilize"}:
                 if target_side != actor_side:
                     raise CombatIntentError("healing and beneficial spells require an allied target")
                 if "dead" in target.get("conditions", {}):
                     raise CombatIntentError("dead targets require a resurrection effect")
             elif target_side == actor_side:
                 raise CombatIntentError("offensive spells require a hostile target")
-            if target["hp"] <= 0 and effect["mode"] not in {"healing", "buff"}:
+            if effect["mode"] == "stabilize" and (
+                target["kind"] != "player" or target["hp"] > 0
+                or "stable" in target.get("conditions", {})
+            ):
+                raise CombatIntentError("this spell requires a dying ally at 0 HP")
+            if target["hp"] <= 0 and effect["mode"] not in {"healing", "buff", "stabilize"}:
                 raise CombatIntentError("spell target is not active")
             if effect["mode"] != "triggered_damage":
                 self._require_range(combat, actor["actor_id"], target_id, int(effect["range"]))

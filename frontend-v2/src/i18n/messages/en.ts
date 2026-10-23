@@ -1100,6 +1100,7 @@ export const en = {
   securityEnableConfirmIntro: 'A local self-signed certificate will be generated and the service will restart; the old http:// address stops working immediately.',
   securityEnableConfirmAddress: 'Afterwards, switch to the new https address and share it with your players.',
   securityEnableConfirmTrust: 'Browsers — your players\u2019 included — will show a “Not secure” warning; the connection is still encrypted and this is expected. Explain it beforehand so nobody is afraid to connect.',
+  securityEnableConfirmPlugin: 'If plugins or internal clients such as NapCat/QQ also need to connect, keep or configure TRPG_WEB_HTTP_PORT for a plain internal API; their default aiohttp clients do not trust self-signed certificates and may fail with CERTIFICATE_VERIFY_FAILED. Keep this HTTP port private; external players can still use HTTPS.',
   securityEnableConfirmMobileApp: 'The DiceFrame mobile app cannot currently connect to servers using self-signed certificates.',
   securityAcmeSetupTitle: 'Issuance setup',
   securityEnableConfirmAction: 'Enable and restart',
