@@ -258,6 +258,14 @@ function moduleCount(item: ModuleSummary): number {
 .hub-world-card .hub-card-content > div { min-width: 0; }
 .hub-world-card .hub-card-content h3 { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .hub-world-card .hub-card-content p { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.lorebook-card > div { min-width: 0; }
+.lorebook-card p {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
 .hub-world-card .hub-card-actions { margin-top: auto; margin-inline: 0; margin-bottom: 0; gap: .4rem; }
 .library-unavailable small { display: block; margin-top: .25rem; color: var(--df-text-muted); font-size: .72rem; }
 .hub-empty { padding: 1rem; border: 1px dashed var(--df-border-soft); border-radius: 12px; color: var(--df-text-muted); }

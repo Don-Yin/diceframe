@@ -84,3 +84,22 @@ test('lorebook cards identify the actual book and its bound world', async ({ pag
   await expect(cards.nth(1).getByRole('link')).toHaveAttribute('href', /world=port.*book=people:port|book=people:port.*world=port/)
   await page.screenshot({ path: info.outputPath('lorebook-card-titles.png'), scale: 'css' })
 })
+
+test('lorebook cards clamp long descriptions on narrow screens', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 })
+  const longDescription = '# 盐与钟：潮汐列岛\n\n' + '这是一段很长的世界资料，用来验证内容库卡片不会被完整正文撑爆。'.repeat(40)
+  await page.route('**/api/worlds', route => route.fulfill({ json: { worlds: [{ id: 'tide', name: '盐与钟：潮汐列岛', language: 'zh-CN' }] } }))
+  await page.route('**/api/lorebooks?scope=all', route => route.fulfill({ json: { books: [
+    { id: 'primary:tide', name: '盐与钟：潮汐列岛', language: 'zh-CN', description: longDescription, entry_count: 1, bindings: [{ scope_kind: 'world', scope_id: 'tide', role: 'primary' }] },
+  ] } }))
+
+  await page.goto('/#/library')
+  const card = page.getByTestId('library-lorebook')
+  const description = card.locator('p')
+  await expect(description).toBeVisible()
+  await expect.poll(() => description.evaluate(element => ({
+    lineClamp: getComputedStyle(element).webkitLineClamp,
+    overflow: getComputedStyle(element).overflow,
+  }))).toEqual({ lineClamp: '3', overflow: 'hidden' })
+  expect(await card.evaluate(element => element.getBoundingClientRect().height)).toBeLessThan(400)
+})
