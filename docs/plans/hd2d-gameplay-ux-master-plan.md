@@ -524,4 +524,3 @@ idle → submitting → streaming → pending → committed
 - [Alchemy RPG](https://alchemyrpg.com/)：scene-first 叙事舞台；
 - [Owlbear Rodeo](https://docs.owlbear.rodeo/docs/getting-started/)：低门槛桌面体验；
 - [Foundry VTT](https://foundryvtt.com/)：专业模块和权限生态。
-

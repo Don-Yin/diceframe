@@ -326,4 +326,3 @@ GameTable
 - [Foundry VTT](https://foundryvtt.com/)：专业扩展生态和权限模型；
 - [Quest Portal](https://www.questportal.com/)：AI 辅助 GM 工作流；
 - [AI Dungeon](https://help.aidungeon.com/faq/how-to-play)：明确的行动意图和编辑/撤销恢复。
-
