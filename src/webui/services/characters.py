@@ -834,24 +834,39 @@ async def _update_character_authority(
         else:
             cs["portrait"] = portrait
     # GAL P8：立绘 / 表情差分 / 音色绑定（全部可选字段，旧存档照常）。
-    if "standing_portrait" in updates or "standing_portrait_expressions" in updates:
+    standing_portrait_present = "standing_portrait" in updates
+    standing_expressions_present = "standing_portrait_expressions" in updates
+    if standing_portrait_present or standing_expressions_present:
         try:
-            standing = _validated_standing_portrait(
-                dependencies.assets, updates.pop("standing_portrait", None),
+            # A missing PATCH field means "leave it alone".  Validate every
+            # supplied field before mutating either stored value so a bad
+            # partial update cannot produce a half-applied standing portrait.
+            standing = (
+                _validated_standing_portrait(
+                    dependencies.assets, updates["standing_portrait"],
+                )
+                if standing_portrait_present else None
             )
-            standing_expressions = _validated_standing_portrait_expressions(
-                dependencies.assets, updates.pop("standing_portrait_expressions", None),
+            standing_expressions = (
+                _validated_standing_portrait_expressions(
+                    dependencies.assets, updates["standing_portrait_expressions"],
+                )
+                if standing_expressions_present else None
             )
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
-        if standing is None:
-            cs.pop("standing_portrait", None)
-        else:
-            cs["standing_portrait"] = standing
-        if standing_expressions is None:
-            cs.pop("standing_portrait_expressions", None)
-        else:
-            cs["standing_portrait_expressions"] = standing_expressions
+        if standing_portrait_present:
+            updates.pop("standing_portrait")
+            if standing is None:
+                cs.pop("standing_portrait", None)
+            else:
+                cs["standing_portrait"] = standing
+        if standing_expressions_present:
+            updates.pop("standing_portrait_expressions")
+            if standing_expressions is None:
+                cs.pop("standing_portrait_expressions", None)
+            else:
+                cs["standing_portrait_expressions"] = standing_expressions
     if "voice_profile" in updates:
         try:
             voice = _validated_voice_profile(updates.pop("voice_profile"))

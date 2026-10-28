@@ -144,6 +144,87 @@ async def test_player_character_edit_accepts_bindings(web_api):
     assert rejected.get("ok") is False
 
 
+@pytest.mark.asyncio
+async def test_player_standing_portrait_partial_updates_preserve_other_field(web_api):
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    game_key, inst = await _game_with_npc(api, registry)
+    uploaded = api.save_standing_portrait_upload(_portrait_b64())
+    ref = uploaded["standing_portrait"]
+    gm_uid = "web_session_gm"
+
+    initial = await api.update_character(
+        game_key,
+        gm_uid,
+        {
+            "standing_portrait": ref,
+            "standing_portrait_expressions": {"smile": ref},
+        },
+    )
+    assert initial["ok"] is True
+
+    # Updating either field alone must not clear its sibling.
+    assert (await api.update_character(
+        game_key, gm_uid, {"standing_portrait": ref},
+    ))["ok"] is True
+    sheet = inst.get_character_sheet(gm_uid)
+    assert sheet["standing_portrait"] == ref
+    assert sheet["standing_portrait_expressions"] == {"smile": ref}
+
+    assert (await api.update_character(
+        game_key, gm_uid, {"standing_portrait_expressions": {"sad": ref}},
+    ))["ok"] is True
+    sheet = inst.get_character_sheet(gm_uid)
+    assert sheet["standing_portrait"] == ref
+    assert sheet["standing_portrait_expressions"] == {"sad": ref}
+
+    # Explicit None / {} retains the sibling while clearing only the named field.
+    assert (await api.update_character(
+        game_key, gm_uid, {"standing_portrait": None},
+    ))["ok"] is True
+    sheet = inst.get_character_sheet(gm_uid)
+    assert "standing_portrait" not in sheet
+    assert sheet["standing_portrait_expressions"] == {"sad": ref}
+
+    assert (await api.update_character(
+        game_key, gm_uid, {"standing_portrait_expressions": {}},
+    ))["ok"] is True
+    sheet = inst.get_character_sheet(gm_uid)
+    assert "standing_portrait" not in sheet
+    assert "standing_portrait_expressions" not in sheet
+
+
+@pytest.mark.asyncio
+async def test_player_standing_portrait_partial_update_is_atomic_on_invalid_field(web_api):
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    game_key, inst = await _game_with_npc(api, registry)
+    uploaded = api.save_standing_portrait_upload(_portrait_b64())
+    ref = uploaded["standing_portrait"]
+    gm_uid = "web_session_gm"
+    await api.update_character(
+        game_key,
+        gm_uid,
+        {
+            "standing_portrait": ref,
+            "standing_portrait_expressions": {"smile": ref},
+        },
+    )
+    before = dict(inst.get_character_sheet(gm_uid))
+
+    rejected = await api.update_character(
+        game_key,
+        gm_uid,
+        {
+            "standing_portrait": {"kind": "upload", "asset_id": "0" * 64},
+            "standing_portrait_expressions": {"sad": ref},
+        },
+    )
+
+    assert rejected["ok"] is False
+    after = inst.get_character_sheet(gm_uid)
+    assert after["standing_portrait"] == before["standing_portrait"]
+    assert after["standing_portrait_expressions"] == before["standing_portrait_expressions"]
+
+
 def test_projection_drops_stale_personal_voice_binding():
     voice = "personal:" + "cd" * 16
     row = {"voice_profile": voice}
