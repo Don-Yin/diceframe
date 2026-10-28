@@ -57,6 +57,15 @@ def test_manual_roll_create_resolve_is_idempotent_and_bound_to_target():
     asyncio.run(scenario())
 
 
+def test_cancelled_manual_roll_cannot_be_resolved():
+    request = _resolved_check(status="cancelled", results={})
+    service = _make_service(_context_instance([request]), [])
+    result = asyncio.run(service.resolve(
+        "game", "p1", request["id"], {"run_id": "run-1"},
+    ))
+    assert result["ok"] is False
+
+
 def test_manual_roll_purpose_check_and_contest_are_evaluated_without_state_effects():
     instance = SimpleNamespace(
         modules={},

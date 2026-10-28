@@ -88,6 +88,7 @@ class ManualRollService:
         if not req or req.get("run_id")!=body.get("run_id"): return {"ok":False,"error":"请求不存在或已过期"}
         target=str(body.get("target_uid") or uid)
         if target not in req.get("target_uids",[]) or (uid!=target and uid!=inst.gm_uid): return {"ok":False,"error":"无权投掷"}
+        if req.get("status") == "cancelled": return {"ok":False,"error":"请求已取消"}
         if target in req["results"]: return {"ok":True,"result":req["results"][target],"idempotent":True}
         session_stats.require_writable(inst)
         checks.require_writable(inst)
