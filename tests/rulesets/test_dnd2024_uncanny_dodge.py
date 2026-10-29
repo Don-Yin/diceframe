@@ -244,7 +244,9 @@ def test_an_invisible_attacker_cannot_be_dodged() -> None:
         "conditions", {},
     )["invisible"] = {}
 
-    events = _enemy_attack(engine, instance, [15, 4])
+    # P1 起 invisible 进入攻击模式注册表：隐形攻击者的攻击具有优势，
+    # 双骰取高后伤害骰继续沿用序列；断言意图不变（无反应决策 + 全额伤害）。
+    events = _enemy_attack(engine, instance, [15, 8, 4])
 
     assert not any(
         event["type"] == "dnd2024.decision.pending" for event in events
