@@ -221,3 +221,32 @@ def test_a_level_four_rogue_gets_no_reaction_decision() -> None:
         event["type"] == "dnd2024.decision.pending" for event in events
     )
     assert _damage(events)["amount"] == 6
+
+
+def test_a_blinded_rogue_is_not_offered_uncanny_dodge() -> None:
+    """Uncanny Dodge needs to see the attacker; a blinded rogue just takes it."""
+
+    engine, instance = _instance()
+    _player(instance).setdefault("conditions", {})["blinded"] = {}
+
+    events = _hit_once(engine, instance, [15, 4])
+
+    assert not any(
+        event["type"] == "dnd2024.decision.pending" for event in events
+    )
+    assert _damage(events)["amount"] == 6
+
+
+def test_an_invisible_attacker_cannot_be_dodged() -> None:
+    engine, instance = _instance()
+    _end_player_turn(engine, instance)
+    ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"].setdefault(
+        "conditions", {},
+    )["invisible"] = {}
+
+    events = _enemy_attack(engine, instance, [15, 4])
+
+    assert not any(
+        event["type"] == "dnd2024.decision.pending" for event in events
+    )
+    assert _damage(events)["amount"] == 6

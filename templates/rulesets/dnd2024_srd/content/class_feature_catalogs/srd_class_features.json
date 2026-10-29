@@ -226,15 +226,7 @@
           "summary": "When an attacker that you can see hits you with an attack, you can use your Reaction to halve the attack's damage against you (rounded down).",
           "parameters": {
             "damage_multiplier": 0.5
-          },
-          "capabilities": [
-            {
-              "id": "uncanny_dodge",
-              "cost": {"resources": [{"id": "reaction", "amount": 1}]},
-              "requires_hostile_target": false,
-              "actions": [{"kind": "uncanny_dodge", "count": 1}]
-            }
-          ]
+          }
         }
       ]
     }

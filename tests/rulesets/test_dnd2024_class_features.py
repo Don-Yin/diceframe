@@ -580,24 +580,22 @@ def test_sneak_attack_dice_follow_the_rogue_progression(level: int, dice: str) -
     assert resolver.feature_value(_rogue(level), "sneak_attack", "damage_dice") == dice
 
 
-def test_rogue_uncanny_dodge_declaration_and_capability_load() -> None:
+def test_rogue_uncanny_dodge_declares_no_capability_and_keeps_parameters() -> None:
+    """Uncanny Dodge is owned by the reaction path, not the action list.
+
+    It declares no capability on purpose: listing it in ``available_intents``
+    would surface a "use" action that the engine cannot resolve (the feature
+    reacts to being hit, it is never the player's turn action).  Its catalog
+    parameters stay authoritative for the reaction path.
+    """
+
     _runtime, resolver = _resolver()
     character = _rogue(5)
 
     assert [feature.id for feature in resolver.features_for(character)] == [
         "sneak_attack", "uncanny_dodge",
     ]
-    capability = resolver.declared_capability(character, "uncanny_dodge")
-
-    assert capability is not None
-    assert capability.requires_hostile_target is False
-    assert capability.cost.action == ""
-    assert [
-        (cost.resource_id, cost.amount) for cost in capability.cost.resources
-    ] == [("reaction", 1)]
-    assert [
-        (action.kind, action.count) for action in capability.actions
-    ] == [("uncanny_dodge", 1)]
+    assert resolver.declared_capability(character, "uncanny_dodge") is None
     assert resolver.feature_value(character, "uncanny_dodge", "damage_multiplier") == 0.5
     assert resolver.catalog.label("uncanny_dodge") == "Uncanny Dodge"
 

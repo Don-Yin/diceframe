@@ -1184,7 +1184,14 @@ class Dnd2024CombatEngine(
             previous_conditions = self._conditions(snapshot, combat, previous_actor_id)
             rage = previous_conditions.get("rage")
             if isinstance(rage, dict):
-                if "unconscious" in previous_conditions:
+                # 失能即结束狂暴：unconscious / incapacitated 以及所有
+                # 蕴含失能的条件（paralyzed / stunned / petrified）。
+                if any(
+                    condition in previous_conditions
+                    for condition in (
+                        "unconscious", "incapacitated", "paralyzed", "stunned", "petrified",
+                    )
+                ):
                     previous_conditions.pop("rage", None)
                 elif not rage.get("established"):
                     rage["established"] = True

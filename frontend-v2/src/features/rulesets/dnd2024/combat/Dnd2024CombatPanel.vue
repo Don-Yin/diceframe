@@ -1370,7 +1370,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
                 :key="feature.feature_id"
                 :disabled="busy"
                 @click="decide(pendingDecision, 'feature', { feature_id: feature.feature_id })"
-              >{{ spellText.useReactionFeature(feature.name) }}</button>
+              >{{ spellText.useReactionFeature(feature.name, Number(feature.damage_multiplier)) }}</button>
               <button :disabled="busy" @click="decide(pendingDecision, 'decline')">{{ spellText.declineReaction }}</button>
             </div>
           </template>

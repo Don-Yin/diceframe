@@ -7,10 +7,13 @@ Every assertion goes through the same authoritative chain the web layer uses:
 
 from __future__ import annotations
 
+import pytest
+
 from src.engine.modules import ruleset_runtime
 from src.engine.player_control import set_control
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
+from src.rulesets.events import EventBatchError
 
 from dnd2024_monk_common import (
     SequenceRng,
@@ -260,3 +263,27 @@ def test_ai_hosted_fighter_keeps_attacking_after_using_the_surge() -> None:
     assert intent is not None
     assert intent["type"] == "attack"
     assert intent["target_id"] == "enemy:goblin-1"
+
+
+def test_economy_grant_flags_fail_closed_on_unknown_keys() -> None:
+    """``flags`` is engine bookkeeping, not a channel to write arbitrary economy."""
+
+    engine, instance = _instance()
+    version = ruleset_runtime.state(instance)["version"]
+
+    with pytest.raises(EventBatchError, match="unknown"):
+        engine.apply_batch(instance, {
+            "batch_id": "batch_forged_economy_flags",
+            "intent_id": "forged-flags",
+            "intent_type": "class_capability",
+            "expected_version": version,
+            "result_version": version + 1,
+            "events": [
+                {"type": "dnd2024.economy.granted", "actor_id": "player:gm",
+                 "grants": {}, "flags": {"not_a_real_flag": True}},
+            ],
+            "source_ref": "test",
+        })
+
+    assert "not_a_real_flag" not in _economy(instance)
+    assert ruleset_runtime.state(instance)["version"] == version

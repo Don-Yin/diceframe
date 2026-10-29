@@ -180,8 +180,12 @@ class CombatResolutionMixin:
             "total": total, "target": target_ac, "success": hit, "critical": critical,
         }
         events.append(check_event)
-        if target["kind"] == "enemy" and "rage" in actor["conditions"]:
-            # 2024 狂暴：对敌人进行一次攻击检定即延长一轮，命中与否都算。
+        if (
+            target["kind"] == "enemy" and "rage" in actor["conditions"]
+            and str((combat.get("economy") or {}).get("actor_id") or "") == str(actor_id)
+        ):
+            # 2024 狂暴：在你的回合对敌人进行一次攻击检定即延长一轮，
+            # 命中与否都算；借机攻击发生在别人的回合，不延长狂暴。
             events.append({
                 "type": "dnd2024.condition.sustained", "target_id": actor_id,
                 "condition": "rage",
@@ -216,11 +220,24 @@ class CombatResolutionMixin:
                     ]}
             damage, rolls = roll_damage_node(damage_node, rng)
             damage = max(0, damage)
+            resistance = None
+            if (
+                "rage" in target["conditions"]
+                and str(damage_type) in ("bludgeoning", "piercing", "slashing")
+            ):
+                # 2024 狂暴：承受的钝击/穿刺/挥砍伤害减半，
+                # 取整方式与反应减半（damage_multiplier）一致：向下取整。
+                halved = int(damage * 0.5)
+                if halved != damage:
+                    resistance = "rage"
+                    damage = halved
             damage_event = {
                 "type": "resource.changed", "resource": "hp", "target_id": target_id,
                 "delta": -damage, "amount": damage, "damage_type": damage_type,
                 "critical": critical, "rolls": rolls,
             }
+            if resistance:
+                damage_event["resistance"] = resistance
             if sneak_dice:
                 # 延迟提交：只有这次命中伤害最终落地才记一次偷袭使用。
                 # Shield 改判落空时不会走到提交辅助方法，因此不会记账。
@@ -443,6 +460,15 @@ class CombatResolutionMixin:
             if self._distance(combat, actor_id, target["actor_id"]) <= 5
             and self._distance_after_move(combat, actor_id, target["actor_id"], distance) > 5
             and int(combat.get("reactions", {}).get(target["actor_id"], 0)) > 0
+            # 借机攻击必须是近战武器攻击：远程武器的持有者不构成威胁，
+            # 也不应为一次无法结算的借机攻击消耗其反应。敌方档案与玩家
+            # 装备链都携带 range，缺失 range 的档案按近战处理。
+            and any(
+                int(attack.get("range") or 0) <= 5
+                for attack in self._available_attacks(
+                    self._actor_view(instance, combat, target["actor_id"])
+                )
+            )
         ]
         actor = self._actor_view(instance, combat, actor_id)
         disengaged = bool(economy.get("disengaged")) or "disengaged" in actor["conditions"]
@@ -839,20 +865,27 @@ class CombatResolutionMixin:
                 "actor_id": threat_id,
                 "target_id": str(movement["actor_id"]),
             }
-            if threat["kind"] == "enemy":
-                attack_intent["attack_id"] = str(threat["attacks"][0]["id"])
+            # 借机攻击必须是近战武器攻击：只有射程 5 尺的攻击档案才能
+            # 用作借机攻击（长弓等远程武器不构成威胁）；没有近战档案时
+            # 不发生攻击，也不臆造档案。敌方档案与玩家装备链都带 range。
+            melee_attacks = [
+                attack for attack in self._available_attacks(threat)
+                if int(attack.get("range") or 0) <= 5
+            ]
+            if melee_attacks:
+                if threat["kind"] == "enemy":
+                    attack_intent["attack_id"] = str(melee_attacks[0]["id"])
+                else:
+                    attack_intent["weapon_ref"] = str(melee_attacks[0]["weapon_ref"])
             else:
-                # 玩家/队友的借机攻击复用其已装备武器的既有攻击档案；
-                # 没有可声明武器时按既有规则失败，不臆造档案。
-                attack_intent["weapon_ref"] = str(
-                    self._available_attacks(threat)[0]["weapon_ref"]
-                )
-            opportunity = self._attack_events(instance, combat, attack_intent, rng)
-            opportunity[0] = {
-                "type": "dnd2024.reaction.spent", "actor_id": threat_id,
-                "reason": "opportunity_attack",
-            }
-            events.extend(opportunity)
+                attack_intent = None
+            if attack_intent is not None:
+                opportunity = self._attack_events(instance, combat, attack_intent, rng)
+                opportunity[0] = {
+                    "type": "dnd2024.reaction.spent", "actor_id": threat_id,
+                    "reason": "opportunity_attack",
+                }
+                events.extend(opportunity)
         events.append({
             "type": "dnd2024.position.changed", "actor_id": movement["actor_id"],
             "distance": int(movement["distance"]),

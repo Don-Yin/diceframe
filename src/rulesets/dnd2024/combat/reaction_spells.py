@@ -66,6 +66,7 @@ class CombatReactionSpellsMixin:
 
     def _reaction_feature_choices(
         self, combat: dict[str, Any], defender: dict[str, Any],
+        attacker: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Class features the defender may spend their reaction on when hit.
 
@@ -74,6 +75,10 @@ class CombatReactionSpellsMixin:
         character can never react twice in the same round through two paths.
         Ownership comes from the feature boundary (class level), never from a
         localized name.
+
+        Uncanny Dodge must see the attack, so a blinded defender or an
+        invisible attacker removes the choice.  ``attacker`` is optional:
+        callers without an attacker view keep the unrestricted behaviour.
         """
 
         if defender["kind"] not in {"player", "companion"} or defender["hp"] <= 0:
@@ -81,6 +86,10 @@ class CombatReactionSpellsMixin:
         if int(combat.get("reactions", {}).get(defender["actor_id"], 0) or 0) < 1:
             return []
         if "reaction_blocked" in defender["conditions"] or "shield" in defender["conditions"]:
+            return []
+        if "blinded" in defender["conditions"]:
+            return []
+        if attacker is not None and "invisible" in (attacker.get("conditions") or {}):
             return []
         character = self._feature_character(defender)
         if not self.features.has_feature(character, "uncanny_dodge"):
@@ -107,7 +116,7 @@ class CombatReactionSpellsMixin:
         if attacker.get("side") == defender.get("side"):
             return None
         spells = self._reaction_spell_choices(combat, defender)
-        features = self._reaction_feature_choices(combat, defender)
+        features = self._reaction_feature_choices(combat, defender, attacker)
         if not spells and not features:
             return None
         kind, raw_id = actor_kind(defender["actor_id"])
@@ -153,9 +162,10 @@ class CombatReactionSpellsMixin:
             if isinstance(slot_level, bool) or slot_level not in choice["available_slot_levels"]:
                 raise CombatIntentError("the selected spell slot is not available")
             return
+        attacker = self._actor_view(instance, combat, str(decision["attacker_id"]))
         choice = next(
             (
-                row for row in self._reaction_feature_choices(combat, defender)
+                row for row in self._reaction_feature_choices(combat, defender, attacker)
                 if row["feature_id"] == intent.get("feature_id")
             ),
             None,

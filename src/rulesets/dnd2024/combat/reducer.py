@@ -14,6 +14,9 @@ from .primitives import actor_kind as _actor_kind
 _GRANTABLE_ECONOMY = frozenset({
     "action", "bonus_action", "reaction", "movement", "surge_action",
 })
+# economy.granted 的 flags 是引擎内部记账（如 action_surge_used 的「每回合
+# 一次」），不是向 economy 任意写字段的通道；未知 flag fail closed。
+_GRANTABLE_FLAGS = frozenset({"action_surge_used"})
 
 
 class CombatReducerMixin:
@@ -149,6 +152,8 @@ class CombatReducerMixin:
                     raise EventBatchError("economy grant amount is invalid")
                 economy[str(key)] = int(economy.get(str(key), 0) or 0) + amount
             for key, value in flags.items():
+                if str(key) not in _GRANTABLE_FLAGS:
+                    raise EventBatchError(f"economy grant flag is unknown: {key}")
                 economy[str(key)] = value
             return
         if event_type == "dnd2024.feature.used":

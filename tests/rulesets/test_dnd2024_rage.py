@@ -453,3 +453,104 @@ def test_attacking_a_non_enemy_does_not_renew_the_rage() -> None:
     assert not any(
         event["type"] == "dnd2024.condition.sustained" for event in events
     )
+
+
+# --------------------------------------------------------------------------
+# 2024 Rage resilience: bludgeoning / piercing / slashing damage taken while
+# raging is halved (rounding down, like every other damage multiplier).
+# --------------------------------------------------------------------------
+
+
+def _damage_to_player(events: list[dict]) -> dict:
+    return next(
+        event for event in events
+        if event["type"] == "resource.changed" and event.get("target_id") == "player:gm"
+    )
+
+
+def _goblin_attacks_the_barbarian(engine, instance, rolls: list[int]) -> list[dict]:
+    return _apply(engine, instance, _attack_intent(
+        engine, instance, "", intent_id="goblin-1", actor_id="enemy:goblin-1",
+        target_id="player:gm", attack_id="scimitar",
+    ), SequenceRng(list(rolls)))
+
+
+def test_rage_halves_slashing_damage_taken() -> None:
+    engine, instance = _instance(level=5, hp=30, conditions={
+        "rage": {"duration": "rage", "turns_remaining": 10, "source_actor_id": "player:gm"},
+    })
+    _end_turn(engine, instance)
+
+    events = _goblin_attacks_the_barbarian(engine, instance, [15, 5])
+
+    damage = _damage_to_player(events)
+    assert damage["damage_type"] == "slashing"
+    assert damage["amount"] == 3  # (5 + 2) = 7, halved rounds down
+    assert damage["resistance"] == "rage"
+    assert _player(instance)["resources"]["hp"] == 30 - 3
+
+
+def test_rage_leaves_nonphysical_damage_alone() -> None:
+    engine, instance = _instance(level=5, hp=30, conditions={
+        "rage": {"duration": "rage", "turns_remaining": 10, "source_actor_id": "player:gm"},
+    })
+    _end_turn(engine, instance)
+    combat = ruleset_runtime.state(instance)["combat"]
+    combat["enemies"]["goblin-1"]["attacks"][0]["damage_type"] = "fire"
+
+    events = _goblin_attacks_the_barbarian(engine, instance, [15, 5])
+
+    damage = _damage_to_player(events)
+    assert damage["damage_type"] == "fire"
+    assert damage["amount"] == 7
+    assert "resistance" not in damage
+
+
+@pytest.mark.parametrize(
+    "condition",
+    ["incapacitated", "paralyzed", "stunned", "petrified"],
+)
+def test_incapacitating_conditions_end_the_rage(condition: str) -> None:
+    engine, instance = _instance(level=5, conditions={
+        "rage": {"duration": "rage", "turns_remaining": 10, "source_actor_id": "player:gm"},
+        condition: {},
+    })
+
+    _end_turn(engine, instance)
+
+    assert condition in _conditions(instance)
+    assert "rage" not in _conditions(instance)
+
+
+def test_an_opportunity_attack_on_another_actors_turn_does_not_renew_rage() -> None:
+    engine, instance = _instance(level=5, conditions={
+        "rage": {"duration": "rage", "turns_remaining": 10, "source_actor_id": "player:gm"},
+    })
+    _end_turn(engine, instance)
+
+    moved = _apply(engine, instance, {
+        "intent_id": "move-1", "type": "move",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "enemy:goblin-1", "distance": 10,
+    })
+
+    pending = next(
+        event for event in moved if event["type"] == "dnd2024.decision.pending"
+    )
+    assert pending["kind"] == "opportunity_attack"
+    assert pending["threat_actor_ids"] == ["player:gm"]
+
+    decided = _apply(engine, instance, {
+        "intent_id": "decision-1", "type": "decision.resolve",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "decision_id": pending["decision_id"], "option": "resolve",
+    }, SequenceRng([15, 7]))
+
+    # 借机攻击确实结算了，但它发生在别人的回合，因此不延长狂暴。
+    assert any(
+        event["type"] == "resource.changed" and event.get("target_id") == "enemy:goblin-1"
+        for event in decided
+    )
+    assert not any(
+        event["type"] == "dnd2024.condition.sustained" for event in decided
+    )
