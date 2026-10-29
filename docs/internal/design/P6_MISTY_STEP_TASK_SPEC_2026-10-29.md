@@ -219,3 +219,61 @@ speed = effective_speed(self.catalog.conditions, actor.get("conditions") or {}, 
 ## 9. 修订记录
 
 - v1（2026-10-29）：初版。借机攻击解释依用户裁决（只有使用速度的移动才触发，参照贤者谏言判据）。
+
+---
+
+## 执行报告（2026-10-30）
+
+### 1. 变更文件清单
+
+| 文件 | 状态 | 内容 | 归属 |
+|---|---|---|---|
+| `templates/rulesets/dnd2024_srd/content/combat_catalogs/srd_combat_core.json` | M | `spell_effects` 新增 `misty_step`（teleport/30/1）；conditions 新增 `slowed_10: {"speed_modifier": -10}` | 仅 P6 |
+| `src/rulesets/dnd2024/combat/catalog.py` | M | `SPELL_MODES` 追加 `"teleport"`；conditions 允许键与被动标志键集合追加 `speed_modifier`；新增 bool/int/0/±600 校验 | 仅 P6 |
+| `src/rulesets/dnd2024/combat/check_modes.py` | M | 新增纯函数 `effective_speed(registry, conditions, base_speed)`（`condition_flags` 与 `attack_sources` 之间），既有函数未动 | 仅 P6 |
+| `src/rulesets/dnd2024/combat/engine.py` | M | 顶层导入 `effective_speed`；`_fresh_economy` 由 `@staticmethod` 改实例方法并删除 `slowed_10` 硬编码；两个调用点（`resolution.py` combat.started / turn.advanced）已是 `self._fresh_economy(view)`，零改动 | 仅 P6 |
+| `src/rulesets/dnd2024/combat/validation.py` | M | 有益集合追加 `teleport`；目标循环内 teleport 只允许施法者自身；`teleport_distance` 双向 fail closed（缺失/0/非 int/bool/超 range；非 teleport 携带即拒） | 仅 P6 |
+| `src/rulesets/dnd2024/combat/resolution.py` | M | `_spell_events` 目标循环 `temp_hp` 与 `stabilize` 之间新增 `elif mode == "teleport"`，产出一条 `forced: True`、无 `movement_cost` 的 `dnd2024.position.changed` | 仅 P6 |
+| `tests/rulesets/test_dnd2024_misty_step.py` | 新增 | 12 个测试函数（#3 六参数化 → 17 用例），覆盖 §4 矩阵 #1-#12 | 仅 P6 |
+| `docs/internal/design/P6_MISTY_STEP_TASK_SPEC_2026-10-29.md` | M | 本节执行报告 | §8 豁免 |
+
+共用文件（catalog / validation / resolution / engine）的逐段改动均只服务于 teleport 与 speed_modifier 两项 P6 原语；reducer / view / 前端未改（P6 不需要，且遵守 §6 禁止项）。
+
+### 2. 测试矩阵逐项结果（全部通过）
+
+| # | 用例 | 结果 | 备注 |
+|---|---|---|---|
+| 1 | `test_catalog_rejects_invalid_speed_modifier_and_teleport_range` | 通过 | bool / str / 0 / ±601 → `CombatCatalogError`；misty_step range=3 → 拒；既有合法目录仍可构造 |
+| 2 | `test_misty_step_teleports_without_movement_cost` | 通过 | 过滤 `intent.submitted` 后事件序恰为 action.spent(bonus_action) → slot_spent(2) → spell.cast(2, 自身) → position.changed(distance=25, forced, 无 movement_cost)；无 concentration / check.resolved；positions=25；bonus_action=0、movement 不变；`slots_current["2"]=1`；`available_intents` 投影 mode=teleport |
+| 3 | `test_teleport_distance_must_be_valid[None/0/"25"/True/31/-31]` | 通过 | 六种均 `CombatIntentError`，错误含 "teleport" |
+| 4 | `test_teleport_targets_only_the_caster` | 通过 | 敌人 → 拒（先落"beneficial spells require an allied target"敌我分支）；盟友 p2 → 拒（模式级 "teleport spells can only target the caster"）；自身 → 过 |
+| 5 | `test_non_teleport_spell_rejects_teleport_distance` | 通过 | magic_missile 携带 `teleport_distance` → "teleport distance is not valid for this spell" |
+| 6 | `test_misty_step_does_not_trigger_opportunity_attacks` | 通过 | 无 `decision.pending`、无 `check.resolved`；goblin reaction 保持 1；positions 更新。对照同场景 move +25 仍挂起 opportunity_attack 决策（既有行为回归） |
+| 7 | `test_turn_start_economy_snapshots_slowed_10_before_expiry` | 通过 | ray_of_frost 命中施加 slowed_10；end_turn 的 `turn.advanced.economy.movement/speed == 20`；apply 后 goblin 无 slowed_10（快照先于过期） |
+| 8 | `test_slowed_10_floors_at_zero_for_slow_enemies` | 通过 | speed 10 + slowed_10 → movement/speed == 0，不为负 |
+| 9 | `test_paralyzed_speed_zero_projects_into_economy_and_blocks_move` | 通过 | economy movement/speed == 0；该敌人随后 move 被 "speed zero" 拒（P2 门控联动） |
+| 10 | `test_effective_speed_pure_function` | 通过 | 空 conditions=base；负修正求和；floor 0；speed_zero 压倒负修正；正修正叠加 |
+| 11 | `test_misty_step_ignores_exhausted_movement` | 通过 | move 30 后 movement=0，仍可 teleport +25，positions 前进且 movement 保持 0 |
+| 12 | `test_misty_step_spends_bonus_action_and_blocks_a_second_one` | 通过 | action 保持 1、bonus_action=0；同回合第二个附赠动作法术 → "bonus action" 拒；哨兵骰未被弹出（零 RNG） |
+
+### 3. 验收命令与结果
+
+1. `pytest tests/rulesets/test_dnd2024_misty_step.py -q` → **17 passed**（12 个测试函数，#3 参数化 6 条）。
+2. §5 第二条（含 P3/P4/P5 产物）：`test_dnd2024_combat.py test_dnd2024_spells.py test_dnd2024_smite.py test_dnd2024_uncanny_dodge.py test_dnd2024_monk_combat.py test_dnd2024_invisibility.py test_dnd2024_hold_person.py test_dnd2024_scorching_ray.py test_dnd2024_false_life.py test_dnd2024_stoneskin.py test_dnd2024_misty_step.py` → **176 passed**（= 基线 159 + 新增 17）。
+3. 全量 `pytest tests/rulesets -q --deselect tests/rulesets/test_dnd2024_character_builder.py` → **578 passed, 39 deselected, 0 failed**（= 561 + 17），耗时 28:02。
+
+### 4. §3 语义与实现的偏差
+
+1. **占用 / 可见性裁剪**（任务书 §1.2 既定，非新增偏差）：1D theater 位置模型无占用语义，未校验传送终点占用；无视觉系统，未实现"你能看见"门控。两者均整体推迟。
+2. **前端适配滞后**（§1.2 既定）：`teleport_distance` 目前只能由 intent 直交；战斗面板距离选择器属后续前端任务。P4 遗留的 temp_hp 展示偏差不在本切片，未改动。
+3. **矩阵 #4 的括号措辞**：敌人目标被拒发生在既有的"beneficial spells require an allied target"敌我分支；盟友目标被拒发生在新增的 teleport 模式级检查；两者语义符合 §1.1 边界 3，仅拒绝路径不同。执行侧未为敌人生成独立分支。
+4. **测试 #2 的事件索引**：批次首事件恒为引擎统一前置的 `intent.submitted`（既有契约，§6 未禁止），故断言先过滤该事件再比对 P6 专属事件序；未改引擎事件序。
+5. **`effective_speed` 签名换行**：语义与 §3.3 一致，只是按仓库行宽写成多行参数表。
+6. **`speed_zero` 投影落地**：P2 显式推迟的"回合开始 economy movement=0"在本切片通过 registry 化一并实现（矩阵 #9 覆盖），未新增 mid-turn economy 改写（遵守 §6 第 9 条）。
+
+### 5. 遗留问题
+
+1. `teleport_distance` 缺前端入口（同 §1.2，待前端任务）。
+2. 传送终点占用与可见性待位置模型升级后统一实现。
+3. 其余传送法术（雷鸣步、任意门等）与速度提升法术（haste 整套机制）未落数据，留待后续切片。
+4. **白名单外残留（非本切片产生）**：收尾 `git status --short` 出现 5 个未跟踪文件 `docs/internal/design/SP1_IMPROVED_CRITICAL_TASK_SPEC_2026-10-30.md`、`SP4_DARK_ONES_BLESSING_TASK_SPEC_2026-10-30.md`、`SP5_DRACONIC_RESILIENCE_TASK_SPEC_2026-10-30.md`、`SP7_SURVIVOR_TASK_SPEC_2026-10-30.md`、`SP8_HIDE_AND_BONUS_ACTION_TASK_SPEC_2026-10-30.md`。执行侧未创建、未修改、未暂存它们，判定为其它任务/AI 工作区残留，请审核端在提交时排除。
