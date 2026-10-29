@@ -452,7 +452,10 @@ class CombatValidationMixin:
         upcast_targets = int(effect.get("upcast_target_count", 0) or 0)
         if upcast_targets:
             required_count += upcast_targets * max(0, slot_level - int(spell["level"]))
-        if not target_ids or len(target_ids) > required_count or len(set(target_ids)) != len(target_ids):
+        has_duplicates = len(set(target_ids)) != len(target_ids)
+        if not target_ids or len(target_ids) > required_count or (
+            has_duplicates and not effect.get("repeat_targets")
+        ):
             raise CombatIntentError(f"spell requires 1 to {required_count} unique targets")
         if effect["mode"] == "triggered_damage" and target_ids != [trigger["target_id"]]:
             raise CombatIntentError("this spell must target the creature hit by the melee attack")

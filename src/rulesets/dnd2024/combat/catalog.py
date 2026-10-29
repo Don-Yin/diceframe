@@ -132,6 +132,10 @@ class Dnd2024CombatCatalog:
                 raise CombatCatalogError(
                     f"combat spell target creature types are invalid: {spell_id}"
                 )
+            if "repeat_targets" in effect and not isinstance(effect["repeat_targets"], bool):
+                raise CombatCatalogError(
+                    f"combat spell repeat targets flag is invalid: {spell_id}"
+                )
             if not 5 <= int(effect.get("range", 0) or 0) <= 600:
                 raise CombatCatalogError(f"combat spell range is invalid: {spell_id}")
         conditions = cls._validated_conditions(raw.get("conditions"))

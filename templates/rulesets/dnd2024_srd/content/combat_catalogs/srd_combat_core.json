@@ -77,7 +77,8 @@
     "protection_from_energy": {"mode": "buff", "range": 5, "target_count": 1, "condition": "energy_resistant", "condition_duration": "concentration", "concentration": true, "resist_choice": ["acid", "cold", "fire", "lightning", "thunder"]},
     "protection_from_poison": {"mode": "buff", "range": 5, "target_count": 1, "condition": "poison_resistant", "condition_duration": "1_hour", "removes_conditions": ["poisoned"]},
     "fire_shield": {"mode": "buff", "range": 5, "target_count": 1, "condition": "fire_shield_resistant", "condition_duration": "10_minute", "resist_choice": ["fire", "cold"]},
-    "hold_person": {"mode": "saving_throw", "save": "wis", "range": 60, "target_count": 1, "upcast_target_count": 1, "condition": "paralyzed", "condition_duration": "concentration", "concentration": true, "save_repeat": "wis", "target_creature_types": ["humanoid"]}
+    "hold_person": {"mode": "saving_throw", "save": "wis", "range": 60, "target_count": 1, "upcast_target_count": 1, "condition": "paralyzed", "condition_duration": "concentration", "concentration": true, "save_repeat": "wis", "target_creature_types": ["humanoid"]},
+    "scorching_ray": {"mode": "spell_attack", "damage": "2d6", "damage_type": "fire", "range": 120, "target_count": 3, "upcast_target_count": 1, "repeat_targets": true}
   },
   "conditions": {
     "next_attack_advantage": {"attack_modes": [{"side": "target", "mode": "advantage", "consume_on": "attack_resolved"}]},

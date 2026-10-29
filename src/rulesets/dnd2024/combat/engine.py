@@ -1073,11 +1073,16 @@ class Dnd2024CombatEngine(
         dc = max(10, damage // 2)
         roll = int(rng.randint(1, 20))
         modifier = int(target["saving_throws"].get("con", 0) or 0)
-        success = roll + modifier >= dc
+        # 专注维持是一次体质豁免，Bless 对豁免同样生效（1d4）。
+        bless_bonus = 0
+        if "blessed" in (target.get("conditions") or {}):
+            bless_bonus = int(rng.randint(1, 4))
+        success = roll + modifier + bless_bonus >= dc
         events: list[dict[str, Any]] = [{
             "type": "check.resolved", "kind": "concentration", "actor_id": target["actor_id"],
             "rolls": [roll], "natural": roll, "modifier": modifier,
-            "total": roll + modifier, "target": dc, "success": success,
+            "bless_bonus": bless_bonus, "total": roll + modifier + bless_bonus,
+            "target": dc, "success": success,
         }]
         if not success:
             events.append({

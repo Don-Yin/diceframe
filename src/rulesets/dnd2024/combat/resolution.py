@@ -28,6 +28,25 @@ from .reaction_spells import HIT_REACTION_DECISION, effective_armor_class
 from .triggered_spells import HIT_SPELL_DECISION
 
 
+def _without_consumed_conditions(
+    view: dict[str, Any], consumed: set[tuple[str, str]],
+) -> dict[str, Any]:
+    """Hide conditions an earlier attack roll of the same batch consumed.
+
+    一次施法只产出一个事件批次，状态要到 ``apply_batch`` 才落地；多道射线在
+    同一批次内循环时，每道都会读到施法前的条件集合。RAW 规定"你的下一次攻击
+    掷骰"类条件在第一次掷骰后即消耗，因此循环用本函数的副本逐 beam 隐藏已消耗
+    条件，既不提前改状态，也不让后续射线重复受益。
+    """
+
+    conditions = {
+        code: entry
+        for code, entry in (view.get("conditions") or {}).items()
+        if (str(view.get("actor_id") or ""), str(code)) not in consumed
+    }
+    return {**view, "conditions": conditions}
+
+
 class CombatResolutionMixin:
     """Turn validated intents and server RNG into immutable event batches."""
 
@@ -376,6 +395,9 @@ class CombatResolutionMixin:
             "slot_level": slot_level, "target_ids": target_ids,
         })
         defeated_targets: set[str] = set()
+        # 同一次施法的多道射线共用一个事件批次：已消耗条件只在局部隐藏，
+        # 事件仍在批次末尾统一移除，状态写入时机不变。
+        consumed_conditions: set[tuple[str, str]] = set()
         for target_id in target_ids:
             target = self._actor_view(instance, combat, target_id)
             mode = str(effect["mode"])
@@ -383,13 +405,19 @@ class CombatResolutionMixin:
             if mode == "spell_attack":
                 from .check_modes import attack_mode
 
-                check_mode = attack_mode(self, instance, actor, target, False)
+                visible_actor = _without_consumed_conditions(actor, consumed_conditions)
+                visible_target = _without_consumed_conditions(target, consumed_conditions)
+                check_mode = attack_mode(self, instance, visible_actor, visible_target, False)
                 rolls = [int(rng.randint(1, 20))]
                 if check_mode["mode"]:
                     rolls.append(int(rng.randint(1, 20)))
                 roll = max(rolls) if check_mode["mode"] == "advantage" else min(rolls)
                 bonus = int(actor["spell_attack_bonus"])
-                total = roll + bonus
+                bless_bonus = 0
+                if "blessed" in visible_actor["conditions"]:
+                    # Bless 对每一次攻击掷骰各加一枚 d4，多道射线逐 beam 各掷一次。
+                    bless_bonus = int(rng.randint(1, 4))
+                total = roll + bonus + bless_bonus
                 target_ac = effective_armor_class(target)
                 succeeded = roll != 1 and (roll == 20 or total >= target_ac)
                 critical = roll == 20
@@ -404,8 +432,8 @@ class CombatResolutionMixin:
                     "type": "check.resolved", "kind": "spell_attack", "actor_id": actor_id,
                     "target_id": target_id, "rolls": rolls, "natural": roll,
                     "advantage_mode": check_mode["mode"], "advantage_sources": check_mode["sources"],
-                    "modifier": bonus, "total": total, "target": target_ac,
-                    "success": succeeded, "critical": critical,
+                    "modifier": bonus, "bless_bonus": bless_bonus, "total": total,
+                    "target": target_ac, "success": succeeded, "critical": critical,
                 })
                 if succeeded:
                     damage_node = spell_formula_node(
@@ -432,7 +460,14 @@ class CombatResolutionMixin:
                     events.extend(self._concentration_events(target, damage, rng))
                     if self._last_hostile_defeated(combat, target, damage):
                         defeated_targets.add(target_id)
-                events.extend(self._consume_attack_conditions(actor_id, target_id, actor, target))
+                consumed_events = self._consume_attack_conditions(
+                    actor_id, target_id, visible_actor, visible_target,
+                )
+                consumed_conditions.update(
+                    (str(event["target_id"]), str(event["condition"]))
+                    for event in consumed_events
+                )
+                events.extend(consumed_events)
             elif mode == "saving_throw":
                 save_ability = str(effect["save"])
                 modifier = int(target["saving_throws"].get(save_ability, 0) or 0)
