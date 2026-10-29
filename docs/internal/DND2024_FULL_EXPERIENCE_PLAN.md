@@ -82,7 +82,7 @@
 | # | 切片 | 打通的原语 | 解锁的特性 |
 |---|---|---|---|
 | 1 | Second Wind | 资源消耗 → 治疗（heal 事件 reducer 已有） | fighter 1 级 |
-| 2 | Rage | 通用 effect 实例（id / source_ref / changes[] / duration）+ 伤害加成聚合 + 优势来源注册 | barbarian 1 级 |
+| 2 | Rage | 持续性 condition 记账（duration / turns_remaining / source_actor_id / established / sustained_this_turn）+ 力量近战伤害加成 + 力量豁免优势 + 物理抗性 + 失能结束 + 回合归属续期 | barbarian 1 级 |
 | 3 | Uncanny Dodge | 触发注册表泛化（`on_hit / on_damage_taken / on_miss / on_turn_start`）+ 伤害修正窗口 | rogue 5 级 |
 | 4 | Action Surge | `economy.granted` 动作经济事件 | fighter 2 级 |
 | 5 | Sneak Attack | 谓词求值器 + 条件伤害（"优势或队友邻近 → +Xd6"） | rogue 1 级 |
@@ -104,7 +104,7 @@
 | P2 | hold_person | condition 行动门控 + 每回合豁免 tick |
 | P3 | scorching_ray | 多目标/多 beam 结算循环（`target_ids` 校验已有） |
 | P4 | false_life | temp HP / max HP 修改 |
-| P5 | stoneskin | 伤害类型抗性/免疫（同时偿还 Rage 抗性裁剪债） |
+| P5 | stoneskin | 伤害类型抗性/免疫框架（Rage 的物理抗性已在 #612 review 修复落地，此处泛化到任意类型与来源） |
 | P6 | misty_step | 1D 位移 + 速度修改 |
 | P7 | counterspell | 施法反应（切片 3 反应管线换触发源） |
 | P8 | dispel_magic | 魔法 condition 移除 |
@@ -147,7 +147,7 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 | 零 | 三层差距核查（内容 / 原语 / 地图） | ✅ 2026-10-28 |
 | 零 | 本计划文档建立 | ✅ 2026-10-28 |
 | 一 | 切片 1：Second Wind（heal 原语） | ✅ 2026-10-28 执行完成并审核通过（任务书 v3；改动在 `feat/second-wind` 工作区待提交） |
-| 一 | 切片 2：Rage（effect 实例 + 加成 + 优势来源） | ✅ 完成（任务书 v2，分支 `feat/rage`；`requires/forbidden_condition` schema、`established` 保证轮生命周期、str 豁免优势、track 加值均已测试锁定） |
+| 一 | 切片 2：Rage（持续性 condition + 引擎检查点） | ✅ 完成（任务书 v2，分支 `feat/rage`；`established` 保证轮生命周期、str 豁免优势、track 加值、物理抗性、失能结束、仅自身回合续期均已测试锁定。**实现为 `conditions` 专用条目 + 引擎内检查点，非通用 effect 实例**——effect 化、狂暴期间施法/专注限制、检定优势数据驱动归入 P1/P5 偿还；PR #612 review 修复 `53b715e1` 补齐抗性与回合行为） |
 | 一 | 切片 3：Uncanny Dodge（触发泛化 + 伤害修正窗口） | ✅ 完成（任务书 v2，分支 `feat/uncanny-dodge`；`hit_reaction` 决策泛化到特性选项、伤害减半、AI 自动选择、人类玩家按钮均已测试/构建锁定） |
 | 一 | 切片 4：Action Surge（economy 授予） | ✅ 完成（任务书 v2，分支 `feat/action-surge`；`economy.granted` 通用授予事件、surge_action 独立经济 key、once_per_turn 通用字段、支付优先级、施法结构性排除均已测试锁定） |
 | 一 | 切片 5：Sneak Attack（谓词伤害） | ✅ 完成（任务书 v1，分支 `feat/sneak-attack`；武器/优势/盟友谓词、extra_dice_formulas 多附加骰 AST、feature_usage 每回合账本、决策链延迟消耗均已测试锁定） |
