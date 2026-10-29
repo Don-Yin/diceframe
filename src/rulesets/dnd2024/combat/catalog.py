@@ -21,6 +21,7 @@ DAMAGE_TYPES = frozenset({
     "bludgeoning", "slashing", "piercing", "acid", "cold", "fire", "lightning",
     "thunder", "poison", "psychic", "force", "necrotic", "radiant",
 })
+SAVE_ABILITIES = frozenset({"str", "dex", "con", "int", "wis", "cha"})
 
 
 class CombatCatalogError(ValueError):
@@ -119,6 +120,18 @@ class Dnd2024CombatCatalog:
                 or any(code not in {"attack_roll", "damage_dealt", "spell_cast"} for code in ends_on)
             ):
                 raise CombatCatalogError(f"combat spell end triggers are invalid: {spell_id}")
+            save_repeat = effect.get("save_repeat")
+            if save_repeat is not None and save_repeat not in SAVE_ABILITIES:
+                raise CombatCatalogError(f"combat spell repeat save is invalid: {spell_id}")
+            target_creature_types = effect.get("target_creature_types")
+            if target_creature_types is not None and (
+                not isinstance(target_creature_types, list)
+                or not target_creature_types
+                or any(not isinstance(kind, str) or not kind for kind in target_creature_types)
+            ):
+                raise CombatCatalogError(
+                    f"combat spell target creature types are invalid: {spell_id}"
+                )
             if not 5 <= int(effect.get("range", 0) or 0) <= 600:
                 raise CombatCatalogError(f"combat spell range is invalid: {spell_id}")
         conditions = cls._validated_conditions(raw.get("conditions"))
@@ -153,9 +166,28 @@ class Dnd2024CombatCatalog:
                 raise CombatCatalogError(
                     f"combat condition must be an object: {condition_id}"
                 )
-            if set(entry) - {"attack_modes", "resist_damage_types"}:
+            if set(entry) - {
+                "attack_modes", "resist_damage_types", "implies_incapacitated",
+                "speed_zero", "auto_fail_saves", "crit_on_hit_within_5",
+            }:
                 raise CombatCatalogError(
                     f"combat condition has unknown fields: {condition_id}"
+                )
+            for flag in ("implies_incapacitated", "speed_zero", "crit_on_hit_within_5"):
+                if flag in entry and not isinstance(entry[flag], bool):
+                    raise CombatCatalogError(
+                        f"combat condition flag must be a boolean: {condition_id}"
+                    )
+            auto_fail = entry.get("auto_fail_saves")
+            if auto_fail is not None and (
+                not isinstance(auto_fail, list)
+                or any(
+                    not isinstance(ability, str) or ability not in SAVE_ABILITIES
+                    for ability in auto_fail
+                )
+            ):
+                raise CombatCatalogError(
+                    f"combat condition auto-fail saves are invalid: {condition_id}"
                 )
             resist_types = entry.get("resist_damage_types")
             if resist_types is not None and (
@@ -171,10 +203,18 @@ class Dnd2024CombatCatalog:
                     f"combat condition resist types are invalid: {condition_id}"
                 )
             modes = entry.get("attack_modes")
-            # A condition may declare resistance only; if it declares neither
-            # mechanics nor attack modes the entry is still rejected, matching
-            # the P1 rule that every registry entry must state something.
-            if modes is None and resist_types is not None:
+            # A condition may declare resistance or a passive flag only; if it
+            # declares neither mechanics nor attack modes the entry is still
+            # rejected, matching the P1 rule that every entry states something.
+            if modes is None and (
+                resist_types is not None
+                or any(
+                    key in entry for key in (
+                        "implies_incapacitated", "speed_zero",
+                        "auto_fail_saves", "crit_on_hit_within_5",
+                    )
+                )
+            ):
                 result[str(condition_id)] = deepcopy(entry)
                 continue
             if not isinstance(modes, list):

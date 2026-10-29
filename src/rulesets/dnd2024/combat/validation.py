@@ -17,6 +17,7 @@ from .primitives import (
     actor_kind as _actor_kind,
     canonical as _canonical,
 )
+from .check_modes import condition_flags
 from .readiness import required_encounter_player_ids
 from .reaction_spells import HIT_REACTION_DECISION
 from .triggered_spells import HIT_SPELL_DECISION, free_cast_resource, hit_spell_decision
@@ -278,6 +279,16 @@ class CombatValidationMixin:
             raise CombatIntentError("death saves are only available at 0 HP")
         if intent_type == "death_save" and "stable" in actor["conditions"]:
             raise CombatIntentError("a stable actor does not make death saves")
+        # 失能族只禁"动作"（动作/附赠动作/反应），移动不是动作：纯 incapacitated
+        # （睡眠术）的单位仍可移动，只有 speed_zero（麻痹/昏迷）才门控 move。
+        flags = condition_flags(self.catalog.conditions, actor["conditions"])
+        if flags["incapacitated"] and intent_type in {
+            "attack", "cast_spell", "class_capability", "dash", "dodge",
+            "disengage", "stabilize",
+        }:
+            raise CombatIntentError("an incapacitated actor cannot take actions")
+        if flags["speed_zero"] and intent_type == "move":
+            raise CombatIntentError("an actor with speed zero cannot move")
         economy = combat.get("economy") or {}
         if intent_type in {"attack", "dash", "dodge", "disengage", "stabilize"}:
             has_action = int(economy.get("action", 0) or 0) > 0 or int(
@@ -463,6 +474,9 @@ class CombatValidationMixin:
                 raise CombatIntentError("this spell requires a dying ally at 0 HP")
             if target["hp"] <= 0 and effect["mode"] not in {"healing", "buff", "stabilize"}:
                 raise CombatIntentError("spell target is not active")
+            allowed_types = effect.get("target_creature_types")
+            if allowed_types and str(target.get("creature_type") or "") not in allowed_types:
+                raise CombatIntentError("the spell target's creature type is not eligible")
             if effect["mode"] != "triggered_damage":
                 self._require_range(combat, actor["actor_id"], target_id, int(effect["range"]))
         damage_choices = effect.get("damage_type_choice")

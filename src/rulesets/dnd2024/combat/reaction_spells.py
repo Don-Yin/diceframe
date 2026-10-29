@@ -14,6 +14,7 @@ from copy import deepcopy
 from typing import Any
 
 from src.engine.player_control import is_ai_controlled
+from .check_modes import condition_flags
 from .primitives import CombatIntentError, actor_kind
 from .triggered_spells import free_cast_resource
 
@@ -43,6 +44,8 @@ class CombatReactionSpellsMixin:
         if int(combat.get("reactions", {}).get(defender["actor_id"], 0) or 0) < 1:
             return []
         if "reaction_blocked" in defender["conditions"] or "shield" in defender["conditions"]:
+            return []
+        if condition_flags(self.catalog.conditions, defender["conditions"])["incapacitated"]:
             return []
         choices = []
         for ref in defender["spell_refs"]:
@@ -86,6 +89,8 @@ class CombatReactionSpellsMixin:
         if int(combat.get("reactions", {}).get(defender["actor_id"], 0) or 0) < 1:
             return []
         if "reaction_blocked" in defender["conditions"] or "shield" in defender["conditions"]:
+            return []
+        if condition_flags(self.catalog.conditions, defender["conditions"])["incapacitated"]:
             return []
         if "blinded" in defender["conditions"]:
             return []

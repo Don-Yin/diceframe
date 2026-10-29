@@ -15,6 +15,42 @@ def context_id(engine: Any, instance: Any) -> str:
     return f"combat:{int(ruleset_runtime.state(instance).get('version', 0))}:{current}"
 
 
+def condition_flags(
+    registry: dict[str, dict[str, Any]], conditions: dict[str, Any],
+) -> dict[str, Any]:
+    """Aggregate the registry-declared mechanical flags a condition set carries.
+
+    Incapacitation and speed-zero gate intents, the auto-fail list feeds saving
+    throws, and ``crit_on_hit_within_5`` upgrades an already-hit attack. Any
+    single source turns a boolean on; the save list is the union of every
+    source. The whole incapacitated family (paralyzed, stunned, unconscious,
+    and sleep's plain ``incapacitated``) therefore works without engine
+    branches naming each condition.
+    """
+
+    incapacitated = False
+    speed_zero = False
+    auto_fail_saves: set[str] = set()
+    crit_on_hit_within_5 = False
+    for condition_id, entry in registry.items():
+        if condition_id not in conditions:
+            continue
+        incapacitated = incapacitated or bool(entry.get("implies_incapacitated"))
+        speed_zero = speed_zero or bool(entry.get("speed_zero"))
+        crit_on_hit_within_5 = crit_on_hit_within_5 or bool(
+            entry.get("crit_on_hit_within_5")
+        )
+        auto_fail_saves.update(
+            str(ability) for ability in entry.get("auto_fail_saves") or []
+        )
+    return {
+        "incapacitated": incapacitated,
+        "speed_zero": speed_zero,
+        "auto_fail_saves": auto_fail_saves,
+        "crit_on_hit_within_5": crit_on_hit_within_5,
+    }
+
+
 def attack_sources(
     registry: dict[str, dict], actor: dict, target: dict, range_disadvantage: bool,
 ) -> list[dict]:
