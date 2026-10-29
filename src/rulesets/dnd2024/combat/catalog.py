@@ -15,7 +15,7 @@ DICE_RE = re.compile(r"^[1-9]\d*d(?:4|6|8|10|12|20)(?:\+[1-9]\d*)?$")
 FLAT_DAMAGE_RE = re.compile(r"^[1-9]\d{0,3}$")
 SPELL_MODES = frozenset({
     "spell_attack", "saving_throw", "healing", "automatic_damage", "buff", "debuff", "triggered_damage",
-    "stabilize", "reaction_defense",
+    "stabilize", "reaction_defense", "temp_hp",
 })
 DAMAGE_TYPES = frozenset({
     "bludgeoning", "slashing", "piercing", "acid", "cold", "fire", "lightning",
@@ -135,6 +135,18 @@ class Dnd2024CombatCatalog:
             if "repeat_targets" in effect and not isinstance(effect["repeat_targets"], bool):
                 raise CombatCatalogError(
                     f"combat spell repeat targets flag is invalid: {spell_id}"
+                )
+            if effect["mode"] == "temp_hp" and not isinstance(effect.get("temp_hp"), str):
+                # 公式本身由 spell_formula_node 在结算时 fail closed；这里只锁类型。
+                raise CombatCatalogError(f"combat spell temp HP formula is invalid: {spell_id}")
+            upcast_flat = effect.get("upcast_flat")
+            if upcast_flat is not None and (
+                isinstance(upcast_flat, bool)
+                or not isinstance(upcast_flat, int)
+                or not 0 < upcast_flat <= 50
+            ):
+                raise CombatCatalogError(
+                    f"combat spell upcast flat bonus is invalid: {spell_id}"
                 )
             if not 5 <= int(effect.get("range", 0) or 0) <= 600:
                 raise CombatCatalogError(f"combat spell range is invalid: {spell_id}")

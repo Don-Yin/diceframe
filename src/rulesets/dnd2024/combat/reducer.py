@@ -235,7 +235,10 @@ class CombatReducerMixin:
                 combat["economy"]["movement"] = remaining - cost
             return
         if event_type == "resource.changed":
-            self._apply_hp_change(snapshot, event)
+            if str(event.get("resource") or "hp") == "temp_hp":
+                self._apply_temp_hp_change(snapshot, event)
+            else:
+                self._apply_hp_change(snapshot, event)
             return
         if event_type == "condition.applied":
             conditions = self._conditions(snapshot, combat, str(event["target_id"]))
@@ -361,6 +364,27 @@ class CombatReducerMixin:
             return snapshot["characters"][raw_id]
         return self._companion_character(snapshot, raw_id)
 
+    def _apply_temp_hp_change(self, snapshot: dict[str, Any], event: dict[str, Any]) -> None:
+        """授予临时生命值：玩家/同伴走 keep-max，敌人 fail closed。
+
+        临时生命值既不是治疗也不是生命值本身：不碰 unconscious / stable /
+        death_saves / hp，也不受 max_hp clamp。规则书的“保留原值或新值”简化为
+        保留较高者（确定性引擎下较低值永远是非理性选择）。
+        """
+        target_id = str(event["target_id"])
+        kind, raw_id = _actor_kind(target_id)
+        if kind not in {"player", "companion"}:
+            raise EventBatchError("temp HP target actor is invalid")
+        character = (
+            snapshot["characters"][raw_id]
+            if kind == "player"
+            else self._companion_character(snapshot, raw_id)
+        )
+        resources = character["resources"]
+        resources["temp_hp"] = max(
+            int(resources.get("temp_hp", 0) or 0), int(event["amount"])
+        )
+
     def _apply_hp_change(self, snapshot: dict[str, Any], event: dict[str, Any]) -> None:
         target_id = str(event["target_id"])
         kind, raw_id = _actor_kind(target_id)
@@ -374,6 +398,13 @@ class CombatReducerMixin:
             resources = character["resources"]
             before = int(resources.get("hp", 0) or 0)
             maximum = int(resources.get("max_hp", 0) or 0)
+            # 优先失去临时生命值：伤害先吸收，余下的才扣 hp；事件的 amount
+            # 仍是打出的伤害，吸收只反映在资源状态上。
+            temp = int(resources.get("temp_hp", 0) or 0)
+            if delta < 0 and temp > 0:
+                absorbed = min(temp, -delta)
+                resources["temp_hp"] = temp - absorbed
+                delta += absorbed
             resources["hp"] = max(0, min(maximum, before + delta))
             conditions = character.setdefault("conditions", {})
             if resources["hp"] <= 0:

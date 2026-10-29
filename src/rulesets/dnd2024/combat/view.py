@@ -124,6 +124,7 @@ class CombatViewMixin:
             "actor_id": _player_actor(uid), "kind": "player", "id": uid, "side": "party",
             "hp": int(resources.get("hp", 0) or 0),
             "max_hp": int(resources.get("max_hp", 0) or 0),
+            "temp_hp": int(resources.get("temp_hp", 0) or 0),
             "armor_class": int(character.get("derived", {}).get("armor_class", 10) or 10),
             "speed": int(character.get("derived", {}).get("speed", 30) or 30),
             "abilities": deepcopy(character.get("abilities") or {}),

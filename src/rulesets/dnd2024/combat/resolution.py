@@ -572,6 +572,19 @@ class CombatResolutionMixin:
                     **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
                 })
                 succeeded = True
+            elif mode == "temp_hp":
+                # 升环是固定加值，不走 spell_formula_node 的同面骰 upcast 参数。
+                node = spell_formula_node(str(effect["temp_hp"]), None, spell, slot_level, actor)
+                levels = slot_level - int(spell["level"])
+                flat = int(effect.get("upcast_flat", 0) or 0)
+                if flat and levels > 0:
+                    node = {"op": "add", "args": [node, {"op": "constant", "value": flat * levels}]}
+                amount, rolls = roll_damage_node(node, rng)
+                events.append({
+                    "type": "resource.changed", "resource": "temp_hp", "target_id": target_id,
+                    "delta": amount, "amount": amount, "rolls": rolls,
+                })
+                succeeded = True
             elif mode == "stabilize":
                 events.append({
                     "type": "condition.applied", "target_id": target_id,

@@ -463,7 +463,7 @@ class CombatValidationMixin:
             target = self._actor_view(instance, combat, target_id)
             actor_side = str(actor.get("side") or "")
             target_side = str(target.get("side") or "")
-            if effect["mode"] in {"healing", "buff", "stabilize"}:
+            if effect["mode"] in {"healing", "buff", "stabilize", "temp_hp"}:
                 if target_side != actor_side:
                     raise CombatIntentError("healing and beneficial spells require an allied target")
                 if "dead" in target.get("conditions", {}):
