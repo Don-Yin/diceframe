@@ -138,6 +138,34 @@ class CombatResolutionMixin:
             })
         return events
 
+    def _resist_damage(
+        self, target: dict[str, Any], amount: int, damage_type: str,
+    ) -> tuple[int, str]:
+        """Halve ``amount`` once when the target resists ``damage_type``.
+
+        Resistance sources are server-authoritative in two places: the combat
+        catalog's condition registry (static declarations such as rage and
+        stoneskin) and each condition's metadata (written by choice-driven
+        spells). A single set-membership test guarantees that multiple
+        simultaneous sources never stack; the returned condition id names the
+        source for the event, or ``""`` when nothing applies.
+        """
+
+        if amount <= 0 or not damage_type:
+            return amount, ""
+        for condition_id, meta in (target.get("conditions") or {}).items():
+            types = set((self.catalog.conditions.get(condition_id) or {}).get(
+                "resist_damage_types"
+            ) or [])
+            if isinstance(meta, dict):
+                types.update(
+                    str(kind) for kind in meta.get("resist_damage_types") or []
+                    if isinstance(kind, str) and kind
+                )
+            if damage_type in types:
+                return amount // 2, condition_id
+        return amount, ""
+
     def _attack_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
         *, spend_attack_action: bool = True,
@@ -266,23 +294,14 @@ class CombatResolutionMixin:
                     ]}
             damage, rolls = roll_damage_node(damage_node, rng)
             damage = max(0, damage)
-            resistance = None
-            if (
-                "rage" in target["conditions"]
-                and str(damage_type) in ("bludgeoning", "piercing", "slashing")
-            ):
-                # 2024 狂暴：承受的钝击/穿刺/挥砍伤害减半，
-                # 取整方式与反应减半（damage_multiplier）一致：向下取整。
-                halved = int(damage * 0.5)
-                if halved != damage:
-                    resistance = "rage"
-                    damage = halved
+            damage, resistance = self._resist_damage(target, damage, damage_type)
             damage_event = {
                 "type": "resource.changed", "resource": "hp", "target_id": target_id,
                 "delta": -damage, "amount": damage, "damage_type": damage_type,
                 "critical": critical, "rolls": rolls,
             }
             if resistance:
+                damage_event["resisted"] = True
                 damage_event["resistance"] = resistance
             if sneak_dice:
                 # 延迟提交：只有这次命中伤害最终落地才记一次偷袭使用。
@@ -380,12 +399,20 @@ class CombatResolutionMixin:
                     if roll == 20:
                         damage_node = double_dice_counts(damage_node)
                     damage, rolls = roll_damage_node(damage_node, rng)
-                    events.append({
+                    damage_type = str(
+                        intent.get("damage_type") or effect.get("damage_type") or ""
+                    )
+                    damage, resistance = self._resist_damage(target, damage, damage_type)
+                    damage_event = {
                         "type": "resource.changed", "resource": "hp", "target_id": target_id,
                         "delta": -damage, "amount": damage,
-                        "damage_type": str(intent.get("damage_type") or effect.get("damage_type")),
+                        "damage_type": damage_type,
                         "critical": roll == 20, "rolls": rolls,
-                    })
+                    }
+                    if resistance:
+                        damage_event["resisted"] = True
+                        damage_event["resistance"] = resistance
+                    events.append(damage_event)
                     events.extend(self._concentration_events(target, damage, rng))
                     if self._last_hostile_defeated(combat, target, damage):
                         defeated_targets.add(target_id)
@@ -422,13 +449,20 @@ class CombatResolutionMixin:
                     damage, rolls = roll_damage_node(damage_node, rng)
                     if succeeded:
                         damage = damage // 2 if effect.get("half_on_success") else 0
+                    damage_type = str(effect.get("damage_type") or "force")
+                    # 抗性在豁免减半之后结算（RAW 顺序：先修正，后抗性）。
+                    damage, resistance = self._resist_damage(target, damage, damage_type)
                     if damage:
-                        events.append({
+                        damage_event = {
                             "type": "resource.changed", "resource": "hp",
                             "target_id": target_id, "delta": -damage, "amount": damage,
-                            "damage_type": str(effect.get("damage_type") or "force"),
+                            "damage_type": damage_type,
                             "critical": False, "rolls": rolls,
-                        })
+                        }
+                        if resistance:
+                            damage_event["resisted"] = True
+                            damage_event["resistance"] = resistance
+                        events.append(damage_event)
                         events.extend(self._concentration_events(target, damage, rng))
                         if self._last_hostile_defeated(combat, target, damage):
                             defeated_targets.add(target_id)
@@ -438,12 +472,18 @@ class CombatResolutionMixin:
                     spell, slot_level, actor,
                 )
                 damage, rolls = roll_damage_node(damage_node, rng)
-                events.append({
+                damage_type = str(effect.get("damage_type") or "force")
+                damage, resistance = self._resist_damage(target, damage, damage_type)
+                damage_event = {
                     "type": "resource.changed", "resource": "hp", "target_id": target_id,
                     "delta": -damage, "amount": damage,
-                    "damage_type": str(effect.get("damage_type") or "force"),
+                    "damage_type": damage_type,
                     "critical": False, "rolls": rolls,
-                })
+                }
+                if resistance:
+                    damage_event["resisted"] = True
+                    damage_event["resistance"] = resistance
+                events.append(damage_event)
                 events.extend(self._concentration_events(target, damage, rng))
                 if self._last_hostile_defeated(combat, target, damage):
                     defeated_targets.add(target_id)
@@ -491,6 +531,16 @@ class CombatResolutionMixin:
                 # 服务端从目录效果拷贝提前终止声明；客户端永远无法声明它。
                 if effect.get("ends_on") is not None:
                     applied["ends_on"] = deepcopy(effect["ends_on"])
+                # 选择型抗性：施法时选定的伤害类型写进 condition 元数据，
+                # 之后由结算期的抗性辅助读取（客户端不能直接写元数据）。
+                if effect.get("resist_choice"):
+                    applied["resist_damage_types"] = [str(intent["resist_type"])]
+                for removed in effect.get("removes_conditions") or []:
+                    if str(removed) in target["conditions"]:
+                        events.append({
+                            "type": "condition.removed", "target_id": target_id,
+                            "condition": str(removed),
+                        })
                 events.append(applied)
             if succeeded and int(effect.get("push", 0) or 0):
                 direction = 1 if self._position(combat, target_id) >= self._position(combat, actor_id) else -1
