@@ -151,9 +151,10 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 | 一 | 切片 3：Uncanny Dodge（触发泛化 + 伤害修正窗口） | ✅ 完成（任务书 v2，分支 `feat/uncanny-dodge`；`hit_reaction` 决策泛化到特性选项、伤害减半、AI 自动选择、人类玩家按钮均已测试/构建锁定） |
 | 一 | 切片 4：Action Surge（economy 授予） | ✅ 完成（任务书 v2，分支 `feat/action-surge`；`economy.granted` 通用授予事件、surge_action 独立经济 key、once_per_turn 通用字段、支付优先级、施法结构性排除均已测试锁定） |
 | 一 | 切片 5：Sneak Attack（谓词伤害） | ✅ 完成（任务书 v1，分支 `feat/sneak-attack`；武器/优势/盟友谓词、extra_dice_formulas 多附加骰 AST、feature_usage 每回合账本、决策链延迟消耗均已测试锁定） |
-| 1B | 法术原语切片 P1–P9（矩阵见 `design/SPELL_GAP_MATRIX.md`） | 🔶 进行中（P1、P5 已完成；建议顺序 P1→P5→P2→P3→P4→P6→P8→P7→P9，P1–P5 为法术/特性共用底座优先） |
+| 1B | 法术原语切片 P1–P9（矩阵见 `design/SPELL_GAP_MATRIX.md`） | 🔶 进行中（P1、P2、P5 已完成；建议顺序 P1→P5→P2→P3→P4→P6→P8→P7→P9，P1–P5 为法术/特性共用底座优先） |
 | 1B | P1：invisibility（attack_sources 数据驱动 + 升环目标数 + 专注法术提前终止） | ✅ 2026-10-29 执行完成并审核通过（任务书 v1 + 执行报告；`feat/p1-invisibility` WIP 原型融合入本分支，借机攻击事件序交叉已修并补测） |
 | 1B | P5：stoneskin（伤害类型抗性框架 + 偿还 Rage 抗性债） | ✅ 2026-10-29 执行完成并审核通过（任务书 v1 + 执行报告；抗性来源 = 注册表静态声明 ∪ condition 元数据动态声明，`_resist_damage` 集合判成员保证不叠加；Rage 硬编码减半特判移除、改注册表驱动，行为等价由既有测试锁定；免疫/易伤按 §1.2 裁剪，挂钩点已预留） |
+| 1B | P2：hold_person（失能族行动门控 + 每回合豁免 tick） | ✅ 2026-10-29 执行完成并审核通过（任务书 v1.1 + 执行报告；四项通用原语——`condition_flags` 单点聚合失能族后果、`save_repeat` 每回合重复豁免、`auto_fail_saves` 免掷骰失败、`target_creature_types` 生物类型限定；sleep 同步获得重复豁免与真实失能后果；prone/石化/睡眠第二阶段按 §1.2 裁剪） |
 | 二 | 法术批量填充管线（原型已验证，review 13 + manual 33 待处理） | 🔄 原型完成（`scripts/rulesets/import_dnd5eapi_spell_effects.py`） |
 | 二 | spells / progression / class_feature source-aware 解耦 | ⬜ 未开始 |
 | 二 | 许可分层声明（AGPL 代码 / CC-BY 内容） | ⬜ 未开始 |
@@ -236,6 +237,17 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 - planner 侧遗留裁定：fire_shield RAW 为"自身"，但 catalog 校验强制 `5 <= range <= 600`，"自身"编码（放宽下限或引入 self 语义）是首个自身 buff 落地后的待定设计点（P4 false_life 会再遇到），归后续数据批次统一决策，本切片按任务书原样保留并记录。
 - 架构质量：抗性来源两处服务端权威（注册表静态声明 ∪ condition 元数据动态写入），集合判成员保证不叠加；`resist_type` 双向 fail closed（声明必选、未声明必拒，#7 双向锁定）；`energy_resistant`/`fire_shield_resistant` 为纯元数据条件（注册表不强制每个 condition id 有条目，`see_invisibility` 同款先例）；`removes_conditions` 只由服务端目录声明触发。
 - 遗留（执行报告 §D 已登记，均不阻塞）：免疫/易伤挂钩点在 `_resist_damage` 结构上预留；fire_shield 2d8 反伤 rider 待触发注册表扩展；protection_from_poison 中毒豁免优势待豁免优势来源原语；多源同类型时 `resistance` 来源名依赖 conditions 迭代序（`resisted`/`amount` 不受影响）。
+
+### P2 审核记录（2026-10-29）
+
+- 验收复跑通过（整合分支工作树）：`test_dnd2024_hold_person.py` 17 passed；回归七文件（combat / spells / smite / uncanny_dodge / monk_combat / invisibility / stoneskin）119 passed，与执行报告逐项一致；rulesets 全量复跑见提交记录。
+- 白名单合规：8 个改动文件 + 新增测试文件全部命中 §3 白名单（`srd_combat_core.json` / `catalog.py` / `check_modes.py` / `validation.py` / `resolution.py` / `engine.py` / `reaction_spells.py` / `dnd2024_monk_common.py` / 新增 `test_dnd2024_hold_person.py`）+ 任务书执行报告豁免；无白名单外变更。
+- 任务书 §1.1 十条规则边界全部测试锁定：①失能只禁动作不禁移动（#4 禁 attack/cast、move 报 speed zero；#5 纯 `incapacitated` 5 尺 move 合法、超速仍被既有距离门拒）；②`death_save` / `end_turn` 不在门控集合；③重复豁免归属目标回合且成功不发 `concentration.ended`（#6 断言事件序 check→removed→turn.advanced、无 ended、施法者专注保留；#7 失败保留）；④DC 为施放当刻快照（#2 元数据 `save_repeat`）；⑤自动失败不掷骰（#10 `RecordingRng` d20 请求数为 0、`rolls == []`、全额伤害 9）；⑥自动重击要求命中（#11 natural 15 非 20 升级且伤害骰翻倍、#11b 30 尺不升级、#12 法术攻击同款）；⑦失能打断目标自身专注（#13 `ended(actor_id=goblin, reason=incapacitated)` 且 blessed 级联移除）；⑧失能族不进回合跳过清单；⑨类人限定按目标 `creature_type`（#9 beast 被拒）；⑩伤害不解除麻痹（无对应事件路径）。
+- 交叉排查（P1 教训执行）：①`_end_turn_events` 全仓库仅 `engine.py` L650 与 `resolution.py` L1046 两个调用方，§7 停止条件 3 未触发，两处均已传 rng；②新增 check.resolved 键（`rolls: []` / `natural: 0` / `auto_failed` / `repeat_save`）——服务端消费方均为直通（runtime 白名单按事件类型而非键），`frontend-v2/src` 对三键零命中，既有渲染取 `event.total ?? event.natural`，自动失败渲染为 0 但不抛错，§7 停止条件 1 未触发；③`condition_flags` 无引擎依赖、无 RNG 消耗，校验 / 结算 / 反应三处共用同一聚合，无重复实现。
+- 架构质量：四项原语全部数据驱动——失能族后果由注册表四键声明并经 `condition_flags` 单点聚合，引擎内无 condition 名分支（§6 禁止项 8 合规）；`save_repeat` / `target_creature_types` 只能来自目录效果，客户端不可写（禁止项 10）；`_fresh_economy` 未动（禁止项 9）；catalog 的"仅声明被动标志"条目分支沿用 P5 的 resist-only 先例。
+- 执行端偏差全部接受（详见执行报告 §C）：5 级法师替代建议的 3 级（#8 需 3 环位）、#11/#12 拆为独立战斗实例、#10 选 `burning_hands` 并用 `RecordingRng` 记录请求区间、fire bolt 2d10 为既有 cantrip 升级、sleep 近似按 §1.2 保留。
+- 值得记录的连带效果：`unconscious` 注册表条目对 0 HP 玩家立即活效（reducer 直写 `conditions["unconscious"]`），使"5 尺内攻击倒地玩家自动重击"从无变为有——RAW 正确且任务书 §2 已预告，全量复跑无既有测试依赖旧行为。
+- 遗留（执行报告 §E 已登记，均不阻塞）：sleep 第二阶段（二次失败转 unconscious、伤害 / 摇醒终止、免疫清单）；prone 与倒地距离条件优劣势；先攻劣势与惊喜轮；`available_intents` 未按失能过滤；失能单位自动 `end_turn` 代点未实现；速度归零的 economy 投影仍走 `_fresh_economy`。
 
 ## 待定决策
 

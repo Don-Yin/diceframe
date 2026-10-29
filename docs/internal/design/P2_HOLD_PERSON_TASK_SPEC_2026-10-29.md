@@ -270,3 +270,77 @@ spell_attack 分支当前不计算距离，需补 `distance = self._distance(com
 
 - v1（2026-10-29）：初版。
 - v1.1（2026-10-29）：§2 补注 `_apply_hp_change` 零 HP 直接应用 unconscious 的既有路径——注册表条目对倒地玩家立即生效。
+
+---
+
+## 执行报告（2026-10-29，v1.1）
+
+### A. 变更文件清单
+
+| 文件 | 变更 |
+|---|---|
+| `templates/rulesets/dnd2024_srd/content/combat_catalogs/srd_combat_core.json` | conditions 新增 `incapacitated` / `paralyzed` / `stunned` / `unconscious` 四条；`spell_effects` 新增 `hold_person`；`sleep` 追加 `save_repeat: "wis"` |
+| `src/rulesets/dnd2024/combat/catalog.py` | 新增模块常量 `SAVE_ABILITIES`；conditions 允许键扩为 P1∪P5∪四个新键，bool 标志与 `auto_fail_saves` 元素校验；`spell_effects` 校验 `save_repeat` 与 `target_creature_types` |
+| `src/rulesets/dnd2024/combat/check_modes.py` | 新增纯函数 `condition_flags`（返回 `incapacitated` / `speed_zero` / `auto_fail_saves` / `crit_on_hit_within_5`）；既有三个函数未动 |
+| `src/rulesets/dnd2024/combat/validation.py` | `_validate` 在 HP 门后、经济门前插入失能/速度归零门控；`_validate_spell` 目标循环内加入 `target_creature_types` 校验 |
+| `src/rulesets/dnd2024/combat/resolution.py` | `_attack_events` 命中后近战自动重击；spell_attack 分支补距离计算与同款重击升级；saving_throw 分支在掷骰前处理 `auto_fail_saves`；condition 应用尾部写入 `save_repeat` 快照并在 `implies_incapacitated` 时追加 `concentration.ended`；新增 `_save_repeat_events`；`_end_turn_events` 签名加 `rng` 并在结算下一活动者前 tick |
+| `src/rulesets/dnd2024/combat/engine.py` | `end_turn` 分发调用传入 `rng` |
+| `src/rulesets/dnd2024/combat/reaction_spells.py` | 两个反应入口在既有排除清单后追加失能排除 |
+| `tests/rulesets/dnd2024_monk_common.py` | `goblin()` 新增 `"creature_type": "humanoid"` |
+| `tests/rulesets/test_dnd2024_hold_person.py` | 新增，17 项测试覆盖 §4 全部矩阵项 |
+
+`git status` 仅上述 8 个改动文件 + 新测试文件 + 本任务书报告追加；未提交 git。
+
+### B. 测试矩阵逐项结果
+
+| # | 测试 | 结果 |
+|---|---|---|
+| 1 | `test_catalog_rejects_invalid_incapacitation_declarations` | 通过：非 bool 标志、非法 `auto_fail_saves` 元素、非法 `save_repeat`、字符串/空列表 `target_creature_types` 均抛 `CombatCatalogError` |
+| 2 | `test_hold_person_paralyzes_a_humanoid_with_a_repeat_save_snapshot` | 通过：wis 豁免失败 → `condition.applied(paralyzed)`；元数据含 `duration=concentration`、`concentration_owner=player:gm`、`save_repeat={"ability":"wis","dc":<施法 DC>}` |
+| 3 | `test_hold_person_does_nothing_on_a_successful_save` | 通过：高骰成功，无 `condition.applied`，目标无 paralyzed |
+| 4 | `test_paralyzed_actor_cannot_attack_cast_or_move` | 通过：attack / cast_spell 报 "an incapacitated actor cannot take actions"，move 报 "an actor with speed zero cannot move" |
+| 5 | `test_sleep_incapacitation_does_not_block_movement` | 通过：纯失能单位 5 尺 move 合法，超速 move 仍被既有距离门拒绝 |
+| 6 | `test_repeat_save_success_removes_paralyzed_without_ending_concentration` | 通过：事件序 `check.resolved(repeat_save=True, success=True)` → `condition.removed(reason=save_repeat)` → `turn.advanced`；无 `concentration.ended`；施法者专注保留 |
+| 7 | `test_repeat_save_failure_keeps_paralyzed_and_the_caster_concentration` | 通过：低骰失败，paralyzed 保留，无 `condition.removed` / `concentration.ended`，专注保留 |
+| 8 | `test_upcast_hold_person_saves_each_target_independently` | 通过：3 环位两目标各自独立 check（fail/success），各自 condition；2 环位指定 2 目标被既有 upcast 目标数校验拒绝 |
+| 9 | `test_hold_person_rejects_a_non_humanoid_target` | 通过：`creature_type: "beast"` 目标报 "the spell target's creature type is not eligible"；humanoid 正常由 #2 覆盖 |
+| 10 | `test_paralyzed_target_auto_fails_dex_saves_without_rolling` | 通过：`burning_hands`（dex，3d6）对 paralyzed goblin：`rolls=[]`、`success=False`、`auto_failed=True`；RecordingRng 记录 `(1,20)` 请求数为 0；伤害全额 9 |
+| 11 | `test_melee_hit_on_a_paralyzed_target_becomes_critical` / `test_ranged_hit_on_a_paralyzed_target_is_not_critical` | 通过：相邻非 nat20 命中 → `critical=True` 且 1d4 骰翻倍；30 尺远程命中 → `critical=False` 且不翻倍 |
+| 12 | `test_spell_attack_on_a_paralyzed_target_within_5_feet_is_critical` / `test_distant_spell_attack_on_a_paralyzed_target_is_not_critical` | 通过：相邻 fire bolt 非 nat20 命中 → `critical=True`；30 尺施放 → `critical=False` |
+| 13 | `test_incapacitation_breaks_the_targets_concentration` | 通过：sleep 失败 → 批内 `dnd2024.concentration.ended(actor_id=goblin, reason=incapacitated)`；apply 后 blessed 级联移除、incapacitated 存在 |
+| 14 | `test_sleep_repeat_save_removes_incapacitated_and_keeps_it_on_a_failure` | 通过：高骰移除 incapacitated，低骰保留 |
+| 15 | `test_incapacitated_defender_gets_no_reaction_decision` | 通过：注入 paralyzed 的持盾队友被攻击时无 `decision.pending`，伤害直接结算 |
+
+### C. 与 §3 语义 / 计划的偏差与说明
+
+1. **测试职业等级**：任务书 §3.6 建议 3 级；实际用 **5 级法师**，因为 #8 升环需要 3 环法术位（3 级法师只有 2 环位）。`hold_person` 排在 spellbook 第 9 位，使其同时落在 5 级 spellbook(14) 与 prepared(9) 前缀内；1–4 级的前缀仍全部落在各自最大法术环内。
+2. **#11 / #12 拆为两个用例**：相邻与远距分别构造独立战斗，避免同一实例内位置改动污染经济；测试函数总数 17。
+3. **#10 法术选择**：目录中 `save ∈ {str,dex}` 的 saving_throw 效果存在（`burning_hands` / `sacred_flame` / `acid_splash`），无停止条件触发；选用 `burning_hands` 以同时验证全额伤害。断言"无 d20"用 RecordingRng 记录请求区间，而非仅凭队列余值。
+4. **fire bolt 骰数**：#12 中 5 级法师的 fire bolt 已是 2d10（既有 cantrip 升级路径），因此重击时 4 颗骰、非重击 2 颗；这是既有行为，未新增任何规则。
+5. **sleep 近似**（§1.2 既定裁剪）：保留 `condition_duration: "concentration"`，仅新增 `save_repeat: "wis"` 实现"下回合结束重复豁免"；二次失败转 unconscious、受伤/摇醒终止、无需睡眠生物免疫仍未实现。
+6. **失能打断专注**：使用预结算视图判断 `concentration_owner == target_id`，应用后追加一条 `concentration.ended`，级联由既有 reducer 完成；未改动既有 `_concentration_events`（受伤打断专注的体质豁免行为不变）。
+7. **自动失败位置**：在 saving_throw 分支取定豁免属性后、任何 d20 / bless 请求之前；`modifier` 仍填真实修正，`total` 为 0。未命中清单时行为与现状一致。
+8. **自动重击**：只在已命中（`natural != 1` 且达 AC）时升级；spell_attack 分支补 `distance` 计算，重击结果直接作用于既有 check 事件与 `double_dice_counts` / `attack_damage_node(critical=...)`，未新增事件键。
+9. **`condition_flags` 聚合**：四个标志按"任一为真 / 并集"聚合；`auto_fail_saves` 返回 `set[str]`，与任务书签名一致。
+10. **`unconscious` 条目立即活效**：零 HP 玩家由 reducer 直写 `conditions["unconscious"] = {"source": "zero_hp"}`，不经 `condition.applied`，因此注册表条目对倒地玩家立即产生攻击优势 / 速度归零 / 力敏自败 / 近战自动重击后果（与 §2 备忘一致）。
+11. **测试基建**：新测试文件沿用 `dnd2024_monk_common` 的 `SequenceRng`、`monk_draft`、`monk_instance`、`with_equipment`、`goblin`，未改动既有 helper 语义（仅 `goblin()` 加 `creature_type`）。
+12. **已知偏差（§1.2 保留）**：`available_intents` 等客户端投影仍不做失能过滤；失能单位的自动 `end_turn` 代点未实现，需 GM 手动提交触发 tick。
+
+### D. 验收命令结果
+
+| 命令 | 结果 |
+|---|---|
+| `pytest tests/rulesets/test_dnd2024_hold_person.py -q` | **17 passed** |
+| `pytest test_dnd2024_combat / spells / smite / uncanny_dodge / monk_combat / invisibility / stoneskin -q` | **119 passed** |
+| `pytest tests/rulesets -q --deselect tests/rulesets/test_dnd2024_character_builder.py` | **538 passed, 39 deselected, 35 warnings**（2229.17s） |
+
+既有 sleep 回归（`test_dnd2024_combat.py`）在追加 `save_repeat` 后仍通过：该回归未推进失败目标的回合结束，tick 不触发，无需语义解释。
+
+### E. 遗留
+
+1. sleep 的第二阶段（二次失败转 unconscious）、伤害/摇醒终止、免疫清单（§1.2 裁剪）。
+2. prone 与"倒地"相关距离条件优劣势、石化、中毒劣势家族（§1.2 裁剪）。
+3. 先攻劣势（失能"措手不及"）与惊喜轮（§1.2 裁剪）。
+4. `available_intents` 投影未按失能过滤；UI 可能显示将被服务端拒绝的意图（已知偏差）。
+5. 失能单位（AI 托管/敌人）的自动回合结束代点未实现（§1.2 裁剪，需 GM 手动提交）。
+6. 速度归零对 economy 的投影仍走既有 `_fresh_economy`（§6 禁止项 9），未数据驱动化。
