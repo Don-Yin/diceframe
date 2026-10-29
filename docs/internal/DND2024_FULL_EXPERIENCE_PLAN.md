@@ -151,11 +151,12 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 | 一 | 切片 3：Uncanny Dodge（触发泛化 + 伤害修正窗口） | ✅ 完成（任务书 v2，分支 `feat/uncanny-dodge`；`hit_reaction` 决策泛化到特性选项、伤害减半、AI 自动选择、人类玩家按钮均已测试/构建锁定） |
 | 一 | 切片 4：Action Surge（economy 授予） | ✅ 完成（任务书 v2，分支 `feat/action-surge`；`economy.granted` 通用授予事件、surge_action 独立经济 key、once_per_turn 通用字段、支付优先级、施法结构性排除均已测试锁定） |
 | 一 | 切片 5：Sneak Attack（谓词伤害） | ✅ 完成（任务书 v1，分支 `feat/sneak-attack`；武器/优势/盟友谓词、extra_dice_formulas 多附加骰 AST、feature_usage 每回合账本、决策链延迟消耗均已测试锁定） |
-| 1B | 法术原语切片 P1–P9（矩阵见 `design/SPELL_GAP_MATRIX.md`） | 🔶 进行中（P1、P2、P3、P5 已完成；建议顺序 P1→P5→P2→P3→P4→P6→P8→P7→P9，P1–P5 为法术/特性共用底座优先） |
+| 1B | 法术原语切片 P1–P9（矩阵见 `design/SPELL_GAP_MATRIX.md`） | 🔶 进行中（P1–P5 已完成；建议顺序 P1→P5→P2→P3→P4→P6→P8→P7→P9，P1–P5 为法术/特性共用底座优先） |
 | 1B | P1：invisibility（attack_sources 数据驱动 + 升环目标数 + 专注法术提前终止） | ✅ 2026-10-29 执行完成并审核通过（任务书 v1 + 执行报告；`feat/p1-invisibility` WIP 原型融合入本分支，借机攻击事件序交叉已修并补测） |
 | 1B | P5：stoneskin（伤害类型抗性框架 + 偿还 Rage 抗性债） | ✅ 2026-10-29 执行完成并审核通过（任务书 v1 + 执行报告；抗性来源 = 注册表静态声明 ∪ condition 元数据动态声明，`_resist_damage` 集合判成员保证不叠加；Rage 硬编码减半特判移除、改注册表驱动，行为等价由既有测试锁定；免疫/易伤按 §1.2 裁剪，挂钩点已预留） |
 | 1B | P2：hold_person（失能族行动门控 + 每回合豁免 tick） | ✅ 2026-10-29 执行完成并审核通过（任务书 v1.1 + 执行报告；四项通用原语——`condition_flags` 单点聚合失能族后果、`save_repeat` 每回合重复豁免、`auto_fail_saves` 免掷骰失败、`target_creature_types` 生物类型限定；sleep 同步获得重复豁免与真实失能后果；prone/石化/睡眠第二阶段按 §1.2 裁剪） |
 | 1B | P3：scorching_ray（多 beam 重复目标结算） | ✅ 2026-10-29 执行完成并审核通过（任务书 v2 + 执行报告；`repeat_targets` 开启重复 target_ids、`target_count` 读作射线数上限、升环复用 P1 `upcast_target_count`；审核推翻 v1 两条假前提——批次内逐 beam 条件消耗与法术攻击 bless，均按 RAW 补齐） |
+| 1B | P4：false_life（临时生命值原语） | ✅ 2026-10-29 执行完成并审核通过（任务书 v2 + 执行报告；`temp_hp` 效果模式 + `upcast_flat` 固定升环加值、reducer 端 keep-max 与伤害优先吸收；任务书 v1 升环举例错一级由审核按规则书原文修正，实现自始正确） |
 | 二 | 法术批量填充管线（原型已验证，review 13 + manual 33 待处理） | 🔄 原型完成（`scripts/rulesets/import_dnd5eapi_spell_effects.py`） |
 | 二 | spells / progression / class_feature source-aware 解耦 | ⬜ 未开始 |
 | 二 | 许可分层声明（AGPL 代码 / CC-BY 内容） | ⬜ 未开始 |
@@ -259,6 +260,15 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 - 规则边界测试锁定：三道射线集中同一目标 = 三份独立 check + 三份 2d6（#2）；分散三目标各一份（#3）；重复 id 仅 `repeat_targets` 合法（#4a/#4b）；3 环位 4 道 ok / 5 道拒（#5）；中间 beam 单独重击只翻倍自身骰（#6）；优势只覆盖第一道且 condition 恰移除一次（#7）；少射宽容（#8）；bless 逐 beam 加骰（#10）。
 - 交叉排查（P1/P2 教训执行）：①`condition.removed` 去重后同一批仅一份，reducer 按事件类型消费、无位置耦合；②`check.resolved` 的 `bless_bonus` 是既有投影白名单允许键（`runtime.py`），前端 `CombatLiveBar.vue` 已按 `event.bless_bonus` 叠加，新增字段零消费方风险；③RNG 序列仅在"施法者/专注者持 blessed"时新增一枚 d4，既有测试零依赖（全量复跑证实）。
 - 已知不可达 / 遗留（执行报告 §D 已登记，均不阻塞）：①敌人视图硬编码 `concentration: None`，敌方施法者专注模型缺失，矩阵 #9（专注逐伤害事件）删除；②`_last_hostile_defeated` 逐 beam 用批次前 HP 快照，多 beam 累计击杀时本批不发 `dnd2024.combat.ended`（reducer 标 `defeated`、回合结束补发胜利）；③前端仍单目标提交 `target_ids`，多道射线编排是前端任务（§1.2 裁剪）；④`target_count` 在 `repeat_targets` 下的"射线上限"重载语义未在 schema 层固化。
+
+### P4 审核记录（2026-10-29）
+
+- 验收复跑核实（执行端回报，全量数字与 P3 基线吻合）：`test_dnd2024_false_life.py` 12 passed；回归八文件 134 passed；rulesets 全量 561 passed / 39 deselected（2434.84s；P3 基线 549 + 本切片 12，`character_builder` 已知上游豁免）。
+- 白名单合规：6 个改动文件（`srd_combat_core.json` / `catalog.py` / `reducer.py` / `resolution.py` / `validation.py` / `view.py` + 新增 `test_dnd2024_false_life.py`）+ 任务书执行报告豁免；diff 逐文件核对无其它任务残留。
+- 规则逐条核对（对照 `.rulebooks/dnd5r/玩家手册2024/法术详述/1环.htm` L113-114 与临时生命值通则）：①目录条目与原文一致（`temp_hp: "2d4+4"`、`upcast_flat: 5`、Self → 盟友校验 + range 5）；②keep-max 在 `_apply_temp_hp_change`，`max(现有, 新值)` 不分来源，「同一来源重复施放」同样覆盖，RAW 玩家二选一的简化偏差已在任务书 §1.1#1 声明；③**吸收顺序与 P5 抗性框架一致**——`_resist_damage` 在 resolution 生成伤害事件时已把抗性减半写入 `delta`（武器/法术攻击/豁免/自动伤害四个调用点），reducer 的 temp 吸收用同一 `delta`，完整顺序为「豁免修正 → 抗性减半 → temp 吸收 → hp」，符合 RAW（抗性修正伤害本身，temp 吸收已修正的伤害）；④死亡豁免失败累积（`before == 0 and delta < 0`）在吸收之后判定，全吸收不加失败（测试 #10 锁定）；⑤0 HP 目标拒绝：validation L478 豁免集合不含 `temp_hp`，与 §1.1#4 声明的偏差一致；⑥长休清除无引擎钩子，按 §1.2 裁剪记遗留。
+- **任务书 v1 升环数值矛盾（审核修正，实现无需返工）**：§1 规则书原文与 §3.4 代码均为「每比一环高一环 +5」，但 §1.1#5 与矩阵 #7 的举例把「高几环」少算一级（等价 `slot_level - 2`，2 环位会错误 +0）。执行端正确地以规则书原文为准（测试 2 环位 → 11、3 环位 → 16），审核核实规则书原文后升 v2 修正举例，未改实现迁就错误示例。
+- 交叉排查：①`resource.changed` 的 `resource` 字段在 `runtime.py` 投影白名单内（L1129），既有消费方不假设恒为 `"hp"`；②view 投影：`_player_view` 是唯一新增暴露点，companion 复用同一路径（与 reducer 的 companion keep-max 对齐），enemy 分支与战场 roster 轻量投影均不含 `temp_hp`；③前端 `CombatLiveBar.vue` / `Dnd2024CombatPanel.vue` 会把 temp 授予事件渲染为「恢复 N 点生命」/「HP +N」——展示层语义偏差，权威状态不受影响，属任务书 §1.2 已裁剪的前端范围，记遗留；④`_apply_temp_hp_change` 对非 player/companion fail closed（`EventBatchError`），与敌人无 temp 来源的现状一致。
+- 遗留（执行报告 §10.5 已登记，均不阻塞）：长休清理、敌人侧 temp、heroism / armor of agathys / aid 等其它 temp 或 max_hp 机制、战斗结束不清 temp、前端 temp 展示（含上述「恢复 N 点生命」误标）、对倒地盟友赋 temp 的 0 HP 边界。
 
 ## 待定决策
 

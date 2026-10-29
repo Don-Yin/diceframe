@@ -1,6 +1,6 @@
 # 切片 P4 任务书：False Life（临时生命值）
 
-版本：v1（2026-10-29）
+版本：v2（2026-10-29）
 执行侧须知：本任务书是唯一需求来源。只参考本任务书列出的源文件；不要读取 `docs/internal/` 下其他计划文档。仓库根的 `AGENTS.md` 与 `docs/ENGINEERING_RULES.md` 自动适用。
 依赖声明：本切片在 P1、P5、P2、P3 之后执行。无强机制依赖（不用 upcast_target_count / repeat_targets），但 P1-P3 已改 `catalog.py` / `validation.py` / `resolution.py`，行号会偏移，描述以语义位置为准。
 
@@ -34,7 +34,7 @@
 2. **优先吸收发生在 reducer**：伤害事件（`resource.changed`，负 delta）应用时先扣 `temp_hp` 再扣 `hp`；事件本身的 `amount`（打出的伤害）不变，吸收反映在状态上。
 3. **temp HP 不是治疗**：授予不清除 `unconscious` / `stable`、不重置死亡豁免、不被 `cannot_regain_hp`（颤栗之触）阻挡、`hp` 与 `max_hp` 不因授予改变。
 4. **0 HP 目标拒绝**：`temp_hp` 模式不进"0 HP 目标豁免集合"（healing/buff/stabilize）——引擎一贯拒绝无意义操作（RAW 允许给 0 HP 目标赋 temp 但不恢复意识，引擎直接拒绝，记录偏差）。0 HP 者自我施法本就被意图门挡死（只许 death_save），此边界只影响未来对他人赋 temp 的法术。
-5. **升环是固定值**：每级 +5（`2d4+4` → 3 环 `2d4+9`、4 环 `2d4+14`）。`spell_formula_node` 的 `upcast` 参数要求同面骰公式，**不得**用它表达 flat 加值——用本切片的 `upcast_flat` 字段在分支内自行加常数节点。
+5. **升环是固定值**：每比一环高一环 +5（`2d4+4` → 2 环位 `2d4+9`、3 环位 `2d4+14`）。`spell_formula_node` 的 `upcast` 参数要求同面骰公式，**不得**用它表达 flat 加值——用本切片的 `upcast_flat` 字段在分支内自行加常数节点。（v1 举例把「高几环」少算一级，v2 按规则书原文修正，见 §9。）
 6. **满血可授予**：`hp == max_hp` 时授予照常（temp 不受 max_hp clamp）。
 7. **死亡豁免失败累积看吸收后伤害**：`_apply_hp_change` 现有"`before == 0 and delta < 0` 时累积失败"逻辑使用**吸收后**的 delta——temp 吸收了全部伤害（delta 变 0）就不加失败。
 
@@ -150,7 +150,7 @@ if delta < 0 and temp > 0:
 | 4 | 优先吸收：hp 20 + temp 5，受 7 伤害 | state：`temp_hp == 0`、`hp == 18` |
 | 5 | 全吸收：hp 20 + temp 7，受 5 伤害 | state：`temp_hp == 2`、`hp == 20`；无 `unconscious` |
 | 6 | 满血授予：hp == max_hp 时施放 | `temp_hp` 照常增加，`hp` 不变（不受 max_hp clamp） |
-| 7 | 升环：3 环位施放（2d4+4+5） | SequenceRng 两骰 1,1 → amount=11；4 环位 → +10 |
+| 7 | 升环：2 环位施放（2d4+4+5） | SequenceRng 两骰 1,1 → amount=11；3 环位（2d4+4+10）→ 16 |
 | 8 | 敌我校验：对 goblin 施 false_life | `CombatIntentError`（temp_hp 属有益集合，需盟友） |
 | 9 | 非治疗：自挂 `cannot_regain_hp`（注入或颤栗之触）后施 false_life | 授予照常（对照 healing 被挡的既有行为不回归） |
 | 10 | 死亡豁免不受吸收外伤害：0 HP + 注入 temp 5 的玩家受 3 伤害 | `death_saves.failures` 不增加（吸收后 delta=0）、hp 仍 0 |
@@ -190,4 +190,87 @@ if delta < 0 and temp > 0:
 
 ## 9. 修订记录
 
-- v1（2026-10-29）：初版。
+- v1（2026-10-29）：初版；§1.1#5 与矩阵 #7 的升环举例把「高几环」少算一级（等价 `slot_level - 2`，会使 2 环位错误地 +0），与 §1 规则书原文及 §3.4 代码（`flat * (slot_level - spell_level)`）矛盾。
+- v2（2026-10-29）：审核修正——§1.1#5 举例改为 2 环 `2d4+9`、3 环 `2d4+14`；矩阵 #7 改为 2 环位 → 11、3 环位 → 16。实现与测试（`test_upcast_adds_five_per_level_above_the_first`：2 环位 11、3 环位 16）自始按规则书原文，无需改动；§10.3.3 记录的即本处矛盾。
+
+---
+
+## 10. 执行报告（2026-10-29）
+
+### 10.1 变更文件清单
+
+`git status --short` 结果（严格落在 §3 白名单内，无其它阶段残留）：
+
+```text
+ M src/rulesets/dnd2024/combat/catalog.py
+ M src/rulesets/dnd2024/combat/reducer.py
+ M src/rulesets/dnd2024/combat/resolution.py
+ M src/rulesets/dnd2024/combat/validation.py
+ M src/rulesets/dnd2024/combat/view.py
+ M templates/rulesets/dnd2024_srd/content/combat_catalogs/srd_combat_core.json
+?? tests/rulesets/test_dnd2024_false_life.py
+```
+
+逐文件改动（`git diff --stat`：6 files changed, 61 insertions(+), 3 deletions(-)，另有新增测试文件）：
+
+- `srd_combat_core.json`：`spell_effects` 新增 `false_life`（`mode: "temp_hp"`, `range: 5`, `target_count: 1`, `temp_hp: "2d4+4"`, `upcast_flat: 5`）。
+- `catalog.py`：`SPELL_MODES` 追加 `temp_hp`；`temp_hp` 模式要求 `temp_hp` 为字符串；`upcast_flat` 若存在必须是 `0 < int <= 50` 的非 bool int。
+- `validation.py`：有益目标集合改为 `{"healing", "buff", "stabilize", "temp_hp"}`；0 HP 豁免集合保持不含 `temp_hp`。
+- `resolution.py`：`_spell_events` 新增 `temp_hp` 分支（`spell_formula_node(..., None, ...)` + `upcast_flat * levels` 常量节点 → `resource.changed` / `resource: "temp_hp"`）。
+- `reducer.py`：`resource.changed` 按 `resource` 分流到 `_apply_temp_hp_change`；新增该方法（player/companion keep-max，其余 `EventBatchError`）；`_apply_hp_change` 玩家/同伴分支在 clamp 前先吸收 temp HP，死亡豁免累积使用吸收后的 delta。
+- `view.py`：`_player_view` 追加 `"temp_hp"` 投影（缺省容错同 `max_hp`）。
+- `tests/rulesets/test_dnd2024_false_life.py`：新增 12 个用例（含 2 组参数化），覆盖 §4 全部 10 项矩阵。
+
+### 10.2 测试矩阵逐项结果
+
+| # | 用例 | 结果 |
+|---|---|---|
+| 1 | `test_catalog_rejects_invalid_temp_hp_declarations`（缺 `temp_hp` / 非字符串 `temp_hp` / `upcast_flat: "5"` / `upcast_flat: 51`，并验证合法条目可通过） | 通过 |
+| 2 | `test_false_life_grants_temp_hp_from_the_base_formula`（骰 2,3 → amount=9、rolls=[2,3]；`temp_hp=9`，`hp`/`max_hp` 不变） | 通过 |
+| 3 | `test_existing_temp_hp_is_kept_unless_the_new_value_is_higher`（参数化：10 对 9 → 10；8 对 12 → 12） | 通过（2 例） |
+| 4 | `test_damage_absorbs_temp_hp_before_reducing_hp`（hp 20 + temp 5 受 7 → temp 0、hp 18、无 unconscious） | 通过 |
+| 5 | `test_fully_absorbed_damage_leaves_hp_untouched`（hp 20 + temp 7 受 5 → temp 2、hp 20） | 通过 |
+| 6 | `test_temp_hp_is_granted_at_full_hp`（满血授予，`hp` 仍等于 `max_hp`，不受 clamp） | 通过 |
+| 7 | `test_upcast_adds_five_per_level_above_the_first`（参数化：2 环位骰 1,1 → 11；3 环位 → 16） | 通过（2 例，见 10.3 偏差第 3 条） |
+| 8 | `test_false_life_rejects_a_hostile_target`（对 goblin 施放 → 校验 `ok=False`，错误含 allied） | 通过 |
+| 9 | `test_cannot_regain_hp_does_not_block_temp_hp`（自挂 `cannot_regain_hp` 后授予照常，`hp` 不变） | 通过 |
+| 10 | `test_absorbed_damage_does_not_add_death_save_failures`（0 HP + temp 5 受 3 → temp 2、hp 0、failures 仍为 1） | 通过 |
+
+### 10.3 语义与实现的偏差
+
+1. **keep-max 简化（任务书已声明的偏差）**：RAW 为“你决定保留原值或获得新值”，引擎按确定性原则实现为保留较高者（`max(现有, 新值)`），不向玩家开放二选一。故意保留较低值这一非理性场景不在支持范围。
+2. **0 HP 目标拒绝（任务书已声明的偏差）**：RAW 允许给 0 HP 目标赋 temp 但不会恢复意识；引擎在 `_validate_spell` 中对 `hp <= 0` 且模式不在 `{healing, buff, stabilize}` 的目标直接报 “spell target is not active”，即拒绝。该边界只影响未来对他人赋 temp 的法术；0 HP 自我施法本就被意图门挡死。
+3. **升环数值自相矛盾（实现以规则书原文为准）**：任务书自身存在一处数值冲突——
+   - §1 引用规则书原文“使用的法术位每比一环高一环，其给予的临时生命值就增加 5”，且 §3.4 代码 `flat * (slot_level - spell_level)` 与之一致（2 环位 +5、3 环位 +10、4 环位 +15）；
+   - 但 §1.1#5 的举例“3 环 2d4+9、4 环 2d4+14”与矩阵 #7“3 环位（2d4+4+5）、4 环位 → +10”把“高几环”少算了一级（相当于 `slot_level - 2`，会使 2 环位错误地只 +0）。
+   
+   实现取规则书原文 + §3.4 代码，即每比一环高一环 +5。测试据此用“2 环位 +5（该格恰为矩阵期望的 amount=11）”“3 环位 +10”验证固定加值语义；矩阵 #7 的槽位标签按正确级数修正。
+4. **其它实现取舍**：`_apply_temp_hp_change` 读 `resources.get("temp_hp", 0)`，不依赖该键预先存在（§7 停止条件 2 未触发）；`resource.changed` 的公共事件投影允许 `resource` 字段（`runtime.py` 的 `allowed_fields` 已含 `"resource"`），既有消费方不假设恒为 `"hp"`（§7 停止条件 1 未触发）。
+
+### 10.4 验收命令结果
+
+```text
+# 1) 新测试
+.venv\Scripts\python.exe -m pytest tests/rulesets/test_dnd2024_false_life.py -q
+12 passed
+
+# 2) 任务书 §5 指定回归子集
+.venv\Scripts\python.exe -m pytest tests/rulesets/test_dnd2024_combat.py tests/rulesets/test_dnd2024_spells.py tests/rulesets/test_dnd2024_smite.py tests/rulesets/test_dnd2024_uncanny_dodge.py tests/rulesets/test_dnd2024_monk_combat.py tests/rulesets/test_dnd2024_invisibility.py tests/rulesets/test_dnd2024_hold_person.py tests/rulesets/test_dnd2024_scorching_ray.py -q
+134 passed in 431.59s (0:07:11)
+
+# 3) 全量
+.venv\Scripts\python.exe -m pytest tests/rulesets -q --deselect tests/rulesets/test_dnd2024_character_builder.py
+561 passed, 39 deselected, 35 warnings in 2434.84s (0:40:34)
+```
+
+失败 0 条、跳过 0 条；无需要按“11 项已知上游豁免”逐条判定的失败用例。新增 12 例相对 P3 基线（549 passed）正好构成 549 + 12 = 561。
+
+### 10.5 遗留问题
+
+1. **长休清理推迟**：战斗引擎没有长休钩子，`temp_hp` 持续存在直至被消耗或被更高新值覆盖。§1.2 已裁剪，未实现。
+2. **敌人无 temp HP**：敌方无任何 temp 来源，reducer 对非 player/companion 的 `temp_hp` 事件 fail closed；敌人档案也没有 resources 投影路径。
+3. **其它 temp 来源未做**：heroism（专注光环持续赋 temp）、armor of agathys（temp + 反伤）、aid（max_hp 提升）均推迟；本切片只沉淀 `temp_hp` 最小原语。
+4. **战斗结束不清 temp**：`dnd2024.combat.ended` 不触碰角色资源（保持现状）。
+5. **UI 投影未改造**：仅 `_player_view` 暴露 `temp_hp` 字段完成服务端契约；`gameplay_view` 等前端聚合层如何展示不在本切片。
+6. **对他人赋 temp 的 0 HP 边界**：当前引擎一律拒绝（见 10.3 第 2 条），未来若出现对倒地盟友赋 temp 的法术需重新评估该边界。
+
