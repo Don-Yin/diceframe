@@ -151,7 +151,8 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 | 一 | 切片 3：Uncanny Dodge（触发泛化 + 伤害修正窗口） | ✅ 完成（任务书 v2，分支 `feat/uncanny-dodge`；`hit_reaction` 决策泛化到特性选项、伤害减半、AI 自动选择、人类玩家按钮均已测试/构建锁定） |
 | 一 | 切片 4：Action Surge（economy 授予） | ✅ 完成（任务书 v2，分支 `feat/action-surge`；`economy.granted` 通用授予事件、surge_action 独立经济 key、once_per_turn 通用字段、支付优先级、施法结构性排除均已测试锁定） |
 | 一 | 切片 5：Sneak Attack（谓词伤害） | ✅ 完成（任务书 v1，分支 `feat/sneak-attack`；武器/优势/盟友谓词、extra_dice_formulas 多附加骰 AST、feature_usage 每回合账本、决策链延迟消耗均已测试锁定） |
-| 1B | 法术原语切片 P1–P9（矩阵见 `design/SPELL_GAP_MATRIX.md`） | ⬜ 未开始（建议顺序 P1→P5→P2→P3→P4→P6→P8→P7→P9，P1–P5 为法术/特性共用底座优先） |
+| 1B | 法术原语切片 P1–P9（矩阵见 `design/SPELL_GAP_MATRIX.md`） | 🔶 进行中（P1 已完成；建议顺序 P1→P5→P2→P3→P4→P6→P8→P7→P9，P1–P5 为法术/特性共用底座优先） |
+| 1B | P1：invisibility（attack_sources 数据驱动 + 升环目标数 + 专注法术提前终止） | ✅ 2026-10-29 执行完成并审核通过（任务书 v1 + 执行报告；`feat/p1-invisibility` WIP 原型融合入本分支，借机攻击事件序交叉已修并补测） |
 | 二 | 法术批量填充管线（原型已验证，review 13 + manual 33 待处理） | 🔄 原型完成（`scripts/rulesets/import_dnd5eapi_spell_effects.py`） |
 | 二 | spells / progression / class_feature source-aware 解耦 | ⬜ 未开始 |
 | 二 | 许可分层声明（AGPL 代码 / CC-BY 内容） | ⬜ 未开始 |
@@ -208,6 +209,19 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 - 执行端三处偏离（均已接受）：①借机攻击决策的威胁方攻击档案——enemy 仍走原 `attack_id` 路径（字节不变），player/companion 走 `_available_attacks` 的 `weapon_ref`（case 13 真实 move→decision.resolve 链的必要条件）；②Shield/Uncanny Dodge 同阵营受击用任务书 §3.8 授权的构造例外（生产 offer 不面向同阵营）；③companion 代替第二玩家系任务书明文允许。
 - 架构质量：`feature_usage` 是按攻击者 + round/turn_index 的战斗级通用账本，不读当前行动者经济；`dnd2024.feature.used` 对同 actor 同回合同 feature 重复提交 fail-closed，`setdefault` 兼容旧存档免迁移；`attack_damage_node` 的 `extra_dice_formulas` 有序列表让 Hex/偷袭共用一条伤害 AST，重击翻倍全部骰节点而属性修正保持常量；延迟 `feature_use` 元数据只在最终落地伤害路径提交（`_submit_hit_damage` 统一收口全部提交点）。
 - 切片 3 教训闭环：任务书 §1.2 的自动附加策略结构性回答了"哪个人类玩家的哪次点击"——满足谓词的第一次合法命中自动附加偷袭，复用既有 Attack 按钮与借机攻击决策卡，前端零改动成立；账本键在任务书中前置约束，经济域零偏离。
+
+### P1 审核记录（2026-10-29）
+
+- 验收复跑通过（WIP 分支 `feat/p1-invisibility`）：`test_dnd2024_invisibility.py` 16 passed + 相邻六文件 91 passed + rulesets 全量 495 passed / 39 deselected（`character_builder` 已知上游豁免），planner 独立复跑与执行报告一致；融合入本分支后（含 `53b715e1` 修复）invisibility + combat 47 passed，全量另见本次提交前复跑。
+- 白名单合规：9 个实现文件（src 7 + templates 1 + tests 1）+ 任务书执行报告豁免；WIP 提交混入的 9 份规划文档（P2–P9 任务书与主计划 1A–1D 重组）已剥离，不进 feat 提交，留待后续切片各自携带。
+- 任务书 §1.1 八条规则边界全部测试锁定：相消语义零改动（`mode_from_sources` 未动，#13/#14 直测 RAW"多劣一优相消"）；`invisible` 双向声明（#3 目标侧劣势取低骰、#4 攻击者侧优势取高骰）；感官抵消按感知方且只豁免对应方向（#9/#10）；提前终止是整道法术（#4 断言施法者 concentration 清空、非行动目标身上的 condition 一并移除）；攻击检定即触发与命中无关（#4 参数化 miss 用例）；重刷快照语义（#6 恰一次 ended、新 condition 存活）；blur 与 invisible 两份独立 `negated_by` 清单（#11）；`next_attack_*` 消耗语义数据化后行为等价（#12）。
+- 执行端五项偏离均为测试写法（见任务书执行报告），已接受；执行报告无 §8 之外的文档产出。
+- **融合时审核发现的真实缺陷（已修）**：借机攻击结算 `opportunity[0] = reaction.spent` 按列表位置替换支付事件，与 P1 的"法术提前终止事件插在列表头部"在同一位置交叉——隐形威胁方进行借机攻击时其 `concentration.ended` 会被反应支付覆盖丢失。WIP 分支不含 `53b715e1` 的借机攻击重构且测试未覆盖该场景，故未暴露。修复：按 `dnd2024.attack.spent` 事件类型定位替换，并补 #4b 用例（隐形威胁方借机攻击 → 提前终止与反应支付双存且序正确）锁定。
+- **融合时第二交叉（测试适配，已修）**：`53b715e1` 的 `test_an_invisible_attacker_cannot_be_dodged` 注入 `invisible` 时该 condition 尚无攻击模式语义；P1 后隐形攻击者的攻击具有优势（双骰），原两骰序列被攻击双骰耗尽、伤害骰落到 SequenceRng 耗尽 fallback（d6 取 1），伤害 3≠6。测试意图（隐形攻击者不触发 Uncanny Dodge、伤害全额）不变，roll 序列补为三骰 `[15, 8, 4]` 适配优势取高。
+- 架构质量：condition → 攻击模式注册表是目录数据（`side`/`mode`/`negated_by`/`consume_on`，逐字段 fail closed），`check_modes` 不再硬编码来源清单，`gm_grant`/`long_range` 按任务书保持代码路径；`ends_on` 只由服务端从目录效果拷贝进 `condition.applied` 载荷，客户端不可声明；`upcast_target_count` 是通用升环计数（bless 行为不变）；`_spell_end_trigger_events` 统一四个调用点（武器攻击 / 施法 / Shield 反应 / Divine Smite）且读预结算视图，`damage_dealt` 按任务书保留为数据位无独立调用点。
+- 切片 3 教训闭环：施法走既有 cast 界面（`target_ids` 多目标校验已有）、优劣势自动进 check 投影，前端零改动成立。
+- 教训（对后续切片的要求）：**凡改动事件列表结构（插入/重排），必须 grep 所有按位置消费该列表的代码**——本次交叉正是"位置耦合"被两批独立改动同时命中，单侧分支的测试无法暴露；后续切片在整合分支上融合后必须重跑受影响套件而非沿用 WIP 分支的测试结论。
+- 遗留提醒（不阻塞本切片）：①整合分支主计划 1B 行引用的 `SPELL_GAP_MATRIX.md` 与 `scripts/rulesets/import_dnd5eapi_spell_effects.py` 来自原始线 `d134f4be`，尚未搬运到本分支，引用悬空；②`53b715e1` 的 Uncanny Dodge"必须看见攻击者"检查未考虑防御者持 `see_invisibility` 的抵消（RAW 下持识破隐形者可对隐形攻击者反应），归后续感官切片统一处理。
 
 ## 待定决策
 
