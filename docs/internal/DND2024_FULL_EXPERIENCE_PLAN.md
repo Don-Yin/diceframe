@@ -151,10 +151,11 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 | 一 | 切片 3：Uncanny Dodge（触发泛化 + 伤害修正窗口） | ✅ 完成（任务书 v2，分支 `feat/uncanny-dodge`；`hit_reaction` 决策泛化到特性选项、伤害减半、AI 自动选择、人类玩家按钮均已测试/构建锁定） |
 | 一 | 切片 4：Action Surge（economy 授予） | ✅ 完成（任务书 v2，分支 `feat/action-surge`；`economy.granted` 通用授予事件、surge_action 独立经济 key、once_per_turn 通用字段、支付优先级、施法结构性排除均已测试锁定） |
 | 一 | 切片 5：Sneak Attack（谓词伤害） | ✅ 完成（任务书 v1，分支 `feat/sneak-attack`；武器/优势/盟友谓词、extra_dice_formulas 多附加骰 AST、feature_usage 每回合账本、决策链延迟消耗均已测试锁定） |
-| 1B | 法术原语切片 P1–P9（矩阵见 `design/SPELL_GAP_MATRIX.md`） | 🔶 进行中（P1、P2、P5 已完成；建议顺序 P1→P5→P2→P3→P4→P6→P8→P7→P9，P1–P5 为法术/特性共用底座优先） |
+| 1B | 法术原语切片 P1–P9（矩阵见 `design/SPELL_GAP_MATRIX.md`） | 🔶 进行中（P1、P2、P3、P5 已完成；建议顺序 P1→P5→P2→P3→P4→P6→P8→P7→P9，P1–P5 为法术/特性共用底座优先） |
 | 1B | P1：invisibility（attack_sources 数据驱动 + 升环目标数 + 专注法术提前终止） | ✅ 2026-10-29 执行完成并审核通过（任务书 v1 + 执行报告；`feat/p1-invisibility` WIP 原型融合入本分支，借机攻击事件序交叉已修并补测） |
 | 1B | P5：stoneskin（伤害类型抗性框架 + 偿还 Rage 抗性债） | ✅ 2026-10-29 执行完成并审核通过（任务书 v1 + 执行报告；抗性来源 = 注册表静态声明 ∪ condition 元数据动态声明，`_resist_damage` 集合判成员保证不叠加；Rage 硬编码减半特判移除、改注册表驱动，行为等价由既有测试锁定；免疫/易伤按 §1.2 裁剪，挂钩点已预留） |
 | 1B | P2：hold_person（失能族行动门控 + 每回合豁免 tick） | ✅ 2026-10-29 执行完成并审核通过（任务书 v1.1 + 执行报告；四项通用原语——`condition_flags` 单点聚合失能族后果、`save_repeat` 每回合重复豁免、`auto_fail_saves` 免掷骰失败、`target_creature_types` 生物类型限定；sleep 同步获得重复豁免与真实失能后果；prone/石化/睡眠第二阶段按 §1.2 裁剪） |
+| 1B | P3：scorching_ray（多 beam 重复目标结算） | ✅ 2026-10-29 执行完成并审核通过（任务书 v2 + 执行报告；`repeat_targets` 开启重复 target_ids、`target_count` 读作射线数上限、升环复用 P1 `upcast_target_count`；审核推翻 v1 两条假前提——批次内逐 beam 条件消耗与法术攻击 bless，均按 RAW 补齐） |
 | 二 | 法术批量填充管线（原型已验证，review 13 + manual 33 待处理） | 🔄 原型完成（`scripts/rulesets/import_dnd5eapi_spell_effects.py`） |
 | 二 | spells / progression / class_feature source-aware 解耦 | ⬜ 未开始 |
 | 二 | 许可分层声明（AGPL 代码 / CC-BY 内容） | ⬜ 未开始 |
@@ -248,6 +249,16 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 - 执行端偏差全部接受（详见执行报告 §C）：5 级法师替代建议的 3 级（#8 需 3 环位）、#11/#12 拆为独立战斗实例、#10 选 `burning_hands` 并用 `RecordingRng` 记录请求区间、fire bolt 2d10 为既有 cantrip 升级、sleep 近似按 §1.2 保留。
 - 值得记录的连带效果：`unconscious` 注册表条目对 0 HP 玩家立即活效（reducer 直写 `conditions["unconscious"]`），使"5 尺内攻击倒地玩家自动重击"从无变为有——RAW 正确且任务书 §2 已预告，全量复跑无既有测试依赖旧行为。
 - 遗留（执行报告 §E 已登记，均不阻塞）：sleep 第二阶段（二次失败转 unconscious、伤害 / 摇醒终止、免疫清单）；prone 与倒地距离条件优劣势；先攻劣势与惊喜轮；`available_intents` 未按失能过滤；失能单位自动 `end_turn` 代点未实现；速度归零的 economy 投影仍走 `_fresh_economy`。
+
+### P3 审核记录（2026-10-29）
+
+- 验收复跑通过（整合分支工作树）：`test_dnd2024_scorching_ray.py` 11 passed；回归八文件（combat / spells / smite / uncanny_dodge / monk_combat / invisibility / hold_person / stoneskin）136 passed；rulesets 全量 549 passed / 39 deselected（1897.55s；P2 基线 538 + 本切片 11，`character_builder` 已知上游豁免）。
+- 白名单合规：6 个改动文件（`srd_combat_core.json` / `catalog.py` / `validation.py` / `resolution.py` / `engine.py` / 新增 `test_dnd2024_scorching_ray.py`）+ 任务书执行报告豁免；无白名单外变更。
+- **审核推翻任务书 v1 两条假前提（核心裁定：按 RAW 补齐，不迁就现状）**：①§1.1 #4 断言"`_consume_attack_conditions` 每 beam 调用一次即逐 beam 消耗"——实测三道射线全部优势、并产生 3 份重复 `condition.removed`（一次施法只产出一个事件批次，状态在 `apply_batch` 才落地）；§1.1 #4 断言"bless 对每道射线攻击掷骰生效"——`spell_attack` 分支此前完全不吃 bless（只有武器攻击与豁免分支有）。两处均按原文补齐：批次内局部隐藏已消耗条件、法术攻击逐 beam 投 1d4、专注豁免补 1d4。
+- 执行端 v1 未按 §7.1 停止报告，而是只写 7/9 测试项并跳过 §8 执行报告；v2 已补 #7/#10/#11、删除不可达的 #9、补齐报告。属执行流程违规，已记录在任务书 §8-C。
+- 规则边界测试锁定：三道射线集中同一目标 = 三份独立 check + 三份 2d6（#2）；分散三目标各一份（#3）；重复 id 仅 `repeat_targets` 合法（#4a/#4b）；3 环位 4 道 ok / 5 道拒（#5）；中间 beam 单独重击只翻倍自身骰（#6）；优势只覆盖第一道且 condition 恰移除一次（#7）；少射宽容（#8）；bless 逐 beam 加骰（#10）。
+- 交叉排查（P1/P2 教训执行）：①`condition.removed` 去重后同一批仅一份，reducer 按事件类型消费、无位置耦合；②`check.resolved` 的 `bless_bonus` 是既有投影白名单允许键（`runtime.py`），前端 `CombatLiveBar.vue` 已按 `event.bless_bonus` 叠加，新增字段零消费方风险；③RNG 序列仅在"施法者/专注者持 blessed"时新增一枚 d4，既有测试零依赖（全量复跑证实）。
+- 已知不可达 / 遗留（执行报告 §D 已登记，均不阻塞）：①敌人视图硬编码 `concentration: None`，敌方施法者专注模型缺失，矩阵 #9（专注逐伤害事件）删除；②`_last_hostile_defeated` 逐 beam 用批次前 HP 快照，多 beam 累计击杀时本批不发 `dnd2024.combat.ended`（reducer 标 `defeated`、回合结束补发胜利）；③前端仍单目标提交 `target_ids`，多道射线编排是前端任务（§1.2 裁剪）；④`target_count` 在 `repeat_targets` 下的"射线上限"重载语义未在 schema 层固化。
 
 ## 待定决策
 
