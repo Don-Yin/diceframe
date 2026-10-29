@@ -23,6 +23,7 @@ from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
 from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch_id
 
 
+from .check_modes import effective_speed
 from .primitives import (
     INTENT_TYPES,
     UNARMED_STRIKE_REF,
@@ -1002,11 +1003,10 @@ class Dnd2024CombatEngine(
             raise CombatIntentError("combat initiative state is invalid")
         return str(order[index])
 
-    @staticmethod
-    def _fresh_economy(actor: dict[str, Any]) -> dict[str, Any]:
-        speed = max(0, int(actor.get("speed", 0) or 0))
-        if "slowed_10" in actor.get("conditions", {}):
-            speed = max(0, speed - 10)
+    def _fresh_economy(self, actor: dict[str, Any]) -> dict[str, Any]:
+        base = max(0, int(actor.get("speed", 0) or 0))
+        # 速度修正来自条件注册表：speed_zero 压倒修正，其余按 speed_modifier 求和。
+        speed = effective_speed(self.catalog.conditions, actor.get("conditions") or {}, base)
         return {
             "actor_id": actor["actor_id"], "action": 1, "bonus_action": 1,
             "reaction": 1, "movement": speed, "speed": speed,

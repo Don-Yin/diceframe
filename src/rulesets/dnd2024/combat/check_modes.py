@@ -51,6 +51,20 @@ def condition_flags(
     }
 
 
+def effective_speed(
+    registry: dict[str, dict[str, Any]], conditions: dict[str, Any], base_speed: int,
+) -> int:
+    """回合开始的速度上限：speed_zero 压倒一切修正；否则叠加全部 speed_modifier，向下取整于 0。"""
+
+    if condition_flags(registry, conditions)["speed_zero"]:
+        return 0
+    total = 0
+    for condition_id, entry in registry.items():
+        if condition_id in conditions:
+            total += int(entry.get("speed_modifier", 0) or 0)
+    return max(0, int(base_speed) + total)
+
+
 def attack_sources(
     registry: dict[str, dict], actor: dict, target: dict, range_disadvantage: bool,
 ) -> list[dict]:

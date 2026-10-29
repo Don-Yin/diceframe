@@ -463,13 +463,16 @@ class CombatValidationMixin:
             target = self._actor_view(instance, combat, target_id)
             actor_side = str(actor.get("side") or "")
             target_side = str(target.get("side") or "")
-            if effect["mode"] in {"healing", "buff", "stabilize", "temp_hp"}:
+            if effect["mode"] in {"healing", "buff", "stabilize", "temp_hp", "teleport"}:
                 if target_side != actor_side:
                     raise CombatIntentError("healing and beneficial spells require an allied target")
                 if "dead" in target.get("conditions", {}):
                     raise CombatIntentError("dead targets require a resurrection effect")
             elif target_side == actor_side:
                 raise CombatIntentError("offensive spells require a hostile target")
+            if effect["mode"] == "teleport" and target_id != str(actor["actor_id"]):
+                # RAW 施法距离自身：传送只能作用于施法者本人。
+                raise CombatIntentError("teleport spells can only target the caster")
             if effect["mode"] == "stabilize" and (
                 target["kind"] != "player" or target["hp"] > 0
                 or "stable" in target.get("conditions", {})
@@ -491,6 +494,14 @@ class CombatValidationMixin:
                 raise CombatIntentError("spell resist_type choice is required")
         elif intent.get("resist_type") is not None:
             raise CombatIntentError("this spell does not take a resist_type")
+        if effect["mode"] == "teleport":
+            distance = intent.get("teleport_distance")
+            if isinstance(distance, bool) or not isinstance(distance, int) or distance == 0:
+                raise CombatIntentError("teleport distance must be a non-zero integer")
+            if abs(distance) > int(effect["range"]):
+                raise CombatIntentError("teleport distance exceeds the spell range")
+        elif intent.get("teleport_distance") is not None:
+            raise CombatIntentError("teleport distance is not valid for this spell")
 
     @staticmethod
     def _validate_player_positions(instance: Any, positions: Any) -> None:

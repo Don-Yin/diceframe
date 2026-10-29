@@ -585,6 +585,12 @@ class CombatResolutionMixin:
                     "delta": amount, "amount": amount, "rolls": rolls,
                 })
                 succeeded = True
+            elif mode == "teleport":
+                # 传送不是移动：事件无 movement_cost，不扣经济、不触发借机攻击。
+                events.append({
+                    "type": "dnd2024.position.changed", "actor_id": target_id,
+                    "distance": int(intent["teleport_distance"]), "forced": True,
+                })
             elif mode == "stabilize":
                 events.append({
                     "type": "condition.applied", "target_id": target_id,

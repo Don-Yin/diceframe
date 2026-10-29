@@ -15,7 +15,7 @@ DICE_RE = re.compile(r"^[1-9]\d*d(?:4|6|8|10|12|20)(?:\+[1-9]\d*)?$")
 FLAT_DAMAGE_RE = re.compile(r"^[1-9]\d{0,3}$")
 SPELL_MODES = frozenset({
     "spell_attack", "saving_throw", "healing", "automatic_damage", "buff", "debuff", "triggered_damage",
-    "stabilize", "reaction_defense", "temp_hp",
+    "stabilize", "reaction_defense", "temp_hp", "teleport",
 })
 DAMAGE_TYPES = frozenset({
     "bludgeoning", "slashing", "piercing", "acid", "cold", "fire", "lightning",
@@ -185,6 +185,7 @@ class Dnd2024CombatCatalog:
             if set(entry) - {
                 "attack_modes", "resist_damage_types", "implies_incapacitated",
                 "speed_zero", "auto_fail_saves", "crit_on_hit_within_5",
+                "speed_modifier",
             }:
                 raise CombatCatalogError(
                     f"combat condition has unknown fields: {condition_id}"
@@ -194,6 +195,16 @@ class Dnd2024CombatCatalog:
                     raise CombatCatalogError(
                         f"combat condition flag must be a boolean: {condition_id}"
                     )
+            speed_modifier = entry.get("speed_modifier")
+            if speed_modifier is not None and (
+                isinstance(speed_modifier, bool)
+                or not isinstance(speed_modifier, int)
+                or speed_modifier == 0
+                or not -600 <= speed_modifier <= 600
+            ):
+                raise CombatCatalogError(
+                    f"combat condition speed modifier is invalid: {condition_id}"
+                )
             auto_fail = entry.get("auto_fail_saves")
             if auto_fail is not None and (
                 not isinstance(auto_fail, list)
@@ -227,7 +238,7 @@ class Dnd2024CombatCatalog:
                 or any(
                     key in entry for key in (
                         "implies_incapacitated", "speed_zero",
-                        "auto_fail_saves", "crit_on_hit_within_5",
+                        "auto_fail_saves", "crit_on_hit_within_5", "speed_modifier",
                     )
                 )
             ):
