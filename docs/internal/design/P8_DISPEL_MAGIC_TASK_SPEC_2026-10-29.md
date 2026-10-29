@@ -1,6 +1,6 @@
 # 切片 P8 任务书：Dispel Magic（魔法 condition 移除 + 法术来源快照）
 
-版本：v1（2026-10-29）
+版本：v1.1（2026-10-30）
 执行侧须知：本任务书是唯一需求来源。只参考本任务书列出的源文件；不要读取 `docs/internal/` 下其他计划文档。仓库根的 `AGENTS.md` 与 `docs/ENGINEERING_RULES.md` 自动适用。
 依赖声明：本切片在 P1（invisibility）、P5（stoneskin）、P2（hold_person）、P3（scorching_ray）、P4（false_life）、P6（misty_step）之后执行。P2 提供 condition 元数据的 `save_repeat` 快照先例与 `condition_flags`；P6 已把 `teleport` 加入 `SPELL_MODES` 与盟友集合。前置切片合入后本任务书引用的行号会偏移，描述以语义位置为准。catalog 校验的"允许键集合"以已执行切片的并集为准。
 
@@ -143,7 +143,7 @@ if mode == "dispel":
 
 ### 3.5 测试
 
-- 新文件 `tests/rulesets/test_dnd2024_dispel_magic.py`：施法者照 paladin_sheet 模式换 `class:wizard` + `class_spell_choices` 含 `spell:dispel_magic` + `equipment_package:wizard_a`，推进到 5 级拿三环位（升环验证需要 5 级拿四环位）。敌人侧带元数据 condition 用档案注入；玩家/盟友侧用真实施法（hold_person/blur 等）或双玩家 instance。测试矩阵见 §4。
+- 新文件 `tests/rulesets/test_dnd2024_dispel_magic.py`：施法者照 paladin_sheet 模式换 `class:wizard` + `class_spell_choices` 含 `spell:dispel_magic` + `equipment_package:wizard_a`，推进到 5 级拿三环位；升环验证（矩阵 #8 的 4 环位）需要 7 级——full 施法档案 L5 为 `{1:4,2:3,3:2}`（无 4 环）、L7 才有 `{4:1}`——测试统一推进到 7 级。敌人侧带元数据 condition 用档案注入；玩家/盟友侧用真实施法（hold_person/blur 等）或双玩家 instance。测试矩阵见 §4。
 - 回归：`test_dnd2024_combat.py`、`test_dnd2024_spells.py`、`test_dnd2024_smite.py`、`test_dnd2024_uncanny_dodge.py`、`test_dnd2024_monk_combat.py`、`test_dnd2024_invisibility.py`、`test_dnd2024_hold_person.py`、`test_dnd2024_misty_step.py` 及 P3/P4/P5 产物测试文件全部通过（`test_dnd2024_character_builder.py` 上游豁免失败不计）。
 
 ## 4. 测试矩阵
@@ -152,9 +152,9 @@ if mode == "dispel":
 |---|---|---|
 | 1 | 目录校验：mode 不在 SPELL_MODES 的效果照拒；`dispel` 条目通过加载 | `CombatCatalogError` / 正常 |
 | 2 | 来源快照：法师 2 环位施 hold_person 命中 goblin | `condition.applied` 元数据含 `source_spell_ref == "spell:hold_person"`、`source_spell_level == 2`、`concentration_owner`；ray_of_frost（戏法）的 slowed_10 元数据 `source_spell_level == 0` |
-| 3 | 免费施放快照：free_cast 路径施放非戏法（若目录有 free_cast 消费者，如 smite 家族） | `source_spell_level == spell["level"]`（slot_level 0 时取基础环阶） |
+| 3 | 免费施放快照：free_cast 路径施放非戏法（Magic Initiate 专长的免费 1 环法术；smite 家族是 `triggered_damage` 且不施加 condition，不可作载体——v1 原举例有误） | `source_spell_level == spell["level"]`（slot_level 0 时取基础环阶） |
 | 4 | 自动终止（≤ 阈值）：3 环 dispel 对带 slowed_10（level 0）的 goblin | `condition.removed`（reason=dispelled）；无 check.resolved；SequenceRng 零消耗；rage/dodging 等无元数据条目不动 |
-| 5 | 专注整道终止：法师 2 环位 hold_person 定身 goblin-1（升环再定 goblin-2），3 环 dispel 打 goblin-1 | `dnd2024.concentration.ended`（owner=法师、reason=dispelled）**各一次**；apply 后**两个** goblin 的 paralyzed 都移除（级联）；法师专注位清空 |
+| 5 | 专注整道终止：法师单次 3 环 upcast hold_person 同时定身 goblin-1/goblin-2（v1 原描述「先 2 环再升环两次施法」与专注 RAW 冲突——第二次专注会终止第一次），3 环 dispel 打 goblin-1 | `dnd2024.concentration.ended`（owner=法师、reason=dispelled）**各一次**；apply 后**两个** goblin 的 paralyzed 都移除（级联）；法师专注位清空 |
 | 6 | 高环检定失败：goblin 注入 `{"paralyzed": {"source_spell_ref": "spell:hold_person", "source_spell_level": 4, "concentration_owner": "enemy:goblin-1"}}`，3 环 dispel 低骰 | `check.resolved`（kind=ability_check、ability="int"、target=14、success=False）；paralyzed 保留；无 concentration.ended |
 | 7 | 高环检定成功：同场景高骰 | check success=True → `concentration.ended`（owner=enemy:goblin-1）→ 级联移除 |
 | 8 | 升环：4 环位 dispel 对 level 4 来源 | 无检定直接终止（`source_level <= slot_level`） |
@@ -202,3 +202,58 @@ if mode == "dispel":
 ## 9. 修订记录
 
 - v1（2026-10-29）：初版。
+- v1.1（2026-10-30）：审核修正三处任务书自身错误，实现与测试自始正确、未改动——①§3.5「升环验证需要 5 级拿四环位」为笔误（full 施法档案 L7 才有 4 环位，测试统一推进到 7 级）；②矩阵 #3 载体改为 Magic Initiate 免费 1 环法术（smite 是 `triggered_damage` 不施加 condition）；③矩阵 #5 构建方式改为单次 3 环 upcast hold_person（原「两次独立施法」与专注 RAW 冲突）。执行报告 §10.4 记录的即这三处。
+
+## 10. 执行报告（2026-10-30）
+
+### 10.1 变更文件清单（严格白名单）
+
+| 文件 | 变更 |
+|---|---|
+| `templates/rulesets/dnd2024_srd/content/combat_catalogs/srd_combat_core.json` | `spell_effects` 追加 `dispel_magic`（mode=dispel、range=120、target_count=1） |
+| `src/rulesets/dnd2024/combat/catalog.py` | `SPELL_MODES` 追加 `"dispel"` |
+| `src/rulesets/dnd2024/combat/validation.py` | 阵营拒绝分支放行 dispel；dispel dead 特判；hp≤0 拒绝集合追加 dispel |
+| `src/rulesets/dnd2024/combat/resolution.py` | condition.applied 追加服务端来源快照；`elif mode == "dispel"` 逐 condition 判定 + 专注整道终止/非专注单目标移除 |
+| `tests/rulesets/test_dnd2024_dispel_magic.py` | 新增，12 个用例覆盖 §4 矩阵 |
+
+未改动 `reducer.py` / `view.py` / `engine.py` / `frontend-v2`：级联与元数据写入均为既有契约，`ability_check` 前端有回退文案。白名单外无变更。
+
+### 10.2 测试结果
+
+- 新增测试：`test_dnd2024_dispel_magic.py` **12 passed**（45.83s）。
+- 回归子集（combat/spells/smite/uncanny_dodge/monk_combat/invisibility/hold_person/misty_step + scorching_ray/false_life/stoneskin + 新测试）：**188 passed**（529.18s）。
+- 全量：`pytest tests/rulesets -q --deselect tests/rulesets/test_dnd2024_character_builder.py` → **590 passed, 39 deselected, 0 failed**（1669.80s / 27:49）。590 = 578 基线 + 12 新增。
+
+### 10.3 §4 矩阵逐项结果
+
+| # | 用例 | 结果 |
+|---|---|---|
+| 1 | `test_catalog_rejects_unknown_modes_and_accepts_dispel` | 通过：原目录可加载；未知 mode 与非法 range 均抛 `CombatCatalogError` |
+| 2 | `test_condition_snapshot_records_spell_ref_and_cast_level` | 通过：hold_person（2 环位）快照 ref/level=2/owner；ray_of_frost（戏法）level=0 |
+| 3 | `test_feat_free_cast_snapshots_the_spell_level` | 通过：Magic Initiate (Wizard) 免费施放 charm_person（slot 0）快照 level=1，并出现 `feat_spell.free_cast_spent` |
+| 4 | `test_low_level_source_is_removed_without_consuming_a_roll` | 通过：slowed_10 自动终止（reason=dispelled），无 check，RNG 零消耗，rage/dodging 保留 |
+| 5 | `test_concentration_source_ends_the_whole_spell_across_targets` | 通过：恰一条 `concentration.ended`（owner=player:gm、reason=dispelled），两个 goblin 的 paralyzed 均被级联移除，法师专注位清空 |
+| 6 | `test_high_level_source_failure_keeps_the_condition` | 通过：`check.resolved(kind=ability_check, ability=int, target=14, success=False)`，paralyzed 保留，无 ended |
+| 7 | `test_high_level_source_success_ends_the_concentration` | 通过：check 成功 → `concentration.ended(owner=enemy:goblin-1)` → 级联移除 |
+| 8 | `test_upcast_dispel_removes_a_source_matching_the_slot_level` | 通过：4 环位 dispel 对 level 4 来源无检定直接 `condition.removed` |
+| 9 | `test_dispel_targets_hostiles_and_allies` | 通过：敌方 goblin 与自己 blur 后的盟友 `player:ally` 均放行并正确移除 |
+| 10 | `test_dispel_rejects_dead_targets_but_allows_dying_ones` | 通过：dead 盟友被拒（"dead targets cannot be dispelled"）；0 HP 未死盟友放行 |
+| 11 | `test_multiple_sources_are_resolved_in_insertion_order` | 通过：事件序 `condition.removed` → `check.resolved` → `concentration.ended` |
+| 12 | `test_dispel_spends_the_action_and_a_slot` | 通过：action 1→0、`slot_spell_cast=True`、3 环位 3→2、`spell.cast.slot_level=3` |
+
+### 10.4 与任务书语义的偏差（均已记录，无未授权扩权）
+
+1. **四环位等级**：§3.5 写「5 级拿四环位」，bundle 实际法师升级表为 L5 `{1:4,2:3,3:2}`、L7 `{1:4,2:3,3:3,4:1}`，四环位在 7 级。测试统一推进到 7 级，矩阵 #8 用真实 4 环位；未改任何数据。
+2. **矩阵 #3 载体**：任务书举例 smite 家族，但 smite 是 `triggered_damage` 且不施加 condition，无法产生带快照的 condition。改用 Sage 背景 Magic Initiate (Wizard) 的免费施放 charm_person（1 环），既验证 `slot_level==0` 时快照取法术基础环阶，也顺带覆盖免费施放路径。
+3. **矩阵 #5 构建方式**：同一施法者「先 2 环定身 goblin-1，再升环定身 goblin-2」两次专注施法与 RAW 冲突（第二次专注会先终止第一次）。改为单次 3 环 upcast hold_person 同时命中两个 goblin（双方豁免失败），再 3 环 dispel goblin-1，验证一次 `concentration.ended` 对两个目标的级联移除。语义目标（整道法术跨目标终止）不变。
+4. **施法属性修正**：Sage 背景能力加成使法师 int=16，dispel 检定修正实测 +3（非先前推算的 +2）。测试以 `ability_modifier(abilities["int"])` 动态计算，不硬编码。
+5. **reaction 路径快照缺口**：shield 等 `_finish_hit_reaction` 路径不加快照（§1.2 已声明），未扩。
+6. **物件/魔法效应/区域目标**：引擎无对应实体，按 §1.2 裁剪为仅生物目标，未实现。
+7. **前端目标选择器**：面板按既有 cast_spell 流程可用，任意阵营目标的服务端已放行；前端是否过滤盟友/敌方未在本切片验证，按 §1.2「投影滞后」记录，未改前端。
+
+§7 停止条件均未触发：`check.resolved` 新 kind 有前端回退文案；主循环外 condition 路径按声明缺口处理；`spell_ability` 对法师为 `"int"`；免费施放 slot_level 语义与快照取值一致；白名单内即可完成验收。
+
+### 10.5 遗留问题
+
+- 树内 8 个 `docs/internal/design/SP*_TASK_SPEC_2026-10-30.md`（SP1/SP2/SP4/SP5/SP7/SP8/SP10/SP12）为其它会话的预研产物：未读、未改、未删、未暂存，不属于本切片。
+- 本切片未 commit，等待审核端。
