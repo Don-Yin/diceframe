@@ -15,7 +15,7 @@ DICE_RE = re.compile(r"^[1-9]\d*d(?:4|6|8|10|12|20)(?:\+[1-9]\d*)?$")
 FLAT_DAMAGE_RE = re.compile(r"^[1-9]\d{0,3}$")
 SPELL_MODES = frozenset({
     "spell_attack", "saving_throw", "healing", "automatic_damage", "buff", "debuff", "triggered_damage",
-    "stabilize", "reaction_defense", "temp_hp", "teleport",
+    "stabilize", "reaction_defense", "temp_hp", "teleport", "dispel",
 })
 DAMAGE_TYPES = frozenset({
     "bludgeoning", "slashing", "piercing", "acid", "cold", "fire", "lightning",

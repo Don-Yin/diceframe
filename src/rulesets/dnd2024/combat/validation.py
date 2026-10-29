@@ -468,17 +468,20 @@ class CombatValidationMixin:
                     raise CombatIntentError("healing and beneficial spells require an allied target")
                 if "dead" in target.get("conditions", {}):
                     raise CombatIntentError("dead targets require a resurrection effect")
-            elif target_side == actor_side:
+            elif target_side == actor_side and effect["mode"] != "dispel":
                 raise CombatIntentError("offensive spells require a hostile target")
             if effect["mode"] == "teleport" and target_id != str(actor["actor_id"]):
                 # RAW 施法距离自身：传送只能作用于施法者本人。
                 raise CombatIntentError("teleport spells can only target the caster")
+            if effect["mode"] == "dispel" and "dead" in target.get("conditions", {}):
+                # 解除魔法可对任意阵营，但死亡目标不在"生物"范围内。
+                raise CombatIntentError("dead targets cannot be dispelled")
             if effect["mode"] == "stabilize" and (
                 target["kind"] != "player" or target["hp"] > 0
                 or "stable" in target.get("conditions", {})
             ):
                 raise CombatIntentError("this spell requires a dying ally at 0 HP")
-            if target["hp"] <= 0 and effect["mode"] not in {"healing", "buff", "stabilize"}:
+            if target["hp"] <= 0 and effect["mode"] not in {"healing", "buff", "stabilize", "dispel"}:
                 raise CombatIntentError("spell target is not active")
             allowed_types = effect.get("target_creature_types")
             if allowed_types and str(target.get("creature_type") or "") not in allowed_types:

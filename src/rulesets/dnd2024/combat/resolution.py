@@ -591,6 +591,40 @@ class CombatResolutionMixin:
                     "type": "dnd2024.position.changed", "actor_id": target_id,
                     "distance": int(intent["teleport_distance"]), "forced": True,
                 })
+            elif mode == "dispel":
+                # 逐 condition 判定：≤ 施放环阶自动终止；更高环阶走一次施法属性检定。
+                # 专注来源整道终止（reducer 级联移除全部目标），非专注来源只移除本目标。
+                dispelled_owners: set[str] = set()
+                for condition_id, meta in list(target["conditions"].items()):
+                    if not isinstance(meta, dict) or not meta.get("source_spell_ref"):
+                        continue
+                    source_level = int(meta.get("source_spell_level", 0) or 0)
+                    if source_level > slot_level:
+                        modifier = ability_modifier(actor["abilities"][actor["spell_ability"]])
+                        roll = int(rng.randint(1, 20))
+                        success = roll + modifier >= 10 + source_level
+                        events.append({
+                            "type": "check.resolved", "kind": "ability_check",
+                            "actor_id": actor_id, "target_id": target_id,
+                            "ability": actor["spell_ability"], "rolls": [roll],
+                            "natural": roll, "modifier": modifier, "bless_bonus": 0,
+                            "total": roll + modifier, "target": 10 + source_level,
+                            "success": success, "condition": condition_id,
+                        })
+                        if not success:
+                            continue
+                    owner = str(meta.get("concentration_owner") or "")
+                    if not owner:
+                        events.append({
+                            "type": "condition.removed", "target_id": target_id,
+                            "condition": condition_id, "reason": "dispelled",
+                        })
+                    elif owner not in dispelled_owners:
+                        events.append({
+                            "type": "dnd2024.concentration.ended", "actor_id": owner,
+                            "reason": "dispelled",
+                        })
+                        dispelled_owners.add(owner)
             elif mode == "stabilize":
                 events.append({
                     "type": "condition.applied", "target_id": target_id,
@@ -612,6 +646,11 @@ class CombatResolutionMixin:
                     "condition": condition, "duration": str(effect.get("condition_duration") or ""),
                     "source_actor_id": actor_id,
                     "concentration_owner": actor_id if effect.get("concentration") else "",
+                    # 服务端来源快照：解除魔法只认这两个键，客户端不可声明。
+                    "source_spell_ref": spell_ref,
+                    "source_spell_level": (
+                        int(slot_level) if int(slot_level) > 0 else int(spell["level"])
+                    ),
                 }
                 # 服务端从目录效果拷贝提前终止声明；客户端永远无法声明它。
                 if effect.get("ends_on") is not None:
