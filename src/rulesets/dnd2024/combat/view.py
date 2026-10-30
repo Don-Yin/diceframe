@@ -82,6 +82,7 @@ class CombatViewMixin:
                 "death_saves": {}, "equipment_refs": [], "spell_refs": [], "slots": {},
                 "weapon_category_refs": [], "proficiency_bonus": 0,
                 "creature_type": str(enemy.get("creature_type") or ""),
+                "counterspell_dc": int(enemy.get("counterspell_dc", 0) or 0),
                 "skill_values": {}, "concentration": None,
             }
         raise CombatIntentError("actor_id is invalid")

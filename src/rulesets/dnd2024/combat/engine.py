@@ -641,7 +641,11 @@ class Dnd2024CombatEngine(
         elif intent_type == "class_capability":
             events.extend(self._class_capability_events(instance, combat, intent, rng))
         elif intent_type == "cast_spell":
-            events.extend(self._spell_events(instance, combat, intent, rng))
+            window = self._counter_spell_window(instance, combat, intent)
+            if window is not None:
+                events.append({"type": "dnd2024.decision.pending", **window})
+            else:
+                events.extend(self._spell_events(instance, combat, intent, rng))
         elif intent_type == "move":
             pending, movement_events = self._movement_events(instance, combat, intent)
             events.extend(movement_events)

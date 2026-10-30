@@ -15,11 +15,12 @@ from typing import Any
 
 from src.engine.player_control import is_ai_controlled
 from .check_modes import condition_flags
-from .primitives import CombatIntentError, actor_kind
+from .primitives import CombatIntentError, actor_kind, enemy_actor
 from .triggered_spells import free_cast_resource
 
 
 HIT_REACTION_DECISION = "hit_reaction_spell"
+COUNTER_SPELL_DECISION = "counter_spell"
 
 
 def effective_armor_class(target: dict[str, Any]) -> int:
@@ -265,6 +266,116 @@ class CombatReactionSpellsMixin:
         events.extend(self._submit_hit_damage(damage_event))
         defender = self._actor_view(instance, combat, defender_id)
         events.extend(self._concentration_events(defender, int(damage_event["amount"]), rng))
+        return events
+
+    def _counter_spell_window(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Open the counter window when an enemy can interrupt this casting.
+
+        The caster submits the cast; the decision payload keeps a server-side
+        deep copy of the whole intent so the decline path can replay it and the
+        counter path can inspect the cost.  Clients can never write it.
+        """
+
+        spell_ref = str(intent.get("spell_ref") or "")
+        spell = self.spells.get(spell_ref)
+        effect = self.catalog.spell_effects.get(spell_ref.removeprefix("spell:"))
+        if spell is None or effect is None:
+            return None
+        if str(effect.get("mode") or "") in {"triggered_damage", "reaction_defense"}:
+            return None
+        if not (set(spell.get("components") or []) & {"V", "S", "M"}):
+            return None
+        caster_id = str(intent.get("actor_id") or "")
+        threats = []
+        for enemy_id, enemy in (combat.get("enemies") or {}).items():
+            threat_id = enemy_actor(str(enemy_id))
+            if int(enemy.get("hp", 0) or 0) <= 0:
+                continue
+            if int(enemy.get("counterspell_dc", 0) or 0) <= 0:
+                continue
+            if int((combat.get("reactions") or {}).get(threat_id, 0) or 0) < 1:
+                continue
+            if self._distance(combat, caster_id, threat_id) > 60:
+                continue
+            threats.append(threat_id)
+        if not threats:
+            return None
+        # 单威胁简化（RAW 允许多敌各自反应，结果冗余）：actor_id 排序取第一。
+        threat_id = sorted(threats)[0]
+        return {
+            "decision_id": f"decision:{intent['intent_id']}",
+            "kind": COUNTER_SPELL_DECISION,
+            "assigned_to": str(getattr(instance, "gm_uid", "") or ""),
+            "options": ["counter", "decline"],
+            "threat_actor_ids": [threat_id],
+            "cast_intent": deepcopy(intent),
+        }
+
+    def _finish_counter_spell(
+        self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
+        intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = [{
+            "type": "dnd2024.decision.cleared", "decision_id": decision["decision_id"],
+            "option": intent["option"],
+        }]
+        cast_intent = decision["cast_intent"]
+        if intent["option"] != "counter":
+            events.extend(self._spell_events(instance, combat, cast_intent, rng))
+            return events
+        threat_id = str(decision["threat_actor_ids"][0])
+        caster_id = str(cast_intent["actor_id"])
+        events.append({
+            "type": "dnd2024.reaction.spent", "actor_id": threat_id,
+            "reason": "counterspell",
+        })
+        caster = self._actor_view(instance, combat, caster_id)
+        threat = self._actor_view(instance, combat, threat_id)
+        dc = int(threat.get("counterspell_dc", 0) or 0)
+        modifier = int(caster["saving_throws"].get("con", 0) or 0)
+        auto_failed = "con" in condition_flags(
+            self.catalog.conditions, caster["conditions"],
+        )["auto_fail_saves"]
+        if auto_failed:
+            check_event = {
+                "type": "check.resolved", "kind": "saving_throw",
+                "actor_id": caster_id, "source_actor_id": threat_id,
+                "ability": "con", "rolls": [], "natural": 0, "modifier": modifier,
+                "bless_bonus": 0, "total": 0, "target": dc, "success": False,
+                "auto_failed": True, "counterspell": True,
+            }
+            succeeded = False
+        else:
+            roll = int(rng.randint(1, 20))
+            bless = int(rng.randint(1, 4)) if "blessed" in caster["conditions"] else 0
+            total = roll + modifier + bless
+            succeeded = total >= dc
+            check_event = {
+                "type": "check.resolved", "kind": "saving_throw",
+                "actor_id": caster_id, "source_actor_id": threat_id,
+                "ability": "con", "rolls": [roll], "natural": roll,
+                "modifier": modifier, "bless_bonus": bless, "total": total,
+                "target": dc, "success": succeeded, "counterspell": True,
+            }
+        events.append(check_event)
+        if succeeded:
+            events.extend(self._spell_events(instance, combat, cast_intent, rng))
+            return events
+        # 反制失败：动作/附赠动作浪费，法术位与免费施放资源都不消耗（2024 规则）。
+        spell = self.spells.get(str(cast_intent["spell_ref"]))
+        events.append({
+            "type": "dnd2024.action.spent", "actor_id": caster_id,
+            "resource": "bonus_action"
+            if str(spell["casting_time"]).startswith("Bonus Action")
+            else "action",
+            "amount": 1,
+        })
+        events.append({
+            "type": "dnd2024.spell.countered", "actor_id": caster_id,
+            "spell_ref": str(cast_intent["spell_ref"]), "countered_by": threat_id,
+        })
         return events
 
     def _automatic_hit_reaction(

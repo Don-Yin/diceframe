@@ -30,7 +30,7 @@ class CombatReducerMixin:
         event_type = str(event["type"])
         if event_type in {
             "intent.submitted", "check.resolved", "dnd2024.spell.cast",
-            "dnd2024.combat.message",
+            "dnd2024.combat.message", "dnd2024.spell.countered",
         }:
             return
         if event_type == "dnd2024.encounter.readiness.changed":

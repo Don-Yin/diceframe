@@ -24,7 +24,7 @@ from .primitives import (
     player_actor as _player_actor,
 )
 from .check_modes import condition_flags
-from .reaction_spells import HIT_REACTION_DECISION, effective_armor_class
+from .reaction_spells import COUNTER_SPELL_DECISION, HIT_REACTION_DECISION, effective_armor_class
 from .triggered_spells import HIT_SPELL_DECISION
 
 
@@ -92,6 +92,7 @@ class CombatResolutionMixin:
                 "saving_throws": deepcopy(raw.get("saving_throws") or {}),
                 "attacks": deepcopy(raw["attacks"]), "conditions": {},
                 "creature_type": str(raw.get("creature_type") or ""),
+                "counterspell_dc": int(raw.get("counterspell_dc", 0) or 0),
             }
             enemies[enemy_id] = enemy
             initiatives.append({
@@ -1175,6 +1176,8 @@ class CombatResolutionMixin:
             return self._finish_hit_spell(instance, combat, decision, rng)
         if decision.get("kind") == HIT_REACTION_DECISION:
             return self._finish_hit_reaction(instance, combat, decision, intent, rng)
+        if decision.get("kind") == COUNTER_SPELL_DECISION:
+            return self._finish_counter_spell(instance, combat, decision, intent, rng)
         movement = decision["movement"]
         events: list[dict[str, Any]] = [{
             "type": "dnd2024.decision.cleared", "decision_id": decision["decision_id"],

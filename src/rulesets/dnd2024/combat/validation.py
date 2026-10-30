@@ -19,7 +19,7 @@ from .primitives import (
 )
 from .check_modes import condition_flags
 from .readiness import required_encounter_player_ids
-from .reaction_spells import HIT_REACTION_DECISION
+from .reaction_spells import COUNTER_SPELL_DECISION, HIT_REACTION_DECISION
 from .triggered_spells import HIT_SPELL_DECISION, free_cast_resource, hit_spell_decision
 
 
@@ -49,10 +49,12 @@ def validate_enemy_profiles(enemies: Any) -> None:
             ("hp", 1, 10000), ("armor_class", 1, 40),
             ("speed", 0, 200), ("position", -10000, 10000),
             ("initiative_modifier", -20, 30),
+            # 反击法术能力：0 表示没有该项能力，缺省即 0。
+            ("counterspell_dc", 0, 30),
         ):
             default = (
                 30 if field_name in {"speed", "position"}
-                else 0 if field_name == "initiative_modifier" else None
+                else 0 if field_name in {"initiative_modifier", "counterspell_dc"} else None
             )
             value = enemy.get(field_name, default)
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
@@ -211,6 +213,8 @@ class CombatValidationMixin:
             raise CombatIntentError("resolve the melee hit spell decision first")
         if any(row.get("kind") == HIT_REACTION_DECISION for row in combat.get("pending_decisions", [])) and intent_type not in {"decision.resolve", "combat.message"}:
             raise CombatIntentError("waiting for the defender's reaction spell decision")
+        if any(row.get("kind") == COUNTER_SPELL_DECISION for row in combat.get("pending_decisions", [])) and intent_type not in {"decision.resolve", "combat.message"}:
+            raise CombatIntentError("resolve the counter spell decision first")
         if intent_type == "combat.message":
             if submitted_by not in instance.players:
                 raise CombatIntentError("only a party member can send a combat message")
