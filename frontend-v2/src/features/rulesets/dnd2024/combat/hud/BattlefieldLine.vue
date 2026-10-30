@@ -6,6 +6,7 @@ import {
   battleDistance, lineExtent, lineLaneCount, lineSlots,
   type BattleToken,
 } from './battleView'
+import type { Floater } from './feedback'
 import type { BattlefieldLabels } from './labels'
 
 const CELL = 44
@@ -19,6 +20,7 @@ const props = defineProps<{
   selectedDestination: number | null
   canReach: (x: number) => boolean
   labels: BattlefieldLabels
+  floaters?: Floater[]
 }>()
 const emit = defineEmits<{ selectToken: [id: string]; choosePosition: [x: number] }>()
 
@@ -66,6 +68,10 @@ const bridge = computed(() => {
   }
 })
 
+function floatersFor(id: string): Floater[] {
+  return (props.floaters || []).filter(item => item.targetId === id)
+}
+
 function cellLabel(x: number): string {
   return `${props.labels.position} ${x} ${props.labels.feet}`
 }
@@ -85,6 +91,7 @@ function cellLabel(x: number): string {
           >
             <BattleTokenCard
               :token="token"
+              :floaters="floatersFor(token.id)"
               :targeted="token.id === targetId"
               :selectable="selectableIds.includes(token.id)"
               :hp-label="labels.hp"

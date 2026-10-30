@@ -40,6 +40,7 @@ import { battleDistance, buildBattleTokens } from './hud/battleView'
 import InitiativeBar from './hud/InitiativeBar.vue'
 import type { BattlefieldLabels } from './hud/labels'
 import TargetCard from './hud/TargetCard.vue'
+import { useFeedback } from './hud/useFeedback'
 import SpellAvailability from './SpellAvailability.vue'
 import { spellCopy } from './spellCopy'
 
@@ -145,6 +146,7 @@ const copy = computed(() => locale.value.startsWith('zh') ? {
   noActionInTab: '这一类里当前没有可用的行动。', reactionHint: '反应会在被攻击或触发条件出现时由服务器询问你，无需主动选择。',
   chooseModeHint: '选择一个行动开始。', moveHint: '点击战场上的可达格，或在下方微调移动距离。',
   actionDock: '行动区', capabilityChoice: '职业能力', noTarget: '未选择目标',
+  feedbackMiss: '未命中', feedbackHit: '命中', saveOk: '豁免成功', saveFail: '豁免失败', healBlocked: '无法恢复',
 } : {
   title: 'Combat', authority: 'D&D 5E 2024 · Authoritative resolution', rulesNote: 'Resolution rules',
   loading: 'Synchronizing combat…', refresh: 'Refresh', start: 'Confirm Combat',
@@ -215,6 +217,7 @@ const copy = computed(() => locale.value.startsWith('zh') ? {
   noActionInTab: 'Nothing is available in this category right now.', reactionHint: 'The server asks for a reaction when you are attacked or a trigger fires; there is nothing to pick here.',
   chooseModeHint: 'Pick an action to begin.', moveHint: 'Click a reachable cell on the battlefield, or fine-tune the distance below.',
   actionDock: 'Actions', capabilityChoice: 'Class ability', noTarget: 'No target selected',
+  feedbackMiss: 'Miss', feedbackHit: 'Hit', saveOk: 'Saved', saveFail: 'Failed save', healBlocked: 'No healing',
 })
 
 const gameplay = computed(() => data.value?.gameplay)
@@ -436,6 +439,14 @@ const battlefieldLabels = computed<BattlefieldLabels>(() => ({
   position: copy.value.position,
   condition: localizedTerm,
   selectTarget: name => `${copy.value.target}: ${name}`,
+}))
+const { floaters, play: playFeedback, clear: clearFeedback } = useFeedback(() => ({
+  miss: copy.value.feedbackMiss,
+  hit: copy.value.feedbackHit,
+  saveOk: copy.value.saveOk,
+  saveFail: copy.value.saveFail,
+  blocked: copy.value.healBlocked,
+  condition: localizedTerm,
 }))
 
 type DockMode = '' | 'attack' | 'spell' | 'capability' | 'explore' | 'move'
@@ -732,6 +743,7 @@ watch(
 )
 
 function clearGameScopedState(): void {
+  clearFeedback()
   data.value = null
   busy.value = false
   error.value = ''
@@ -999,6 +1011,7 @@ async function submit(payload: JsonObject): Promise<void> {
     staged.value = null
     error.value = ''
     notice.value = latestEvents.value.map(describeEvent).filter(Boolean).join(' · ')
+    playFeedback(latestEvents.value)
     resetSelections()
     resetDock()
     emit('refresh')
@@ -1458,6 +1471,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               :selected-destination="selectedDestination"
               :can-reach="canReachPosition"
               :labels="battlefieldLabels"
+              :floaters="floaters"
               @select-token="pickBattleTarget"
               @choose-position="chooseTrackPosition"
             />

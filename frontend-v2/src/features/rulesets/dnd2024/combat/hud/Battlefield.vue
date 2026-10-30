@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import BattlefieldLine from './BattlefieldLine.vue'
 import BattleTokenCard from './BattleToken.vue'
 import { battlefieldLayoutFor, type BattleToken } from './battleView'
+import type { Floater } from './feedback'
 import type { BattlefieldLabels } from './labels'
 
 /**
@@ -18,6 +19,7 @@ const props = defineProps<{
   selectedDestination: number | null
   canReach: (x: number) => boolean
   labels: BattlefieldLabels
+  floaters?: Floater[]
 }>()
 const emit = defineEmits<{ selectToken: [id: string]; choosePosition: [x: number] }>()
 
@@ -34,6 +36,7 @@ const layout = computed(() => battlefieldLayoutFor(props.positionMode))
     :selected-destination="selectedDestination"
     :can-reach="canReach"
     :labels="labels"
+    :floaters="floaters"
     @select-token="emit('selectToken', $event)"
     @choose-position="emit('choosePosition', $event)"
   />
@@ -43,6 +46,7 @@ const layout = computed(() => battlefieldLayoutFor(props.positionMode))
       v-for="token in tokens"
       :key="token.id"
       :token="token"
+      :floaters="(floaters || []).filter(item => item.targetId === token.id)"
       :targeted="token.id === targetId"
       :selectable="selectableIds.includes(token.id)"
       :hp-label="labels.hp"

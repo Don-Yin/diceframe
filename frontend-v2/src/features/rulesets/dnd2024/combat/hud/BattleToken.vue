@@ -2,9 +2,12 @@
 import { computed } from 'vue'
 import BattleAvatar from './BattleAvatar.vue'
 import type { BattleToken } from './battleView'
+import type { Floater } from './feedback'
 
 const props = defineProps<{
   token: BattleToken
+  /** Results to float above this unit; the unit shakes when it takes damage. */
+  floaters?: Floater[]
   /** Clicking picks this unit as the action target. */
   selectable?: boolean
   targeted?: boolean
@@ -17,12 +20,15 @@ const emit = defineEmits<{ select: [id: string] }>()
 
 const shownConditions = computed(() => props.token.conditions.slice(0, 2))
 const hiddenConditions = computed(() => Math.max(0, props.token.conditions.length - 2))
+const struck = computed(() => (props.floaters || []).some(
+  item => item.kind === 'damage' || item.kind === 'crit',
+))
 </script>
 
 <template>
   <div
     :class="['battle-token', token.side, {
-      current: token.isCurrent, targeted, defeated: token.isDefeated, own: token.isOwn, selectable,
+      current: token.isCurrent, targeted, defeated: token.isDefeated, own: token.isOwn, selectable, struck,
     }]"
     :data-actor-id="token.id"
   >
@@ -44,6 +50,13 @@ const hiddenConditions = computed(() => Math.max(0, props.token.conditions.lengt
       <em v-for="key in shownConditions" :key="key">{{ conditionLabel(key) }}</em>
       <em v-if="hiddenConditions" class="more">+{{ hiddenConditions }}</em>
     </div>
+    <span
+      v-for="item in floaters"
+      :key="item.key"
+      :class="['floater', item.kind]"
+      :style="{ animationDelay: `${item.delay}s` }"
+      aria-hidden="true"
+    >{{ item.text }}</span>
     <button
       v-if="selectable"
       type="button"
@@ -74,5 +87,33 @@ const hiddenConditions = computed(() => Math.max(0, props.token.conditions.lengt
 .token-hit { position: absolute; inset: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer; }
 .token-hit:hover { background: rgb(255 255 255 / 7%); }
 .token-hit:focus-visible { outline: 3px solid #e4b75e; outline-offset: 2px; }
-@media (prefers-reduced-motion: reduce) { .hp-track i { transition: none; } }
+.battle-token.struck { animation: token-shake .38s ease-out; }
+.floater { position: absolute; top: 30px; left: 50%; z-index: 3; padding: 1px 8px; border-radius: 999px; background: rgb(8 13 20 / 82%); font: 800 20px/1.2 Georgia, serif; white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(-50%, 0); animation: floater-rise 1.5s cubic-bezier(.2, .7, .3, 1) both; text-shadow: 0 2px 0 rgb(0 0 0 / 70%); }
+.floater.damage { color: #ff6b6b; }
+.floater.crit { color: #ffd166; font-size: 26px; text-shadow: 0 0 10px rgb(255 160 40 / 80%), 0 2px 0 rgb(0 0 0 / 70%); }
+.floater.heal { color: #7fe29a; }
+.floater.hit { color: #ffb4a8; font-size: 16px; }
+.floater.miss, .floater.blocked { color: #b9c4cc; font-size: 16px; }
+.floater.save { color: #8fd0ff; font-size: 16px; }
+.floater.fail, .floater.status { color: #f4d48d; font-size: 16px; }
+@keyframes floater-rise {
+  0% { opacity: 0; transform: translate(-50%, 10px) scale(.7); }
+  15% { opacity: 1; transform: translate(-50%, -6px) scale(1.15); }
+  30% { transform: translate(-50%, -14px) scale(1); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -48px) scale(1); }
+}
+@keyframes token-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hp-track i { transition: none; }
+  .battle-token.struck { animation: none; }
+  .floater { animation: floater-fade 1.5s linear both; }
+  @keyframes floater-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+}
 </style>

@@ -218,6 +218,36 @@ describe('D&D 2024 combat panel', () => {
     wrapper.unmount()
   })
 
+  it('floats the resolved damage above the struck unit and clears it afterwards', async () => {
+    const data = response('active') as any
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue({
+      ...data,
+      result: {
+        resolved_event_batches: [{ events: [
+          { type: 'check.resolved', kind: 'attack', actor_id: 'player:gm', target_id: 'enemy:goblin-1', success: true },
+          { type: 'resource.changed', resource: 'hp', target_id: 'enemy:goblin-1', delta: -8 },
+        ] }],
+      },
+    })
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    await openTile(wrapper, 'attack')
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+
+    const goblin = wrapper.get('.battle-token[data-actor-id="enemy:goblin-1"]')
+    expect(goblin.get('.floater.damage').text()).toBe('-8')
+    expect(goblin.classes()).toContain('struck')
+    expect(wrapper.get('.battle-token[data-actor-id="player:gm"]').find('.floater').exists()).toBe(false)
+
+    vi.advanceTimersByTime(3000)
+    await flushPromises()
+    expect(wrapper.find('.floater').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('uses the first legal slot for an exploration spell and rejects an empty slot list', async () => {
     mocks.fetch.mockResolvedValueOnce(explorationResponse())
     const wrapper = mount(Dnd2024CombatPanel, {
