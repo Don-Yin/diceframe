@@ -1,6 +1,6 @@
 # 切片 P9 任务书：Revivify（复活：dead → 存活）
 
-版本：v1（2026-10-29）
+版本：v1.1（2026-10-30）
 执行侧须知：本任务书是唯一需求来源。只参考本任务书列出的源文件；不要读取 `docs/internal/` 下其他计划文档。仓库根的 `AGENTS.md` 与 `docs/ENGINEERING_RULES.md` 自动适用。
 依赖声明：本切片在 P1（invisibility）、P5（stoneskin）、P2（hold_person）、P3（scorching_ray）、P4（false_life）、P6（misty_step）、P8（dispel_magic）、P7（counterspell）之后执行，是 1B 第九个也是最后一个切片。P4 已把 `temp_hp` 加入盟友集合；P6 已加入 `teleport`；P8 已把 `dispel` 加入 hp≤0 拒绝豁免集合。前置切片合入后本任务书引用的行号会偏移，描述以语义位置为准。
 
@@ -37,10 +37,11 @@
 ### 1.2 本切片的产品策略与裁剪
 
 - **1 分钟死亡时限**：引擎不追踪死亡时刻——裁剪，如实记录（RAW"前一分钟内"由 GM 叙事把握）。
+- **战斗外 revivify（含「战斗中死亡、战斗 <10 轮结束后立刻施放」场景，2026-10-30 审核端补充）**：本切片只做战斗内闭环，该场景的三阶段口径——①现状（revivify 无 combat 效果条目）：探索层 `exploration.cast_spell` 走 `spell.narrative` 叙事兜底（扣位 + `spell.cast(context=exploration)`），机械复活由 GM `revive_player` 命令落地（`character.revived` 事件清四状态 + hp=1，不依赖战斗状态）；②**本切片落 `revive` 条目后的行为变化（预期，非回归）**：探索层 `_validate`（exploration/engine.py L206-212）对「有效果条目但 mode 非探索支持集」的法术**显式拒绝** `no exploration-safe deterministic effect`（fail closed 拒绝，非静默吞效果）——战斗外 revivify 从叙事兜底变为硬拒绝，过渡期机械通道仍是 GM revive 命令；③家族切片①（探索层 revive 分支）落地后由玩家施法路径正式接管。窗口判定按⑦：战斗结束 round 冻结后不机械判，「结束后立刻」由 GM 叙事认定，系统不会误拒也不会用冻结 round 误算。执行报告须记录②的行为变化。
 - **300+GP 钻石耗材**：无组件/货币经济——裁剪。
 - **"老死不能复活 / 不恢复失去的身体部位"**：机械不可判的叙事限制——裁剪，GM 层职责。
 - **companion / enemy 复活**：不做（§1.1 边界 4）。未来切片若扩展，须同时改 reducer 契约与 validation kind 门，并处理 companion 的 canonical 位置（DND party 状态而非 characters 快照）。
-- **raise dead / resurrection 家族**：数据不落（后续切片；复活原语已就位，届时主要是数据 + payload 扩展）。
+- **raise dead / reincarnate / resurrection / true resurrection 家族**：数据不落（后续切片）。v1.1 修正路线判断（规则书原文已核：5环.htm L306/L311、7环.htm L127、9环.htm L87）：**revivify 是家族中唯一的战斗内法术（动作施法）；其余四个均为 1 小时施法**，主通道是探索层 `exploration.cast_spell`（已存在，目前仅 healing/buff + 无效果条目时的叙事兜底），不是 combat 侧加数据。本切片的 revive 事件原语可复用——`character.revived` 的 `hp` payload 经 reducer `max(1,hp)` + max_hp clamp 已兼容「全满」，但家族落地是下列独立工作的组合，各自单独立项：①探索层 `revive` 分支（含按数据键区分 hp 1 / 全满，不在本切片预支字段）；②raise dead / resurrection 的**复活惩罚**（D20 检定 -4、每长休 -1）——依赖通用 D20 加值聚合与长休衰减钩子（resting 已有 conditions 处理点），属独立原语；③复活时条件类别清理差异（中和毒素 / 移除诅咒与魔法疫病）——revived 事件 payload 与 reducer 契约的后续扩展；④resurrection 的施法者代价（复活 365 日以上死者：长休前不能施法 + D20 劣势）；⑤reincarnate 的新身体与随机种族（角色重建级，与 revive 原语无关）；⑥true resurrection 的无遗体唤名复活（目标可不在实体册，需角色恢复通道）；⑦死亡窗口判定（2026-10-30 审核端补充，引擎事实已核）：战斗有 `combat["round"]` 计数，**非战斗层无任何日/日历/世界时间**——10 日/100 年/200 年窗口与 resurrection 的 365 日阈值要机械判定，前提是独立的战役日历时钟特性（含长休/旅行/叙事跳时如何推进的语义）+ canonical 记录死亡时刻，不属于复活家族，不为它预建。**窗口判定属施法校验层的前置检查，与 revive 事件原语正交**——原语与 reducer 不需要为窗口预留任何字段；口径为「无时刻数据 → 不机械判、叙事放行」（复活是恢复性操作，缺数据拒绝会让旧存档角色无法复活，此处不适用 fail closed），「有数据且明确超窗 → 拒绝」，且只在同一时钟上下文内判（战斗 round 快照不得用于战斗后判定）。revivify 的 1 分钟窗口维持 GM 叙事把握：战斗内虽可用 round ≤10 机械化，但 revivify 同样可在战斗外使用，半机械半叙事会制造同一法术两种判定路径，不如统一叙事；若未来要增强，以独立小切片做战斗内 `dead_round` 快照。
 - **legacy sheet 的 `deceased`/`hp` 标志同步**：法术路径只写 canonical（ruleset_character），legacy 投影走既有 reconciliation（`merge_live_character_projection`），不新增同步代码。GM 命令路径（`apply_revive_commands`）的显式同步是另一条链路，不在本切片。
 - **前端**：无新增 intent 选择字段；面板照既有 cast_spell 流程。目标选择器若过滤掉 dead 盟友属已知偏差（照 P2"投影滞后"先例记录，服务端已放行）。
 
@@ -175,3 +176,14 @@ elif mode == "revive":
 ## 9. 修订记录
 
 - v1（2026-10-29）：初版。
+- v1.1（2026-10-30）：审核端修正 §1.2 家族路线——v1 写「届时主要是数据 + payload 扩展」不准确：revivify 是家族唯一动作施法（战斗内），其余四个均为 1 小时施法、主通道在探索层 `exploration.cast_spell`；家族工作分解为探索层 revive 分支、复活惩罚 + 长休衰减、条件类别清理、施法者代价、reincarnate 角色重建、true resurrection 唤名通道等独立项。revive 事件原语（hp payload + reducer 清理）兼容全家族，本切片实现与测试矩阵不变。
+
+## 10. 执行报告（2026-10-30，审核端代录）
+
+执行端全量验收中断、未留执行报告；本节由审核端依据工作树 diff 与复跑事实代录。
+
+- 变更清单：`srd_combat_core.json`（`revivify` 条目 +1 行）、`catalog.py`（`SPELL_MODES` 追加 `revive`）、`validation.py`（盟友集合追加 `revive`、dead 检查改模式分支——revive 要求 dead 且 player-only、其它有益模式对 dead 仍拒绝、hp≤0 豁免集合追加）、`resolution.py`（`revive` 分支 +9 行：只发 `dnd2024.character.revived` 事件 hp=1，零 RNG、无 `resource.changed`、不经 healing 管线）、新增 `tests/rulesets/test_dnd2024_revivify.py`。reducer / view / engine / 前端零改动。
+- 矩阵映射（§4 前 10 项 ↔ 10 测试函数，#11 回归由子集与全量覆盖）：#1 `test_catalog_accepts_revive_and_rejects_unknown_modes`；#2 `test_revivify_restores_one_hp_and_spends_slot_and_action`（事件序 `action.spent`→`slot_spent`→`spell.cast`→`character.revived` 精确断言 + hp=1 + dead/unconscious/stable/death_saves 四状态清理 + 三环位消耗 + economy action 归零 + `NoRollRng` 零掷骰）；#3 `test_dying_ally_without_dead_condition_is_rejected`；#4 `test_healing_still_rejects_a_dead_ally`；#5 `test_revivify_rejects_a_hostile_target`；#6 `test_dead_companion_is_rejected_before_apply`；#7 `test_out_of_range_dead_ally_is_rejected`；#8 `test_dead_ally_intents_restore_after_revive`；#9 `test_revivify_rejects_low_slot_and_exhausted_level_three`；#10 `test_revive_ignores_the_death_source`。
+- 偏差：实现与 §3 无偏差；§3.3 dead 模式分支结构与任务书示意一致。
+- 验收：`test_dnd2024_revivify.py` 10 passed（38.31s，审核端复跑）；rulesets 全量 613 passed / 39 deselected（28:55 = P7 基线 603 + 本切片 10，审核端复跑，执行端全量中断未留数字）。
+- 遗留：1 分钟时限 / 钻石耗材 / 老死与肢体限制照 §1.2 裁剪；companion / enemy 复活未开（kind 门 + canonical 位置已记）；前端 dead 盟友目标选择器适配照 P2 投影滞后先例；探索层对 revivify 显式拒绝「no exploration-safe deterministic effect」——v1.1 §1.2 预告的行为变化（战斗外施法过渡期走 GM revive 命令，家族切片①接管后消除）。
