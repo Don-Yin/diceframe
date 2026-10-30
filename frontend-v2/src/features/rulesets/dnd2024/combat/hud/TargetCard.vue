@@ -12,6 +12,7 @@ export interface TargetCardLabels {
   sideAlly: string
   sideEnemy: string
   empty: string
+  listSeparator: string
   condition: (key: string) => string
 }
 
@@ -51,7 +52,7 @@ defineProps<{
         </div>
         <div class="wide">
           <dt>{{ labels.status }}</dt>
-          <dd>{{ token.conditions.length ? token.conditions.map(labels.condition).join('、') : labels.none }}</dd>
+          <dd>{{ token.conditions.length ? token.conditions.map(labels.condition).join(labels.listSeparator) : labels.none }}</dd>
         </div>
       </dl>
     </template>

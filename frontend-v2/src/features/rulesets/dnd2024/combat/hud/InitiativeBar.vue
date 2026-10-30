@@ -39,8 +39,12 @@ defineProps<{
 .turn-title small { color: #9db7c6; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 .turn-title strong { font-size: 17px; }
 .turn-title span { color: #f4d48d; font: 700 14px/1.2 Georgia, serif; }
-.initiative { display: flex; flex: 1; align-items: flex-end; justify-content: center; gap: 14px; margin: 0; padding: 4px 6px; overflow-x: auto; overflow-y: hidden; list-style: none; }
-.initiative li { display: grid; justify-items: center; gap: 3px; min-width: 56px; opacity: .78; }
+.initiative { display: flex; flex: 1; align-items: flex-end; gap: 14px; min-width: 0; margin: 0; padding: 4px 6px; overflow-x: auto; overflow-y: hidden; list-style: none; }
+.initiative li { display: grid; flex: 0 0 auto; justify-items: center; gap: 3px; min-width: 56px; opacity: .78; }
+/* Centred while it fits; auto margins (unlike justify-content: center) keep the
+   first units reachable by scrolling once a long order overflows. */
+.initiative li:first-child { margin-left: auto; }
+.initiative li:last-child { margin-right: auto; }
 .initiative li strong { max-width: 72px; overflow: hidden; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .initiative li.current { opacity: 1; }
 .initiative li.current :deep(.battle-avatar) { border-color: #e4b75e; box-shadow: 0 0 0 3px rgb(228 183 94 / 45%), 0 0 16px rgb(228 183 94 / 55%); }
@@ -48,6 +52,6 @@ defineProps<{
 .initiative li.defeated { opacity: .4; filter: grayscale(.8); }
 @media (max-width: 700px) {
   .turn-banner { flex-direction: column; align-items: stretch; gap: 8px; }
-  .initiative { justify-content: flex-start; }
+  .initiative li:first-child { margin-left: 0; }
 }
 </style>

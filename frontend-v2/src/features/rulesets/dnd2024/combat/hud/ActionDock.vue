@@ -11,7 +11,7 @@ export interface DockTab {
   note?: string
 }
 
-defineProps<{
+const props = defineProps<{
   own: BattleToken | null
   hpLabel: string
   tabs: DockTab[]
@@ -19,6 +19,19 @@ defineProps<{
   dockLabel: string
 }>()
 const emit = defineEmits<{ 'update:activeTab': [id: string] }>()
+
+// Tablist keyboard pattern: one tab stop, arrows move between tabs.
+const STEPS: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }
+function onTabKey(event: KeyboardEvent, index: number): void {
+  const count = props.tabs.length
+  const next = event.key in STEPS ? (index + STEPS[event.key]! + count) % count
+    : event.key === 'Home' ? 0 : event.key === 'End' ? count - 1 : -1
+  if (next < 0) return
+  event.preventDefault()
+  emit('update:activeTab', props.tabs[next]!.id)
+  const buttons = (event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLElement>('[role="tab"]')
+  buttons?.[next]?.focus()
+}
 </script>
 
 <template>
@@ -33,14 +46,17 @@ const emit = defineEmits<{ 'update:activeTab': [id: string] }>()
     <div class="dock-main">
       <div class="dock-tabs" role="tablist" :aria-label="dockLabel">
         <button
-          v-for="tab in tabs"
+          v-for="(tab, index) in tabs"
           :id="`dock-tab-${tab.id}`"
           :key="tab.id"
           type="button"
           role="tab"
           :aria-selected="tab.id === activeTab"
+          :aria-controls="`dock-panel`"
+          :tabindex="tab.id === activeTab ? 0 : -1"
           :class="['dock-tab', { active: tab.id === activeTab, spent: !tab.available }]"
           @click="emit('update:activeTab', tab.id)"
+          @keydown="onTabKey($event, index)"
         >
           <slot :name="`tab-icon-${tab.id}`" />
           <span>{{ tab.label }}</span>
@@ -48,7 +64,7 @@ const emit = defineEmits<{ 'update:activeTab': [id: string] }>()
         </button>
       </div>
       <div class="dock-options"><slot name="options" /></div>
-      <div class="combat-actions dock-tiles" role="tabpanel" :aria-labelledby="`dock-tab-${activeTab}`"><slot name="tiles" /></div>
+      <div id="dock-panel" class="combat-actions dock-tiles" role="tabpanel" :aria-labelledby="`dock-tab-${activeTab}`"><slot name="tiles" /></div>
     </div>
     <div class="dock-summary"><slot name="summary" /></div>
   </section>

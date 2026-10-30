@@ -36,6 +36,12 @@ describe('combat HUD feedback floaters', () => {
       { type: 'check.resolved', kind: 'attack', target_id: 'enemy:h', success: false },
     ])
     expect(result.map(item => [item.targetId, item.kind])).toEqual([['enemy:g', 'hit'], ['enemy:h', 'miss']])
+
+    const soaked = play([
+      { type: 'check.resolved', kind: 'attack', target_id: 'enemy:g', success: true },
+      { type: 'resource.changed', resource: 'hp', target_id: 'enemy:g', delta: 0 },
+    ])
+    expect(soaked.map(item => item.kind)).toEqual(['hit'])
   })
 
   it('reports saving throws on the creature that rolled, then its damage and conditions', () => {

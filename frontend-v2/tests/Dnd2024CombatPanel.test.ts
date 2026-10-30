@@ -791,6 +791,111 @@ describe('D&D 2024 combat panel', () => {
     wrapper.unmount()
   })
 
+  it('keeps marking the aimed target while the player inspects another unit', async () => {
+    const data = response('active') as any
+    data.gameplay.combat.actors[0].conditions = { dodging: {}, blessed: {} }
+    mocks.fetch.mockResolvedValueOnce(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+
+    await openTile(wrapper, 'attack')
+    await wrapper.get('.battle-token[data-actor-id="player:gm"] .token-hit').trigger('click')
+
+    expect(wrapper.get('.battle-token[data-actor-id="enemy:goblin-1"]').classes()).toContain('targeted')
+    expect(wrapper.get('.battle-token[data-actor-id="player:gm"]').classes()).not.toContain('targeted')
+    expect(wrapper.get('.dock-target').text()).toContain('Goblin')
+    // The side card follows the click, and lists statuses with the locale's separator.
+    expect(wrapper.get('.target-card').text()).toContain('Guardian')
+    expect(wrapper.get('.target-card').text()).toContain('Dodging, Blessed')
+    wrapper.unmount()
+  })
+
+  it('shows the movement ghost only while a move is being planned', async () => {
+    mocks.fetch.mockResolvedValueOnce(response('active'))
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+
+    expect(wrapper.find('.move-ghost').exists()).toBe(false)
+    expect(wrapper.find('.stage-floor button.selected').exists()).toBe(false)
+    await wrapper.get('#dock-tab-move').trigger('click')
+    expect(wrapper.get('button[aria-label="Position 5 ft"]').find('.move-ghost').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('moves between dock tabs with the arrow keys', async () => {
+    mocks.fetch.mockResolvedValueOnce(response('active'))
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true }, attachTo: document.body,
+    })
+    await flushPromises()
+
+    const actionTab = wrapper.get('#dock-tab-action')
+    expect(actionTab.attributes('tabindex')).toBe('0')
+    expect(wrapper.get('#dock-tab-bonus').attributes('tabindex')).toBe('-1')
+    await actionTab.trigger('keydown', { key: 'ArrowRight' })
+    expect(wrapper.get('#dock-tab-bonus').attributes('aria-selected')).toBe('true')
+    expect(document.activeElement?.id).toBe('dock-tab-bonus')
+    await wrapper.get('#dock-tab-bonus').trigger('keydown', { key: 'End' })
+    expect(wrapper.get('#dock-tab-reaction').attributes('aria-selected')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('keeps a bonus-action spell and slot picked across the periodic refresh', async () => {
+    const data = response('active') as any
+    data.available_actions.push({
+      type: 'cast_spell', expected_version: 1, actor_id: 'player:gm', targets: data.gameplay.combat.actors,
+      spells: [
+        { spell_ref: 'spell:cure_wounds', name: 'Cure Wounds', level: 1, mode: 'healing', casting_time: 'Action', available_slot_levels: [1] },
+        { spell_ref: 'spell:healing_word', name: 'Healing Word', level: 1, mode: 'healing', casting_time: 'Bonus Action', available_slot_levels: [1, 2] },
+      ],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+
+    await wrapper.get('#dock-tab-bonus').trigger('click')
+    const card = await openTile(wrapper, 'spell')
+    expect((card.findAll('select')[0]!.element as HTMLSelectElement).value).toBe('spell:healing_word')
+    await card.findAll('select')[1]!.setValue('2')
+
+    vi.advanceTimersByTime(30000)
+    await flushPromises()
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({
+      type: 'cast_spell', spell_ref: 'spell:healing_word', slot_level: 2,
+    })
+    wrapper.unmount()
+  })
+
+  it('floats the deferred hit damage once the melee-hit decision is declined', async () => {
+    const data = response('active') as any
+    const decision = { decision_id: 'hit:1', kind: 'melee_hit_spell', assigned_to: 'gm', options: ['decline'] }
+    data.gameplay.combat.pending_decisions = [decision]
+    data.available_actions = [{ type: 'decision.resolve', expected_version: 1, decisions: [decision] }, ...data.available_actions]
+    mocks.fetch.mockResolvedValue(data)
+    mocks.decide.mockResolvedValue({
+      ...response('active'),
+      result: { resolved_event_batches: [{ events: [
+        { type: 'resource.changed', resource: 'hp', target_id: 'enemy:goblin-1', delta: -6 },
+      ] }] },
+    })
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    expect(wrapper.get('#dock-tab-bonus').attributes('aria-selected')).toBe('true')
+
+    await wrapper.get('.decision-card button').trigger('click')
+    await flushPromises()
+
+    expect(mocks.decide).toHaveBeenCalledOnce()
+    expect(wrapper.get('.battle-token[data-actor-id="enemy:goblin-1"] .floater').text()).toBe('-6')
+    expect(wrapper.get('#dock-tab-action').attributes('aria-selected')).toBe('true')
+    wrapper.unmount()
+  })
+
   it('shows a waiting state when the server exposes no action', async () => {
     const waiting = response('active')
     waiting.available_actions = []

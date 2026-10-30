@@ -52,7 +52,7 @@ const emit = defineEmits<{
   refresh: []
   navigate: [target: 'campaign']
 }>()
-const { locale } = useLocale()
+const { locale, t } = useLocale()
 const spellText = computed(() => spellCopy(locale.value))
 
 const data = ref<RulesetGameplayResponse | null>(null)
@@ -266,22 +266,31 @@ const battleTokenIds = computed(() => battleTokens.value.map(token => token.id))
 const targetCardLabels = computed(() => ({
   hp: copy.value.hp, ac: copy.value.ac, distance: copy.value.distance, feet: copy.value.feet,
   status: copy.value.status, none: copy.value.none, sideAlly: copy.value.sideAlly,
-  sideEnemy: copy.value.sideEnemy, empty: copy.value.pickTarget, condition: localizedTerm,
+  sideEnemy: copy.value.sideEnemy, empty: copy.value.pickTarget, listSeparator: t('listSeparator'),
+  condition: localizedTerm,
 }))
 const selectedCapability = computed(() => capabilityActions.value.find(
   item => item.capability_id === selectedCapabilityId.value,
 ))
+// The unit the open action would be sent at; empty while no aimed action is open.
 const aimedTargetId = computed(() => {
-  if (dockMode.value === 'spell') return selectedSpellTargetId.value
-  if (dockMode.value === 'capability' && selectedCapability.value?.requires_target) return capabilityTargetId.value
-  if (dockMode.value === 'explore') return explorationTargetId.value
-  return selectedTargetId.value
+  switch (dockMode.value) {
+    case 'attack': return selectedTargetId.value
+    case 'spell': return selectedSpellTargetId.value
+    case 'capability': return selectedCapability.value?.requires_target ? capabilityTargetId.value : ''
+    case 'explore': return explorationTargetId.value
+    default: return ''
+  }
 })
-const focusId = computed(() => inspectedId.value || (dockMode.value ? aimedTargetId.value : ''))
-const focusToken = computed(() => battleTokens.value.find(token => token.id === focusId.value) || null)
+// The battlefield marks what will actually be hit; the side card shows whatever
+// the player clicked last, which may be a unit the open action cannot reach.
+const focusId = computed(() => aimedTargetId.value || inspectedId.value)
+const cardToken = computed(() => (
+  battleTokens.value.find(token => token.id === (inspectedId.value || focusId.value)) || null
+))
 const currentToken = computed(() => battleTokens.value.find(token => token.isCurrent) || null)
-const focusDistance = computed(() => (
-  currentToken.value && focusToken.value ? battleDistance(currentToken.value.coord, focusToken.value.coord) : null
+const cardDistance = computed(() => (
+  currentToken.value && cardToken.value ? battleDistance(currentToken.value.coord, cardToken.value.coord) : null
 ))
 const initiativeTokens = computed(() => (combat.value?.initiative || [])
   .map(id => battleTokens.value.find(token => token.id === id))
@@ -319,7 +328,9 @@ const canStageDock = computed(() => {
   if (busy.value) return false
   switch (dockMode.value) {
     case 'attack': return Boolean(selectedWeapon.value && selectedTargetId.value && selectedWeaponRange.value?.usable)
-    case 'spell': return Boolean(selectedSpell.value && selectedTarget.value)
+    // Only a spell listed under the open tab may be sent from it.
+    case 'spell': return Boolean(selectedTarget.value
+      && spellChoices.value.some(item => item.spell_ref === selectedSpellRef.value))
     case 'capability': return Boolean(selectedCapability.value
       && (!selectedCapability.value.requires_target || capabilityTargetId.value))
     case 'explore': return Boolean(explorationSpellRef.value && explorationSlotValid.value)
@@ -438,22 +449,34 @@ function targetsFor(spell?: RulesetCombatSpell): RulesetCombatTarget[] {
     : target.kind !== currentActor.value?.kind)
 }
 
+// A refresh (the 30 s poll, a teammate's turn) must not throw away what the
+// player already picked: every choice survives while it is still legal.
 function resetSelections(): void {
-  explorationSpellRef.value = ''
-  explorationSlot.value = 0
-  explorationTargetId.value = ''
-  const spell = spellAction.value?.spells?.[0]
-  selectedSpellRef.value = spell?.spell_ref || ''
-  selectedSlot.value = spell?.available_slot_levels?.[0] ?? 0
-  // A refresh must not throw away the unit the player already aimed at.
   const keepOrFirst = (current: string, legal: RulesetCombatTarget[]) => (
     legal.some(item => item.actor_id === current) ? current : legal[0]?.actor_id || ''
   )
+  const keepSlot = (current: number, levels: number[] | undefined) => (
+    levels?.includes(current) ? current : levels?.[0] ?? 0
+  )
+
+  const exploring = explorationAction.value?.spells?.find(item => item.spell_ref === explorationSpellRef.value)
+  explorationSpellRef.value = exploring?.spell_ref || ''
+  explorationSlot.value = exploring ? keepSlot(explorationSlot.value, exploring.available_slot_levels) : 0
+  if (!explorationAction.value?.targets?.some(item => item.actor_id === explorationTargetId.value)) {
+    explorationTargetId.value = ''
+  }
+
+  const spells = spellAction.value?.spells || []
+  const spell = spells.find(item => item.spell_ref === selectedSpellRef.value) || spellChoices.value[0] || spells[0]
+  selectedSpellRef.value = spell?.spell_ref || ''
+  selectedSlot.value = keepSlot(selectedSlot.value, spell?.available_slot_levels)
   selectedSpellTargetId.value = spell ? keepOrFirst(selectedSpellTargetId.value, targetsFor(spell)) : ''
   selectedTargetId.value = keepOrFirst(selectedTargetId.value, attackAction.value?.targets || [])
   capabilityTargetId.value = keepOrFirst(capabilityTargetId.value, capabilityTargets.value)
   chooseUsableWeapon()
-  movementDistance.value = Math.min(5, Number(moveAction.value?.movement_remaining || 5))
+  if (!currentActor.value || !canReachPosition(Number(currentActor.value.position || 0) + Number(movementDistance.value || 0))) {
+    movementDistance.value = Math.min(5, Number(moveAction.value?.movement_remaining || 5))
+  }
   if (!capabilityActions.value.some(item => item.capability_id === selectedCapabilityId.value)) {
     selectedCapabilityId.value = capabilityActions.value[0]?.capability_id || ''
   }
@@ -641,6 +664,10 @@ async function decide(decision: RulesetPendingDecision, option: string, extra: J
     if (props.gameKey !== gameKey) return
     data.value = response
     error.value = ''
+    // A declined smite or a Shield answer is where a deferred hit lands.
+    playFeedback(latestEvents.value)
+    resetSelections()
+    resetDock()
     emit('refresh')
   } catch (cause: unknown) {
     if (props.gameKey !== gameKey) return
@@ -666,7 +693,11 @@ function describeEvent(event: JsonObject): string {
 watch(selectedSpellRef, () => {
   const spell = selectedSpell.value
   selectedSlot.value = spell?.available_slot_levels?.[0] ?? 0
-  selectedSpellTargetId.value = targetsFor(spell)[0]?.actor_id || ''
+  // Switching spells keeps the unit the player clicked when the new spell can reach it.
+  const legal = targetsFor(spell)
+  const kept = [inspectedId.value, selectedSpellTargetId.value]
+    .find(id => id && legal.some(item => item.actor_id === id))
+  selectedSpellTargetId.value = kept || legal[0]?.actor_id || ''
 })
 watch(explorationSpellRef, () => {
   explorationSlot.value = explorationSpell.value?.available_slot_levels?.[0] ?? 0
@@ -749,14 +780,14 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               :movement-remaining="Number(moveAction?.movement_remaining || 0)"
               :target-id="focusId"
               :selectable-ids="battleTokenIds"
-              :selected-destination="selectedDestination"
+              :selected-destination="dockMode === 'move' ? selectedDestination : null"
               :can-reach="canReachPosition"
               :labels="battlefieldLabels"
               :floaters="floaters"
               @select-token="pickBattleTarget"
               @choose-position="chooseTrackPosition"
             />
-            <TargetCard :token="focusToken" :distance="focusDistance" :labels="targetCardLabels" />
+            <TargetCard :token="cardToken" :distance="cardDistance" :labels="targetCardLabels" />
           </div>
           <p class="battlefield-hint">{{ copy.chooseDestination }}</p>
         </section>

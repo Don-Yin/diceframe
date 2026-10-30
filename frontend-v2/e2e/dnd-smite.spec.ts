@@ -75,7 +75,7 @@ test('paladin can cast Divine Smite after a hit using the free use and then a sl
     }
     await hit()
     await expect(page.locator('.decision-card')).toContainText('不追加法术，结算攻击')
-    await expect(spellCard).toContainText('职业免费次数')
+    await expect(spellCard).toContainText('免费施放（长休恢复）')
     expect(await spellCard.locator('select').last().locator('option').count()).toBe(1)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
     await spellCard.screenshot({ path: info.outputPath('smite-hit.png') })

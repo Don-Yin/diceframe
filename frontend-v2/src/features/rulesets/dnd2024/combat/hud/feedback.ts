@@ -65,7 +65,8 @@ export function floatersFromEvents(
     } else if (type === 'resource.changed' && event.resource === 'hp') {
       const target = String(event.target_id || '')
       const delta = Number(event.delta || 0)
-      if (target === pendingHit) pendingHit = ''
+      // A hit fully soaked (0 damage) still reads as "hit" through flushHit().
+      if (target === pendingHit && (delta || event.blocked_by)) pendingHit = ''
       if (delta < 0) add(target, event.critical ? 'crit' : 'damage', String(delta))
       else if (delta > 0) add(target, 'heal', `+${delta}`)
       else if (event.blocked_by) add(target, 'blocked', labels.blocked)
