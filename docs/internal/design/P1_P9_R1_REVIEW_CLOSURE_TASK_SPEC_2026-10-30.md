@@ -222,8 +222,21 @@ git diff --stat
 7. `git diff --check`：仅有 LF/CRLF 提示，无空白错误。
 8. `git status --short`：本任务改动仅涉及 §3 白名单文件；未执行 commit。
 
-### 8.4 未执行项与残余风险
+### 8.4 PR-1B 独立分支基线复验（2026-10-30）
 
-- 全量 ruleset 回归已通过（718 passed）；本次未重跑全仓库其他测试集（非本任务验收范围）。
+§8.3 的数字是在含 1C（S-P1 / S-P7）的工作树上验收的。1B / 1C 拆分为两次 PR 时，本修复落在独立分支 `feat/dnd2024-p1-p9-r1-closure`（基线 `62b486a2`，不含 1C 的 improved critical 与 survivor 切片），在该基线上复验：
+
+- 分支内容验证：`git diff 62b486a2..HEAD` 共 21 个文件（20 个修复文件 + 本任务书），零 1C 文件（SP1/SP7 任务书、`features/resolver.py`、`srd_class_features.json`、improved_critical / survivor 测试均不在分支上）。
+- 提交拆分：`fix(dnd2024): harden reaction eligibility, self targeting and exploration casting`（remediation，20 文件）+ `fix(dnd2024): close post-review findings on reaction budget, revive candidates and target scope`（收尾，6 文件）。
+- 纯 remediation 中间态定向复验：78 passed（= 收尾后 80 − 新增 2 反例），证明修复代码对 1C 无隐性依赖。
+- 后端定向（§6.1 五文件）：80 passed。
+- 全量 ruleset 回归：**660 passed, 39 deselected, 0 failed in 2808.16s（0:46:48）**——较含 1C 树的 718 恰差 58（improved_critical 23 + survivor 35），与剥离范围精确一致。
+- 前端定向：86 passed（2 files）；`npm run typecheck` / `npm run lint` / `npm run build` 退出码 0（build 仅既存 lightningcss `@undefined` 与 chunk size 警告）。
+- 行尾幻影文件（P2/P5/P6/P7/P8 任务书、`srd_spells.json`、`test_dnd2024_stoneskin.py`）经 stash 迁移后不再产生 diff，未进入任何提交。
+
+
+### 8.5 未执行项与残余风险
+
+- §8.3–§8.4 的全量数字均为 rulesets 目录范围；本次未重跑全仓库其他测试集（非本任务验收范围）。
 - 借机攻击的最终资格复查仍依赖 `resolution.py` 的 `_reaction_eligible`；后续若再在 validation 前插入反应预算校验，可能重新截断该路径，需保持该契约。
 
