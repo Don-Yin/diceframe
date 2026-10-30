@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import BattleAvatar from './BattleAvatar.vue'
 import BattleTokenCard from './BattleToken.vue'
 import {
@@ -9,7 +9,7 @@ import {
 import type { BattlefieldLabels } from './labels'
 
 const CELL = 44
-const LANE_HEIGHT = 104
+const LANE_HEIGHT = 124
 
 const props = defineProps<{
   tokens: BattleToken[]
@@ -29,6 +29,18 @@ const stageStyle = computed(() => ({ minWidth: `${cellCount.value * CELL}px` }))
 const unitsStyle = computed(() => ({ height: `${lineLaneCount(slots.value) * LANE_HEIGHT + 14}px` }))
 const current = computed(() => props.tokens.find(token => token.isCurrent))
 const target = computed(() => props.tokens.find(token => token.id === props.targetId))
+
+// On a narrow screen the stage scrolls; start with the acting unit in view.
+const scroller = ref<HTMLElement | null>(null)
+function centerOnCurrent(): void {
+  const el = scroller.value
+  const slot = current.value ? slots.value.get(current.value.id) : undefined
+  if (!el || !slot || el.scrollWidth <= el.clientWidth) return
+  const cell = el.scrollWidth / cellCount.value
+  el.scrollLeft = Math.max(0, (slot.index + 0.5) * cell - el.clientWidth / 2)
+}
+onMounted(() => void nextTick(centerOnCurrent))
+watch(() => current.value?.id, () => void nextTick(centerOnCurrent))
 
 function unitStyle(token: BattleToken): Record<string, string> {
   const slot = slots.value.get(token.id)!
@@ -61,7 +73,7 @@ function cellLabel(x: number): string {
 
 <template>
   <div class="battlefield-line">
-    <div class="stage-scroll">
+    <div ref="scroller" class="stage-scroll">
       <div class="stage" :style="stageStyle">
         <div class="stage-units" :style="unitsStyle">
           <div

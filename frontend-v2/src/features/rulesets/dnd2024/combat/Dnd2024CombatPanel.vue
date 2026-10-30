@@ -8,6 +8,7 @@ import {
   FootstepsOutline,
   HourglassOutline,
   PlayForwardOutline,
+  RibbonOutline,
   ShieldOutline,
   SparklesOutline,
 } from '@vicons/ionicons5'
@@ -32,9 +33,13 @@ import type {
 import { useLocale } from '@/composables/useLocale'
 import CombatLiveBar from '@/components/play/CombatLiveBar.vue'
 import Modal from '@/components/ui/Modal.vue'
+import ActionDock, { type DockTab } from './hud/ActionDock.vue'
+import ActionTile from './hud/ActionTile.vue'
 import Battlefield from './hud/Battlefield.vue'
-import { buildBattleTokens } from './hud/battleView'
+import { battleDistance, buildBattleTokens } from './hud/battleView'
+import InitiativeBar from './hud/InitiativeBar.vue'
 import type { BattlefieldLabels } from './hud/labels'
+import TargetCard from './hud/TargetCard.vue'
 import SpellAvailability from './SpellAvailability.vue'
 import { spellCopy } from './spellCopy'
 
@@ -134,6 +139,12 @@ const copy = computed(() => locale.value.startsWith('zh') ? {
   classFeatures: '职业能力',
   noCapabilityTarget: '当前没有可指定的敌对目标',
   noCapabilityAvailable: '本回合没有可用的职业能力。',
+  tabAction: '动作', tabBonus: '附赠动作', tabMove: '移动', tabReaction: '反应',
+  confirmAction: '确认行动', classAbilities: '职业能力', consumes: '消耗', distance: '距离',
+  status: '状态', sideEnemy: '敌对生物', sideAlly: '友方', pickTarget: '点选战场上的单位，查看详情并指定目标。',
+  noActionInTab: '这一类里当前没有可用的行动。', reactionHint: '反应会在被攻击或触发条件出现时由服务器询问你，无需主动选择。',
+  chooseModeHint: '选择一个行动开始。', moveHint: '点击战场上的可达格，或在下方微调移动距离。',
+  actionDock: '行动区', capabilityChoice: '职业能力', noTarget: '未选择目标',
 } : {
   title: 'Combat', authority: 'D&D 5E 2024 · Authoritative resolution', rulesNote: 'Resolution rules',
   loading: 'Synchronizing combat…', refresh: 'Refresh', start: 'Confirm Combat',
@@ -198,6 +209,12 @@ const copy = computed(() => locale.value.startsWith('zh') ? {
   classFeatures: 'Class features',
   noCapabilityTarget: 'No hostile target is available',
   noCapabilityAvailable: 'No class capability is available this turn.',
+  tabAction: 'Action', tabBonus: 'Bonus Action', tabMove: 'Move', tabReaction: 'Reaction',
+  confirmAction: 'Confirm action', classAbilities: 'Class abilities', consumes: 'Cost', distance: 'Distance',
+  status: 'Status', sideEnemy: 'Hostile creature', sideAlly: 'Ally', pickTarget: 'Select a unit on the battlefield to inspect it and aim at it.',
+  noActionInTab: 'Nothing is available in this category right now.', reactionHint: 'The server asks for a reaction when you are attacked or a trigger fires; there is nothing to pick here.',
+  chooseModeHint: 'Pick an action to begin.', moveHint: 'Click a reachable cell on the battlefield, or fine-tune the distance below.',
+  actionDock: 'Actions', capabilityChoice: 'Class ability', noTarget: 'No target selected',
 })
 
 const gameplay = computed(() => data.value?.gameplay)
@@ -405,6 +422,7 @@ function canReachPosition(position: number): boolean {
 function chooseTrackPosition(position: number): void {
   if (!canReachPosition(position) || !currentActor.value) return
   movementDistance.value = position - Number(currentActor.value.position || 0)
+  selectDockTab('move')
 }
 
 const battleTokens = computed(() => buildBattleTokens(
@@ -412,16 +430,6 @@ const battleTokens = computed(() => buildBattleTokens(
   String(combat.value?.current_actor_id || ''),
   props.actorId,
 ))
-// Units the current intent can legally aim at; the server lists them per action.
-const targetableIds = computed(() => {
-  const ids = new Set<string>()
-  const lists = [
-    attackAction.value?.targets, spellAction.value?.targets,
-    capabilityTargets.value, explorationAction.value?.targets,
-  ]
-  for (const list of lists) for (const item of list || []) ids.add(item.actor_id)
-  return [...ids]
-})
 const battlefieldLabels = computed<BattlefieldLabels>(() => ({
   hp: copy.value.hp,
   feet: copy.value.feet,
@@ -430,9 +438,149 @@ const battlefieldLabels = computed<BattlefieldLabels>(() => ({
   selectTarget: name => `${copy.value.target}: ${name}`,
 }))
 
+type DockMode = '' | 'attack' | 'spell' | 'capability' | 'explore' | 'move'
+const dockTab = ref<'action' | 'bonus' | 'move' | 'reaction'>('action')
+const dockMode = ref<DockMode>('')
+const inspectedId = ref('')
+const selectedCapabilityId = ref('')
+
+const castingKey = (spell: RulesetCombatSpell) => String(spell.casting_time || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+const isBonusSpell = (spell: RulesetCombatSpell) => Boolean(spell.trigger_target_id) || castingKey(spell) === 'bonus_action'
+const isReactionSpell = (spell: RulesetCombatSpell) => castingKey(spell) === 'reaction' && !spell.trigger_target_id
+// Spells split by the turn resource they spend; reaction spells are answered
+// through the server's decision prompt instead of being picked here.
+const spellChoices = computed(() => (spellAction.value?.spells || []).filter(spell => (
+  !isReactionSpell(spell) && (dockTab.value === 'bonus' ? isBonusSpell(spell) : !isBonusSpell(spell))
+)))
+const showSpellTile = computed(() => {
+  if (dockTab.value === 'bonus') return spellChoices.value.length > 0
+  if (dockTab.value !== 'action') return false
+  return spellChoices.value.length > 0 || Boolean(spellActor.value?.spells?.length)
+})
+const visibleTileCount = computed(() => {
+  if (dockTab.value === 'move') return moveAction.value ? 1 : 0
+  if (dockTab.value === 'reaction') return 0
+  const spell = showSpellTile.value ? 1 : 0
+  if (dockTab.value === 'bonus') return spell
+  return spell + (attackAction.value ? 1 : 0) + (explorationAction.value ? 1 : 0) + simpleActions.value.length
+    + (capabilityActions.value.length || currentClassResources.value.length ? 1 : 0)
+})
+const simpleActions = computed(() => (['dash', 'dodge', 'disengage', 'death_save'] as const).filter(type => action(type)))
+const simpleLabel = (type: string) => ({
+  dash: copy.value.dash, dodge: copy.value.dodge, disengage: copy.value.disengage, death_save: copy.value.deathSave,
+}[type] || type)
+const battleTokenIds = computed(() => battleTokens.value.map(token => token.id))
+const targetCardLabels = computed(() => ({
+  hp: copy.value.hp, ac: copy.value.ac, distance: copy.value.distance, feet: copy.value.feet,
+  status: copy.value.status, none: copy.value.none, sideAlly: copy.value.sideAlly,
+  sideEnemy: copy.value.sideEnemy, empty: copy.value.pickTarget, condition: localizedTerm,
+}))
+const selectedCapability = computed(() => capabilityActions.value.find(
+  item => item.capability_id === selectedCapabilityId.value,
+))
+const aimedTargetId = computed(() => {
+  if (dockMode.value === 'spell') return selectedSpellTargetId.value
+  if (dockMode.value === 'capability' && selectedCapability.value?.requires_target) return capabilityTargetId.value
+  if (dockMode.value === 'explore') return explorationTargetId.value
+  return selectedTargetId.value
+})
+const focusId = computed(() => inspectedId.value || (dockMode.value ? aimedTargetId.value : ''))
+const focusToken = computed(() => battleTokens.value.find(token => token.id === focusId.value) || null)
+const currentToken = computed(() => battleTokens.value.find(token => token.isCurrent) || null)
+const focusDistance = computed(() => (
+  currentToken.value && focusToken.value ? battleDistance(currentToken.value.coord, focusToken.value.coord) : null
+))
+const initiativeTokens = computed(() => (combat.value?.initiative || [])
+  .map(id => battleTokens.value.find(token => token.id === id))
+  .filter((token): token is NonNullable<typeof token> => Boolean(token)))
+const ownToken = computed(() => battleTokens.value.find(token => token.isOwn) || currentToken.value)
+const dockTabs = computed<DockTab[]>(() => {
+  const economy = combat.value?.economy || {}
+  const movement = Number(economy.movement ?? 0)
+  const spent = copy.value.spent
+  return [
+    { id: 'action', label: copy.value.tabAction, available: Boolean(economy.action), note: economy.action ? '' : spent },
+    { id: 'bonus', label: copy.value.tabBonus, available: Boolean(economy.bonus_action), note: economy.bonus_action ? '' : spent },
+    { id: 'move', label: copy.value.tabMove, available: movement > 0, note: `${movement} ${copy.value.feet}` },
+    { id: 'reaction', label: copy.value.tabReaction, available: Boolean(economy.reaction), note: economy.reaction ? '' : spent },
+  ]
+})
+const dockTargetToken = computed(() => battleTokens.value.find(token => token.id === aimedTargetId.value) || null)
+const dockTargetDistance = computed(() => (
+  currentToken.value && dockTargetToken.value ? battleDistance(currentToken.value.coord, dockTargetToken.value.coord) : null
+))
+const dockCost = computed(() => {
+  if (dockMode.value === 'attack') return copy.value.action
+  if (dockMode.value === 'spell' || dockMode.value === 'explore') {
+    const spell = dockMode.value === 'spell' ? selectedSpell.value : explorationSpell.value
+    if (!spell) return ''
+    return spell.trigger_target_id ? copy.value.bonus : localizedTerm(spell.casting_time)
+  }
+  if (dockMode.value === 'capability') return selectedCapability.value ? capabilityCostLabel(selectedCapability.value) : ''
+  if (dockMode.value === 'move') return `${Math.abs(Number(movementDistance.value || 0))} ${copy.value.feet}`
+  return ''
+})
+const dockNeedsTarget = computed(() => dockMode.value === 'attack' || dockMode.value === 'spell'
+  || (dockMode.value === 'capability' && Boolean(selectedCapability.value?.requires_target)))
+const canStageDock = computed(() => {
+  if (busy.value) return false
+  switch (dockMode.value) {
+    case 'attack': return Boolean(selectedWeapon.value && selectedTargetId.value && selectedWeaponRange.value?.usable)
+    case 'spell': return Boolean(selectedSpell.value && selectedTarget.value)
+    case 'capability': return Boolean(selectedCapability.value
+      && (!selectedCapability.value.requires_target || capabilityTargetId.value))
+    case 'explore': return Boolean(explorationSpellRef.value && explorationSlotValid.value)
+    case 'move': return Boolean(movementDistance.value)
+    default: return false
+  }
+})
+
+function openDockMode(mode: DockMode, keepOpen = false): void {
+  dockMode.value = !keepOpen && dockMode.value === mode ? '' : mode
+  if (dockMode.value === 'spell') {
+    const choices = spellChoices.value
+    if (choices.length && !choices.some(item => item.spell_ref === selectedSpellRef.value)) {
+      selectedSpellRef.value = choices[0]!.spell_ref
+    }
+  }
+  if (dockMode.value === 'capability' && !selectedCapability.value) {
+    selectedCapabilityId.value = capabilityActions.value[0]?.capability_id || ''
+  }
+  if (dockMode.value === 'explore' && !explorationSpellRef.value) {
+    explorationSpellRef.value = explorationAction.value?.spells?.[0]?.spell_ref || ''
+  }
+}
+
+function stageDock(): void {
+  if (!canStageDock.value) return
+  if (dockMode.value === 'attack') stageAttack()
+  else if (dockMode.value === 'spell') stageSpell()
+  else if (dockMode.value === 'capability' && selectedCapability.value) stageCapability(selectedCapability.value)
+  else if (dockMode.value === 'explore') stageExplorationSpell()
+  else if (dockMode.value === 'move') stageMove()
+}
+
+function selectDockTab(tab: string): void {
+  dockTab.value = tab as typeof dockTab.value
+  dockMode.value = tab === 'move' && moveAction.value ? 'move' : ''
+}
+
+// A landed melee hit lets the player add a bonus-action spell before damage;
+// bring that choice forward instead of leaving it behind another tab.
+watch(
+  () => (pendingDecision.value?.kind === 'melee_hit_spell' ? pendingDecision.value.decision_id : ''),
+  (decisionId) => {
+    if (!decisionId) return
+    dockTab.value = 'bonus'
+    openDockMode('spell', true)
+  },
+  { immediate: true },
+)
+
 // Clicking a unit aims every action that can legally reach it, so the choice
 // carries over when the player switches between attack, spell and ability.
 function pickBattleTarget(actorId: string): void {
+  inspectedId.value = actorId
   if (attackAction.value?.targets?.some(item => item.actor_id === actorId)) selectedTargetId.value = actorId
   if (targetsFor(selectedSpell.value).some(item => item.actor_id === actorId)) selectedSpellTargetId.value = actorId
   if (capabilityTargets.value.some(item => item.actor_id === actorId)) capabilityTargetId.value = actorId
@@ -557,12 +705,31 @@ function resetSelections(): void {
   const spell = spellAction.value?.spells?.[0]
   selectedSpellRef.value = spell?.spell_ref || ''
   selectedSlot.value = spell?.available_slot_levels?.[0] ?? 0
-  selectedSpellTargetId.value = spell ? targetsFor(spell)[0]?.actor_id || '' : ''
-  selectedTargetId.value = attackAction.value?.targets?.[0]?.actor_id || ''
-  capabilityTargetId.value = capabilityTargets.value[0]?.actor_id || ''
+  // A refresh must not throw away the unit the player already aimed at.
+  const keepOrFirst = (current: string, legal: RulesetCombatTarget[]) => (
+    legal.some(item => item.actor_id === current) ? current : legal[0]?.actor_id || ''
+  )
+  selectedSpellTargetId.value = spell ? keepOrFirst(selectedSpellTargetId.value, targetsFor(spell)) : ''
+  selectedTargetId.value = keepOrFirst(selectedTargetId.value, attackAction.value?.targets || [])
+  capabilityTargetId.value = keepOrFirst(capabilityTargetId.value, capabilityTargets.value)
   chooseUsableWeapon()
   movementDistance.value = Math.min(5, Number(moveAction.value?.movement_remaining || 5))
+  if (!capabilityActions.value.some(item => item.capability_id === selectedCapabilityId.value)) {
+    selectedCapabilityId.value = capabilityActions.value[0]?.capability_id || ''
+  }
 }
+
+// Back to a clean dock once an intent lands or the turn passes on.
+function resetDock(): void {
+  dockTab.value = 'action'
+  dockMode.value = ''
+  inspectedId.value = ''
+}
+// The first load is not a turn change, so it must not undo a decision prompt.
+watch(
+  () => (combat.value ? `${combat.value.round}:${combat.value.current_actor_id}` : ''),
+  (_next, previous) => { if (previous) resetDock() },
+)
 
 function clearGameScopedState(): void {
   data.value = null
@@ -833,6 +1000,7 @@ async function submit(payload: JsonObject): Promise<void> {
     error.value = ''
     notice.value = latestEvents.value.map(describeEvent).filter(Boolean).join(' · ')
     resetSelections()
+    resetDock()
     emit('refresh')
     if (payload.type === 'combat.end') emit('navigate', 'campaign')
   } catch (cause: unknown) {
@@ -1270,43 +1438,31 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
       </section>
 
       <template v-else>
-        <section :class="['turn-banner', currentActor?.kind || 'player']" aria-live="polite">
-          <div><small>{{ copy.round }} {{ combat.round }}</small><strong>{{ currentTurnLabel }}</strong></div>
-          <span>{{ targetName(combat.current_actor_id) }}</span>
-        </section>
-
-        <div class="combat-summary">
-          <span><NIcon :component="FlashOutline" /><i><small>{{ copy.action }}</small><strong>{{ combat.economy.action ? copy.available : copy.spent }}</strong></i></span>
-          <span><NIcon :component="SparklesOutline" /><i><small>{{ copy.bonus }}</small><strong>{{ combat.economy.bonus_action ? copy.available : copy.spent }}</strong></i></span>
-          <span><NIcon :component="FootstepsOutline" /><i><small>{{ copy.movement }}</small><strong>{{ combat.economy.movement ?? 0 }} {{ copy.feet }}</strong></i></span>
-          <span><NIcon :component="ShieldOutline" /><i><small>{{ copy.reaction }}</small><strong>{{ combat.economy.reaction ? copy.available : copy.spent }}</strong></i></span>
-        </div>
+        <InitiativeBar
+          :order="initiativeTokens"
+          :round-label="`${copy.round} ${combat.round}`"
+          :turn-label="currentTurnLabel"
+          :acting-name="targetName(combat.current_actor_id)"
+          :list-label="copy.current"
+        />
         <p v-if="combat.current_actor_id === `player:${actorId}`" class="turn-guide">{{ copy.turnGuide }}</p>
 
-        <ol class="initiative" :aria-label="copy.current">
-          <li
-            v-for="(actorIdValue, index) in combat.initiative"
-            :key="actorIdValue"
-            :class="[{ current: actorIdValue === combat.current_actor_id }, actorIdValue.startsWith('enemy:') ? 'enemy' : 'player']"
-            :aria-current="actorIdValue === combat.current_actor_id ? 'step' : undefined"
-          >
-            <span>{{ index + 1 }}</span><strong>{{ targetName(actorIdValue) }}</strong>
-          </li>
-        </ol>
-
         <section class="battlefield" :aria-label="copy.tacticalTrack">
-          <Battlefield
-            :position-mode="combat.position_mode"
-            :tokens="battleTokens"
-            :movement-remaining="Number(moveAction?.movement_remaining || 0)"
-            :target-id="selectedTargetId"
-            :selectable-ids="targetableIds"
-            :selected-destination="selectedDestination"
-            :can-reach="canReachPosition"
-            :labels="battlefieldLabels"
-            @select-token="pickBattleTarget"
-            @choose-position="chooseTrackPosition"
-          />
+          <div class="battlefield-body">
+            <Battlefield
+              :position-mode="combat.position_mode"
+              :tokens="battleTokens"
+              :movement-remaining="Number(moveAction?.movement_remaining || 0)"
+              :target-id="focusId"
+              :selectable-ids="battleTokenIds"
+              :selected-destination="selectedDestination"
+              :can-reach="canReachPosition"
+              :labels="battlefieldLabels"
+              @select-token="pickBattleTarget"
+              @choose-position="chooseTrackPosition"
+            />
+            <TargetCard :token="focusToken" :distance="focusDistance" :labels="targetCardLabels" />
+          </div>
           <p class="battlefield-hint">{{ copy.chooseDestination }}</p>
         </section>
 
@@ -1338,143 +1494,179 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
           </div>
         </section>
 
-        <section v-if="actions.length && (!pendingDecision || pendingDecision.kind === 'melee_hit_spell')" class="available-actions">
-          <h3>{{ copy.availableActions }}</h3>
-          <div class="combat-actions">
-          <section v-if="attackAction" class="action-card">
-            <h3><NIcon :component="FlashOutline" />{{ copy.action }} · {{ copy.attack }}</h3>
-            <label>{{ copy.weapon }}
-              <select v-model="selectedWeaponId">
-                <option
-                  v-for="weaponItem in attackAction.weapons"
-                  :key="weaponItem.weapon_ref || weaponItem.id"
-                  :value="weaponItem.weapon_ref || weaponItem.id"
-                  :disabled="!weaponRangeState(weaponItem, selectedTargetId).usable"
-                >
-                  {{ weaponItem.name || weaponItem.id }} · {{ weaponItem.damage }} {{ localizedTerm(weaponItem.damage_type) }} · {{ weaponRangeLabel(weaponItem) }}
-                </option>
-              </select>
-            </label>
-            <label>{{ copy.target }}
-              <select v-model="selectedTargetId">
-                <option v-for="targetItem in attackAction.targets" :key="targetItem.actor_id" :value="targetItem.actor_id">
-                  {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
-                </option>
-              </select>
-            </label>
-            <p v-if="selectedTargetId" :class="['range-guide', { blocked: !hasUsableWeapon }]">
-              {{ copy.targetDistance }} {{ attackDistance }} {{ copy.feet }}。
-              {{ hasUsableWeapon ? copy.autoWeapon : copy.moveCloser }}
-            </p>
-            <button :disabled="busy || !selectedWeapon || !selectedTargetId || !selectedWeaponRange?.usable" @click="stageAttack"><NIcon :component="FlashOutline" />{{ copy.attack }}</button>
-          </section>
+        <ActionDock
+          v-if="actions.length && (!pendingDecision || pendingDecision.kind === 'melee_hit_spell')"
+          :active-tab="dockTab"
+          :own="ownToken"
+          :hp-label="copy.hp"
+          :tabs="dockTabs"
+          :dock-label="copy.actionDock"
+          @update:active-tab="selectDockTab"
+        >
+          <template #tab-icon-action><NIcon :component="FlashOutline" /></template>
+          <template #tab-icon-bonus><NIcon :component="SparklesOutline" /></template>
+          <template #tab-icon-move><NIcon :component="FootstepsOutline" /></template>
+          <template #tab-icon-reaction><NIcon :component="ShieldOutline" /></template>
 
-          <section v-if="capabilityActions.length || currentClassResources.length" class="action-card capability-card">
-            <h3><NIcon :component="SparklesOutline" />{{ copy.classFeatures }}</h3>
+          <template #identity>
             <div v-if="currentClassResources.length" class="class-resource-strip">
               <span v-for="resource in currentClassResources" :key="resource.id">
                 <small>{{ resource.name }}</small>
                 <strong>{{ resource.current }} / {{ resource.maximum }}</strong>
               </span>
             </div>
-            <template v-if="capabilityActions.length">
-              <label v-if="capabilityTargets.length">{{ copy.target }}
+          </template>
+
+          <template #options>
+            <p v-if="dockTab === 'reaction'" class="dock-hint">{{ copy.reactionHint }}</p>
+            <p v-else-if="!dockMode" class="dock-hint">{{ visibleTileCount ? copy.chooseModeHint : copy.noActionInTab }}</p>
+
+            <div v-if="dockMode === 'attack' && attackAction" class="mode-panel" data-mode="attack">
+              <label>{{ copy.weapon }}
+                <select v-model="selectedWeaponId">
+                  <option
+                    v-for="weaponItem in attackAction.weapons"
+                    :key="weaponItem.weapon_ref || weaponItem.id"
+                    :value="weaponItem.weapon_ref || weaponItem.id"
+                    :disabled="!weaponRangeState(weaponItem, selectedTargetId).usable"
+                  >
+                    {{ weaponItem.name || weaponItem.id }} · {{ weaponItem.damage }} {{ localizedTerm(weaponItem.damage_type) }} · {{ weaponRangeLabel(weaponItem) }}
+                  </option>
+                </select>
+              </label>
+              <label>{{ copy.target }}
+                <select v-model="selectedTargetId">
+                  <option v-for="targetItem in attackAction.targets" :key="targetItem.actor_id" :value="targetItem.actor_id">
+                    {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
+                  </option>
+                </select>
+              </label>
+              <p v-if="selectedTargetId" :class="['range-guide', { blocked: !hasUsableWeapon }]">
+                {{ copy.targetDistance }} {{ attackDistance }} {{ copy.feet }}。
+                {{ hasUsableWeapon ? copy.autoWeapon : copy.moveCloser }}
+              </p>
+            </div>
+
+            <div v-if="dockMode === 'spell'" class="mode-panel" data-mode="spell" data-testid="combat-spell-card">
+              <template v-if="spellAction && spellChoices.length">
+                <label>{{ copy.spell }}
+                  <select v-model="selectedSpellRef">
+                    <option v-for="spellItem in spellChoices" :key="spellItem.spell_ref" :value="spellItem.spell_ref">
+                      {{ spellItem.name }} · {{ spellItem.trigger_target_id ? copy.bonus : localizedTerm(spellItem.casting_time) }}
+                    </option>
+                  </select>
+                </label>
+                <label v-if="selectedSpell?.level">{{ copy.slot }}
+                  <select v-model.number="selectedSlot">
+                    <option v-for="level in selectedSpell.available_slot_levels" :key="level" :value="level">{{ level === 0 ? spellText.free : level }}</option>
+                  </select>
+                </label>
+                <label>{{ copy.target }}
+                  <select v-model="selectedSpellTargetId">
+                    <option v-for="targetItem in targetsFor(selectedSpell)" :key="targetItem.actor_id" :value="targetItem.actor_id">
+                      {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
+                    </option>
+                  </select>
+                </label>
+              </template>
+              <SpellAvailability :spells="spellActor?.spells || []" />
+            </div>
+
+            <div v-if="dockMode === 'capability'" class="mode-panel" data-mode="capability">
+              <div v-if="capabilityActions.length" class="capability-list" role="group" :aria-label="copy.capabilityChoice">
+                <button
+                  v-for="capability in capabilityActions"
+                  :key="capability.capability_id"
+                  type="button"
+                  :class="{ active: capability.capability_id === selectedCapabilityId }"
+                  :aria-pressed="capability.capability_id === selectedCapabilityId"
+                  @click="selectedCapabilityId = capability.capability_id || ''"
+                >
+                  <span class="capability-button-label">{{ capability.label }}</span>
+                  <small class="capability-button-cost">{{ capabilityCostLabel(capability) }}</small>
+                </button>
+              </div>
+              <p v-else class="range-guide">{{ copy.noCapabilityAvailable }}</p>
+              <label v-if="selectedCapability?.requires_target && capabilityTargets.length">{{ copy.target }}
                 <select v-model="capabilityTargetId">
                   <option v-for="targetItem in capabilityTargets" :key="targetItem.actor_id" :value="targetItem.actor_id">
                     {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
                   </option>
                 </select>
               </label>
-              <p v-else-if="capabilityActions.some(item => item.requires_target)" class="range-guide blocked">
-                {{ copy.noCapabilityTarget }}
-              </p>
-              <button
-                v-for="capability in capabilityActions"
-                :key="capability.capability_id"
-                :disabled="busy || (capability.requires_target && !capabilityTargetId)"
-                @click="stageCapability(capability)"
-              >
-                <NIcon :component="SparklesOutline" />
-                <span class="capability-button-label">{{ capability.label }}</span>
-                <small class="capability-button-cost">{{ capabilityCostLabel(capability) }}</small>
-              </button>
+              <p v-else-if="selectedCapability?.requires_target" class="range-guide blocked">{{ copy.noCapabilityTarget }}</p>
+            </div>
+
+            <div v-if="dockMode === 'explore' && explorationAction" class="mode-panel" data-mode="explore">
+              <label>{{ copy.spell }}
+                <select v-model="explorationSpellRef">
+                  <option v-for="spellItem in explorationAction.spells" :key="spellItem.spell_ref" :value="spellItem.spell_ref">
+                    {{ spellItem.name }} · {{ localizedTerm(spellItem.casting_time) }}
+                  </option>
+                </select>
+              </label>
+              <label v-if="explorationSpell?.level">{{ copy.slot }}
+                <select v-model.number="explorationSlot">
+                  <option v-for="level in explorationSpell.available_slot_levels" :key="level" :value="level">{{ level }}</option>
+                </select>
+              </label>
+              <label>{{ copy.target }}
+                <select v-model="explorationTargetId">
+                  <option v-for="targetItem in explorationAction.targets" :key="targetItem.actor_id" :value="targetItem.actor_id">
+                    {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
+                  </option>
+                </select>
+              </label>
+            </div>
+
+            <div v-if="dockMode === 'move' && moveAction" class="mode-panel" data-mode="move">
+              <p class="dock-hint">{{ copy.moveHint }}</p>
+              <label>{{ copy.move }}
+                <input v-model.number="movementDistance" type="number" :min="-Number(moveAction.movement_remaining || 0)" :max="Number(moveAction.movement_remaining || 0)" step="5">
+                <small>± {{ moveAction.movement_remaining }} {{ copy.feet }}</small>
+              </label>
+            </div>
+          </template>
+
+          <template #tiles>
+            <template v-if="dockTab === 'action'">
+              <ActionTile v-if="attackAction" :label="copy.attack" :hint="selectedWeapon?.name || selectedWeapon?.id" :active="dockMode === 'attack'" data-tile="attack" @click="openDockMode('attack')">
+                <template #icon><NIcon :component="FlashOutline" /></template>
+              </ActionTile>
             </template>
-            <p v-else class="range-guide">{{ copy.noCapabilityAvailable }}</p>
-          </section>
-
-          <section v-if="spellAction || spellActor?.spells?.length" class="action-card" data-testid="combat-spell-card">
-            <h3><NIcon :component="SparklesOutline" />{{ copy.action }} / {{ copy.bonus }} · {{ copy.cast }}</h3>
-            <template v-if="spellAction">
-            <label>{{ copy.spell }}
-              <select v-model="selectedSpellRef">
-                <option v-for="spellItem in spellAction.spells" :key="spellItem.spell_ref" :value="spellItem.spell_ref">
-                  {{ spellItem.name }} · {{ spellItem.trigger_target_id ? copy.bonus : localizedTerm(spellItem.casting_time) }}
-                </option>
-              </select>
-            </label>
-            <label v-if="selectedSpell?.level">{{ copy.slot }}
-              <select v-model.number="selectedSlot">
-                <option v-for="level in selectedSpell.available_slot_levels" :key="level" :value="level">{{ level === 0 ? spellText.free : level }}</option>
-              </select>
-            </label>
-            <label>{{ copy.target }}
-              <select v-model="selectedSpellTargetId">
-                <option v-for="targetItem in targetsFor(selectedSpell)" :key="targetItem.actor_id" :value="targetItem.actor_id">
-                  {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
-                </option>
-              </select>
-            </label>
-            <button :disabled="busy || !selectedSpell || !selectedTarget" @click="stageSpell"><NIcon :component="SparklesOutline" />{{ copy.cast }}</button>
+            <ActionTile v-if="showSpellTile" :label="copy.cast" :active="dockMode === 'spell'" data-tile="spell" @click="openDockMode('spell')">
+              <template #icon><NIcon :component="SparklesOutline" /></template>
+            </ActionTile>
+            <template v-if="dockTab === 'action'">
+              <ActionTile v-if="capabilityActions.length || currentClassResources.length" :label="copy.classAbilities" :active="dockMode === 'capability'" data-tile="capability" @click="openDockMode('capability')">
+                <template #icon><NIcon :component="RibbonOutline" /></template>
+              </ActionTile>
+              <ActionTile v-if="explorationAction" :label="copy.explorationCast" :active="dockMode === 'explore'" data-tile="explore" @click="openDockMode('explore')">
+                <template #icon><NIcon :component="SparklesOutline" /></template>
+              </ActionTile>
+              <ActionTile v-for="type in simpleActions" :key="type" :label="simpleLabel(type)" :disabled="busy" @click="stageSimple(type)">
+                <template #icon><NIcon :component="type === 'dodge' ? ShieldOutline : type === 'death_save' ? SparklesOutline : FootstepsOutline" /></template>
+              </ActionTile>
             </template>
-            <SpellAvailability :spells="spellActor?.spells || []" />
-          </section>
+            <ActionTile v-if="dockTab === 'move' && moveAction" :label="copy.move" :hint="`${moveAction.movement_remaining} ${copy.feet}`" :active="dockMode === 'move'" data-tile="move" @click="openDockMode('move')">
+              <template #icon><NIcon :component="FootstepsOutline" /></template>
+            </ActionTile>
+          </template>
 
-          <section v-if="explorationAction" class="action-card">
-            <h3><NIcon :component="SparklesOutline" />{{ copy.explorationCast }}</h3>
-            <label>{{ copy.spell }}
-              <select v-model="explorationSpellRef">
-                <option v-for="spellItem in explorationAction.spells" :key="spellItem.spell_ref" :value="spellItem.spell_ref">
-                  {{ spellItem.name }} · {{ localizedTerm(spellItem.casting_time) }}
-                </option>
-              </select>
-            </label>
-            <label v-if="explorationSpell?.level">
-              {{ copy.slot }}
-              <select v-model.number="explorationSlot">
-                <option v-for="level in explorationSpell.available_slot_levels" :key="level" :value="level">{{ level }}</option>
-              </select>
-            </label>
-            <label>{{ copy.target }}
-              <select v-model="explorationTargetId">
-                <option v-for="targetItem in explorationAction.targets" :key="targetItem.actor_id" :value="targetItem.actor_id">
-                  {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
-                </option>
-              </select>
-            </label>
-            <button :disabled="busy || !explorationSpellRef || !explorationSlotValid" @click="stageExplorationSpell"><NIcon :component="SparklesOutline" />{{ copy.cast }}</button>
-          </section>
-
-          <section v-if="moveAction" class="action-card">
-            <h3><NIcon :component="FootstepsOutline" />{{ copy.movement }}</h3>
-            <label>{{ copy.move }}
-              <input v-model.number="movementDistance" type="number" :min="-Number(moveAction.movement_remaining || 0)" :max="Number(moveAction.movement_remaining || 0)" step="5">
-              <small>± {{ moveAction.movement_remaining }} {{ copy.feet }}</small>
-            </label>
-            <button :disabled="busy || !movementDistance" @click="stageMove"><NIcon :component="FootstepsOutline" />{{ copy.move }}</button>
-          </section>
-
-          <section class="action-card compact-actions">
-            <h3><NIcon :component="ShieldOutline" />{{ copy.economy }}</h3>
-            <button v-if="action('dash')" :disabled="busy" @click="stageSimple('dash')"><NIcon :component="FootstepsOutline" />{{ copy.dash }}</button>
-            <button v-if="action('dodge')" :disabled="busy" @click="stageSimple('dodge')"><NIcon :component="ShieldOutline" />{{ copy.dodge }}</button>
-            <button v-if="action('disengage')" :disabled="busy" @click="stageSimple('disengage')"><NIcon :component="FootstepsOutline" />{{ copy.disengage }}</button>
-            <button v-if="action('death_save')" :disabled="busy" @click="stageSimple('death_save')"><NIcon :component="SparklesOutline" />{{ copy.deathSave }}</button>
+          <template #summary>
+            <div v-if="dockMode" class="dock-target">
+              <span v-if="dockNeedsTarget"><small>{{ copy.target }}</small><b>{{ dockTargetToken?.name || copy.noTarget }}</b></span>
+              <span v-if="dockCost"><small>{{ copy.consumes }}</small><b>{{ dockCost }}</b></span>
+              <span v-if="dockNeedsTarget && dockTargetDistance !== null"><small>{{ copy.distance }}</small><b>{{ dockTargetDistance }} {{ copy.feet }}</b></span>
+            </div>
+            <button type="button" class="dock-confirm" :disabled="!canStageDock" @click="stageDock">
+              <NIcon :component="FlashOutline" />{{ copy.confirmAction }}
+            </button>
             <p v-if="action('end_turn')" class="end-turn-ready" role="status"><NIcon :component="PlayForwardOutline" />{{ copy.canEndTurn }}</p>
-            <button v-if="action('end_turn')" :disabled="busy" @click="stageSimple('end_turn')"><NIcon :component="PlayForwardOutline" />{{ copy.endTurn }}</button>
-            <button v-if="action('combat.end')" class="danger" :disabled="busy" @click="stageSimple('combat.end')"><NIcon :component="ShieldOutline" />{{ copy.endCombat }}</button>
-          </section>
-          </div>
-        </section>
+            <button v-if="action('end_turn')" type="button" class="dock-end" :disabled="busy" @click="stageSimple('end_turn')"><NIcon :component="PlayForwardOutline" />{{ copy.endTurn }}</button>
+            <button v-if="action('combat.end')" type="button" class="danger dock-end" :disabled="busy" @click="stageSimple('combat.end')"><NIcon :component="ShieldOutline" />{{ copy.endCombat }}</button>
+          </template>
+        </ActionDock>
         <p v-else class="combat-state">{{ waitingText }}</p>
 
         <section v-if="staged" ref="confirmCard" class="confirm-card" role="group" :aria-label="copy.confirm" tabindex="-1">
@@ -1499,7 +1691,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 </template>
 
 <style scoped>
-.dnd-combat { display: grid; grid-auto-rows: max-content; align-content: start; gap: 14px; margin: 14px 0; padding: 16px; border: 1px solid #806339; border-radius: 16px; background: linear-gradient(145deg, rgb(23 20 19 / 96%), rgb(19 27 35 / 96%)); color: #f2eadc; box-shadow: 0 18px 48px rgb(0 0 0 / 24%); }
+.dnd-combat { display: grid; grid-template-columns: minmax(0, 1fr); grid-auto-rows: max-content; align-content: start; gap: 14px; margin: 14px 0; padding: 16px; border: 1px solid #806339; border-radius: 16px; background: linear-gradient(145deg, rgb(23 20 19 / 96%), rgb(19 27 35 / 96%)); color: #f2eadc; box-shadow: 0 18px 48px rgb(0 0 0 / 24%); }
 .combat-header, .decision-card, .confirm-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .combat-header h2 { margin: 2px 0 0; font: 700 clamp(19px, 2vw, 25px)/1.2 Georgia, serif; }
 .eyebrow { margin: 0; color: #d7b873; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
@@ -1560,40 +1752,33 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 .encounter-ended-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .encounter-ended-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .next-encounter-picker { margin-top: 4px; padding-top: 11px; border-top: 1px solid rgb(174 211 178 / 24%); }
-.turn-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 76px; padding: 13px 16px; border: 1px solid #4b6575; border-radius: 12px; background: linear-gradient(135deg, #173142, #111a22); }
-.turn-banner.enemy { border-color: #78484b; background: linear-gradient(135deg, #452326, #17181c); }
-.turn-banner div { display: grid; gap: 4px; }
-.turn-banner small { color: #9db7c6; font-size: 11px; text-transform: uppercase; }
-.turn-banner strong { font-size: 18px; }
-.turn-banner > span { color: #f4d48d; font: 700 clamp(19px, 3vw, 28px)/1.2 Georgia, serif; text-align: right; }
-.combat-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.combat-summary > span { display: flex; align-items: center; gap: 9px; padding: 9px 11px; border: 1px solid #394551; border-radius: 10px; background: #151c23; }
-.combat-summary > span > .n-icon { flex: 0 0 auto; color: #e0b766; font-size: 20px; }
-.combat-summary i { display: grid; gap: 3px; min-width: 0; font-style: normal; }
-.combat-summary small { color: #9ca6ae; }
 .turn-guide { margin: -4px 0 0; padding: 7px 10px; border-left: 3px solid #d2a855; color: #d9d1c4; background: rgb(80 58 23 / 24%); font-size: 12px; line-height: 1.5; }
-.initiative { display: flex; gap: 6px; min-height: 34px; margin: 0; padding: 0; overflow-x: auto; overflow-y: hidden; list-style: none; }
-.initiative li { display: inline-flex; align-items: center; gap: 6px; min-width: max-content; padding: 5px 9px 5px 6px; border: 1px solid #3b4650; border-radius: 999px; color: #aeb8c0; }
-.initiative li > span { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; background: #26333d; font-size: 10px; }
-.initiative li.enemy > span { background: #522a2d; }
-.initiative li.current { border-color: #d2a855; background: #362b19; color: #ffe5a8; }
 .battlefield { display: grid; gap: 6px; }
+.battlefield-body { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 10px; align-items: start; }
+.dock-hint { margin: 0; color: #8fa0ac; font-size: 12px; line-height: 1.5; }
+.mode-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; align-items: end; padding: 10px; border: 1px solid rgb(120 150 175 / 28%); border-radius: 12px; background: rgb(9 15 22 / 70%); }
+.mode-panel > .range-guide, .mode-panel > .dock-hint, .mode-panel > .class-resource-strip, .mode-panel > .capability-list { grid-column: 1 / -1; }
+.mode-panel label { display: grid; gap: 4px; color: #aebcc6; font-size: 12px; }
+.mode-panel select, .mode-panel input { width: 100%; min-height: 40px; padding-inline: 10px; border: 1px solid #4a5560; border-radius: 8px; background: #0d1319; color: #f3eee7; }
+.capability-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.capability-list button { display: grid; gap: 2px; min-height: 40px; padding: 5px 12px; border: 1px solid rgb(120 150 175 / 40%); border-radius: 9px; background: rgb(15 24 35 / 90%); color: #e8eef2; text-align: left; cursor: pointer; }
+.capability-list button.active { border-color: #e4b75e; background: rgb(88 62 22 / 60%); }
+.dock-target { display: grid; gap: 5px; padding: 9px 10px; border: 1px solid rgb(120 150 175 / 28%); border-radius: 12px; background: rgb(9 15 22 / 70%); }
+.dock-target span { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; }
+.dock-target small { color: #9aa9b4; }
+.dock-target b { overflow: hidden; color: #ffe5a8; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.dock-confirm, .dock-end { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 46px; border-radius: 12px; font-weight: 700; cursor: pointer; }
+.dock-confirm { border: 1px solid #e4b75e; background: linear-gradient(180deg, #b87d27, #7a4f16); color: #fff6df; box-shadow: 0 0 14px rgb(228 183 94 / 25%); }
+.dock-confirm:disabled { border-color: #5a5648; background: #2a2820; color: #8a8576; box-shadow: none; cursor: not-allowed; }
+.dock-end { border: 1px solid rgb(120 150 175 / 45%); background: linear-gradient(180deg, #1f3347, #131f2c); color: #e8eef2; }
+.dock-end.danger { border-color: #9d4a4f; background: linear-gradient(180deg, #4a1f24, #2a1013); }
+@media (max-width: 960px) { .battlefield-body { grid-template-columns: minmax(0, 1fr); } }
 .battlefield-hint { margin: 0; color: #8fa0ac; font-size: 12px; }
-.combat-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
-.action-card { display: grid; gap: 8px; padding: 12px; border: 1px solid #3b4650; border-radius: 12px; background: #111820; }
-.action-card h3 { margin: 0; }
-.action-card h3, .action-card button { display: flex; align-items: center; justify-content: center; gap: 6px; }
-.action-card h3 { justify-content: flex-start; }
-.available-actions { display: grid; gap: 9px; }
-.available-actions > h3 { margin: 0; color: #f0cf8b; font-size: 14px; }
 .range-guide { margin: 0; color: #b8d7bc; font-size: 12px; line-height: 1.5; }
 .range-guide.blocked { color: #f0b3a7; }
-.action-card label, .encounter-start label { display: grid; gap: 5px; color: #c8c2b8; font-size: 12px; }
+.encounter-start label { display: grid; gap: 5px; color: #c8c2b8; font-size: 12px; }
 button, select, input { min-height: 44px; font: inherit; }
-.action-card select, .action-card input, .encounter-start select { width: 100%; min-height: 44px; padding-inline: 10px; border: 1px solid #4a5560; border-radius: 8px; background: #0d1319; color: #f3eee7; }
-.compact-actions { align-content: start; }
-.capability-card { align-content: start; }
-.capability-card > button { justify-content: flex-start; flex-wrap: wrap; row-gap: 2px; text-align: left; }
+.encounter-start select { width: 100%; min-height: 44px; padding-inline: 10px; border: 1px solid #4a5560; border-radius: 8px; background: #0d1319; color: #f3eee7; }
 .capability-button-label { font-weight: 700; }
 .capability-button-cost { width: 100%; color: #c8c2b8; font-size: 11px; }
 .class-resource-strip { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -1613,13 +1798,8 @@ button:focus-visible, select:focus-visible, input:focus-visible, .confirm-card:f
 :global(body.light .dnd-combat) { border-color: #9b743a; background: linear-gradient(145deg, #fffaf0, #f1f6f7); color: #27231e; box-shadow: 0 14px 34px rgb(76 59 29 / 12%); }
 :global(body.light .dnd-combat .story-bridge) { border-color: #aa8546; background: #fff7e7; }
 :global(body.light .dnd-combat .story-bridge p), :global(body.light .dnd-combat .story-bridge aside) { color: #403728; }
-:global(body.light .dnd-combat .action-card), :global(body.light .dnd-combat .combat-summary span) { border-color: #b8b2a6; background: #fff; }
-:global(body.light .dnd-combat .action-card select), :global(body.light .dnd-combat .action-card input), :global(body.light .dnd-combat .encounter-start select) { border-color: #908779; background: #fff; color: #211e1a; }
-:global(body.light .dnd-combat .class-resource-strip > span) { border-color: #b8b2a6; background: #fff; }
-:global(body.light .dnd-combat .capability-button-cost) { color: #514b43; }
-:global(body.light .dnd-combat .turn-banner) { border-color: #8ca4b0; background: linear-gradient(135deg, #edf6fa, #fff); }
-:global(body.light .dnd-combat .turn-banner.enemy) { border-color: #c59b9b; background: linear-gradient(135deg, #fff0ef, #fff); }
-:global(body.light .dnd-combat .turn-banner small), :global(body.light .dnd-combat .combat-rules-note), :global(body.light .dnd-combat .preset-description), :global(body.light .dnd-combat .combat-state), :global(body.light .dnd-combat .combat-summary small) { color: #514b43; }
+:global(body.light .dnd-combat .encounter-start select) { border-color: #908779; background: #fff; color: #211e1a; }
+:global(body.light .dnd-combat .combat-rules-note), :global(body.light .dnd-combat .preset-description), :global(body.light .dnd-combat .combat-state), :global(body.light .dnd-combat .combat-summary small) { color: #514b43; }
 :global(body.light .dnd-combat .resolution-log li) { background: #e8eef0; color: #27383e; }
 :global(body.light .dnd-combat .guided-preset) { border-color: #b08a44; background: #fdf5e6; }
 :global(body.light .dnd-combat .guided-preset p), :global(body.light .dnd-combat .guided-preset strong) { color: #3b3226; }
@@ -1630,13 +1810,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, .confirm-card:f
 :global(body.light .dnd-combat .combat-mode-badge.sandbox) { border-color: #8ba7b5; background: #eaf3f7; color: #26414d; }
 @media (max-width: 700px) {
   .dnd-combat { gap: 10px; margin-inline: 0; padding: 10px; border-radius: 12px; }
-  .combat-summary { display: flex; gap: 7px; padding-bottom: 3px; overflow-x: auto; scroll-snap-type: x proximity; }
-  .combat-summary > span { flex: 0 0 134px; scroll-snap-align: start; }
-  .combat-actions { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x proximity; }
-  .action-card { flex: 0 0 min(82vw, 280px); scroll-snap-align: start; }
   .combat-header, .decision-card, .confirm-card { align-items: stretch; flex-direction: column; }
-  .turn-banner { align-items: flex-start; flex-direction: column; }
-  .turn-banner > span { text-align: left; }
   .party-readiness header { align-items: flex-start; flex-direction: column; }
   .story-bridge, .guided-preset { padding: 10px; }
 }

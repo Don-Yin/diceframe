@@ -47,14 +47,16 @@ test('paladin can cast Divine Smite after a hit using the free use and then a sl
     await page.goto(`/#/play?game=${encodeURIComponent(gameKey)}`)
     await page.locator('[data-testid=dnd5e-campaign-tool]:visible').click()
     await page.locator('.dnd-toolbox-dialog').getByRole('button', { name: '战斗工具', exact: true }).click()
+    await page.locator('[data-tile="spell"]').click()
     const spellCard = page.getByTestId('combat-spell-card')
     await expect(spellCard).toContainText('至圣斩')
     await expect(spellCard).toContainText('命中后可用')
 
     async function hit() {
       for (let attempt = 0; attempt < 5; attempt++) {
+        await page.locator('[data-tile="attack"]').click()
         await page.getByRole('combobox', { name: '武器', exact: true }).selectOption('item:longsword')
-        await page.locator('.action-card').filter({ has: page.getByRole('heading', { name: /动作.*攻击/ }) }).getByRole('button', { name: '攻击', exact: true }).click()
+        await page.locator('.dock-confirm').click()
         const finished = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/intents') && response.request().method() === 'POST', { timeout: 10_000 })
         await page.locator('.confirm-card .combat-primary').click()
         const result = await (await finished).json()
@@ -67,7 +69,7 @@ test('paladin can cast Divine Smite after a hit using the free use and then a sl
     }
     async function cast(slot: number) {
       await spellCard.getByRole('combobox', { name: '法术位', exact: true }).selectOption(String(slot))
-      await spellCard.getByRole('button', { name: '施放法术', exact: true }).click()
+      await page.locator('.dock-confirm').click()
       await page.locator('.confirm-card .combat-primary').click()
       await expect(page.locator('.decision-card')).toHaveCount(0)
     }
