@@ -1,6 +1,6 @@
 # 切片 P7 任务书：Counterspell（施法反应窗口：打断施法）
 
-版本：v1（2026-10-29）
+版本：v1.1（2026-10-30）
 执行侧须知：本任务书是唯一需求来源。只参考本任务书列出的源文件；不要读取 `docs/internal/` 下其他计划文档。仓库根的 `AGENTS.md` 与 `docs/ENGINEERING_RULES.md` 自动适用。
 依赖声明：本切片在 P1、P5、P2、P3、P4、P6、P8 之后执行。P2 提供 `condition_flags`（auto_fail_saves）与豁免事件形态；P6/P8 已扩展 `SPELL_MODES` 与 `_validate_spell`。前置切片合入后本任务书引用的行号会偏移，描述以语义位置为准。
 
@@ -137,6 +137,22 @@ elif intent_type == "cast_spell":
 - 新文件 `tests/rulesets/test_dnd2024_counterspell.py`：施法者照 paladin_sheet 先例构造 `class:wizard` + `equipment_package:wizard_a`，`class_spell_choices` 覆盖 fire bolt（戏法）/ misty_step（附赠动作）等，等级推到 3-5 级；敌方用 `goblin()` 基础上加 `"counterspell_dc": 15`。测试矩阵见 §4。
 - 回归：`test_dnd2024_combat.py`、`test_dnd2024_spells.py`、`test_dnd2024_smite.py`、`test_dnd2024_uncanny_dodge.py`、`test_dnd2024_monk_combat.py`、`test_dnd2024_invisibility.py`、`test_dnd2024_hold_person.py`、`test_dnd2024_misty_step.py`、`test_dnd2024_dispel_magic.py` 及 P3/P4/P5 产物测试文件全部通过（`test_dnd2024_character_builder.py` 上游豁免失败不计）。
 
+### 3.7 `src/rulesets/dnd2024/combat/reducer.py`（v1.1 裁决追加）
+
+忽略事件集追加**一项** `"dnd2024.spell.countered"`——纯审计事件，reducer 不改任何状态：
+
+```python
+if event_type in {
+    "intent.submitted", "check.resolved", "dnd2024.spell.cast",
+    "dnd2024.combat.message", "dnd2024.spell.countered",
+}:
+    return
+```
+
+允许范围**仅此一处**：不改任何其它事件类型的处理、不新增任何状态写入（无计数器/标记/conditions/economy 变更）、不动 unknown-type 的 fail-closed 抛错（`unsupported event type`）、不改 `src/rulesets/events.py` 的 `apply_event_batch` / `validate_batch`。
+
+裁决理由（2026-10-30，审核端）：忽略集合是审计事件的既有注册机制（`spell.cast` 本身就是纯审计先例，机械效果全靠其它事件承载）；该事件不进忽略集则 `EventBatchError` 整批拒绝（矩阵 #5 无法交付），并入 `spell.cast` 违反 §1.1#1、并入 `check.resolved` 违反矩阵 #5 的独立事件要求。可观测性已核实：进忽略集后事件在 `apply_batch` 返回的 `event_batch`（`deepcopy(batch)`）、事件 ledger（`next_ledger.append(deepcopy(batch))`）与 AI 叙述者上下文（`latest_event_batch` 读原始 ledger 批次）中完整可见且持久；玩家侧 `recent_combat_events` 的 `meaningful` 白名单未含该类型，静默跳过不报错——展示层滞后照 P2/P8 先例记入执行报告遗留，不阻塞。
+
 ## 4. 测试矩阵
 
 | # | 场景 | 断言 |
@@ -187,7 +203,7 @@ elif intent_type == "cast_spell":
 3. 既有前端/投影对 `dnd2024.spell.countered` 事件或 check 事件的 `counterspell` 键无法容忍；
 4. `cast_intent` 深拷贝在决策持久化/reducer 路径中被突变或丢失，导致重放失败；
 5. 反应预算重置时机（`turn.advanced`）与窗口假设冲突（如敌人回合边界反制预算异常）；
-6. 任何白名单外文件必须修改才能通过验收。
+6. 任何白名单外文件必须修改才能通过验收。（2026-10-30 裁决例外：`reducer.py` 忽略集合追加 `dnd2024.spell.countered` 已授权并升 v1.1 写入 §3.7——纯审计事件走既有注册机制，不构成白名单突破先例；除此之外本条不变。）
 
 ## 8. 执行报告模板
 
@@ -196,3 +212,65 @@ elif intent_type == "cast_spell":
 ## 9. 修订记录
 
 - v1（2026-10-29）：初版。
+- v1.1（2026-10-30）：审核端裁决——§3 白名单追加 `reducer.py`（§3.7：忽略集合加 `dnd2024.spell.countered`，纯审计不改状态），§7.6 记录例外。触发原因：矩阵 #5 的审计事件在 reducer 无处理会触发 `EventBatchError` 整批拒绝，不发事件违反矩阵 #5、并入 `spell.cast`/`check.resolved` 违反 §1.1#1 与独立事件要求。可观测性结论：事件在返回批次、事件 ledger、叙述者上下文完整可见；玩家侧 combat feed 白名单滞后为展示层遗留。
+
+## 10. 执行报告（2026-10-30）
+
+### 10.1 变更文件清单
+
+生产代码（6 个文件，均在 §3 白名单内；`reducer.py` 为 §3.7 v1.1 授权）：
+
+- `src/rulesets/dnd2024/combat/reaction_spells.py`：导入 `enemy_actor`；新增 `COUNTER_SPELL_DECISION = "counter_spell"`；新增 `_counter_spell_window`（L271-314，触发条件：非 `triggered_damage`/`reaction_defense`、有 V/S/M 任一成分、hp>0 且 `counterspell_dc>0` 且有反应且 60 尺内的敌人，多个按 actor_id 排序取第一）与 `_finish_counter_spell`（L316-379，cleared → 可选 `reaction.spent` → con 豁免 → 成功重放 / 失败 `action.spent` + `spell.countered`）。既有 HIT_REACTION 路径未动。
+- `src/rulesets/dnd2024/combat/engine.py`：仅 `cast_spell` 分支（L643-648）先探测窗口，命中则只发 `dnd2024.decision.pending`，否则照旧 `_spell_events`。
+- `src/rulesets/dnd2024/combat/validation.py`：敌人档案数值循环加 `("counterspell_dc", 0, 30)`、缺省 0；挂起阻塞新增 COUNTER 条款（只放行 `decision.resolve` / `combat.message`）。敌人施法拒绝（L411-412）未动。
+- `src/rulesets/dnd2024/combat/resolution.py`：combat.start 敌人入态写入 `counterspell_dc`（缺省 0，L95）；`_decision_events` 增加 COUNTER 分支（L1179-1180）。movement / 借机攻击恢复路径未动。
+- `src/rulesets/dnd2024/combat/view.py`：敌人 actor view 暴露 `counterspell_dc`（L85），供 `_finish_counter_spell` 读取 DC。
+- `src/rulesets/dnd2024/combat/reducer.py`：仅忽略集合追加 `dnd2024.spell.countered`（L33）。未改其它事件分支、未新增任何状态写入、unknown-type 的 `unsupported event type` fail-closed 抛错未动。
+
+测试（1 个新文件）：`tests/rulesets/test_dnd2024_counterspell.py`（13 个用例，覆盖 §4 矩阵 #1-#13）。
+
+文档：本任务书 v1.1（§3.7 / §7.6 / §9）与本节。
+
+未改动：`src/rulesets/events.py`、`src/rulesets/dnd2024/runtime.py`、`src/rulesets/dnd2024/combat/catalog.py`、`check_modes.py`。
+
+### 10.2 测试矩阵结果（13/13 通过）
+
+| # | 结果 | 关键断言 |
+|---|---|---|
+| 1 | 通过 | `counterspell_dc` 为 bool / -1 / 31 时 combat.start 拒绝且错误含 `counterspell_dc`；缺省档案合法 |
+| 2 | 通过 | 批内除固定 `intent.submitted` 外唯一 `decision.pending`（kind=counter_spell、assigned_to=GM、options=[counter,decline]、threat_actor_ids=[enemy:goblin-1]、cast_intent 为服务端深拷贝且保留原 expected_version）；无 action/slot/spell.cast；apply 后 slots 与 economy 不变、pending_decisions 含该决策 |
+| 3 | 通过 | pending 期间 move / attack / 第二个 cast_spell 均以 `resolve the counter spell decision first` 拒绝；decision.resolve 与 combat.message 放行 |
+| 4 | 通过 | decline 事件序 cleared → action.spent → spell.cast → check.resolved(spell_attack) → resource.changed；伤害落地；pending 清空 |
+| 5 | 通过 | 事件序恰为 cleared → reaction.spent(goblin, reason=counterspell) → check.resolved(con、success=False、counterspell=True) → action.spent(wizard, action) → spell.countered；无 spell.cast / slot_spent / 伤害；slots 不变；goblin 反应归零 |
+| 6 | 通过 | 豁免成功 → fire bolt 完整结算（cost、spell.cast、spell_attack、伤害）；slots 不变（戏法） |
+| 7 | 通过 | bless 的 d4 进入反制豁免（骰序 d20 → d4，`bless_bonus=2`）；原始批次无 `concentration.ended`，`blessed` 保留 |
+| 8 | 通过 | misty_step 被反制时 `action.spent` 的 resource=bonus_action、无 slot_spent、无 position.changed、slots 不变 |
+| 9 | 通过 | 位置 100（>60 尺）/ 反应耗尽 / dc=0 三种情况均无 decision.pending，法术直接结算 |
+| 10 | 通过 | blur 专注中施 fire bolt 被反制：无 concentration.ended，`blurred` 保留 |
+| 11 | 通过 | `_counter_spell_window` 对 `spell:divine_smite`（triggered_damage）与 `spell:shield`（reaction_defense）均返回 None；同场景普通法术返回非 None（见 10.3 偏差 1） |
+| 12 | 通过 | 敌人为当前行动者时 GM 提交其 cast_spell 仍报 `enemy spell profiles are not enabled for this actor` |
+| 13 | 条件性通过 | `srd_spells` 的 339 条法术全部声明成分（spell catalog 装载即拒绝空 `components`，见 `src/rulesets/dnd2024/spells/catalog.py`），因此无成分过滤分支当前不可达；测试改为断言"全部法术有成分"，不开不可测的伪造目录 |
+
+### 10.3 与任务书 §3 语义的偏差
+
+1. **#11 采用窗口级验证**：直接调用 `_counter_spell_window`，未构造 smite / shield 的完整施法批次。原因：shield 只作为 `reaction_defense` 受击反应的产物、divine_smite 需在 `melee_hit` 挂起内提交，完整批次会把测试耦合进 P3/P6 既有链路；二者在窗口判定首个 mode 分支即返回 None，语义等价。实现本身无偏差。
+2. **#13 分支不可达**（如 10.2 所述），未写入死代码。
+3. **单威胁简化**：多个满足条件的威胁按 actor_id 排序取第一（§1.1 边界 6 已声明）。
+4. **挂起无超时**（§1.2 裁剪已声明）。
+5. **玩家侧 counterspell 未落**：`spell_effects` 无玩家侧反制条目，本切片只覆盖"敌人反制玩家施法"。玩家反向接入需要敌人具备可被反制的施法档案；当前 `_validate_spell` 对非 player/companion 仍 fail-closed，属后续切片。
+6. **豁免细节**：使用施法者 `saving_throws["con"]`（含熟练加值），与 P2 saving_throw 分支同构；`auto_fail_saves` 命中 con 时不掷骰（`rolls=[]`、`natural=0`、`total=0`、`auto_failed=True`）。
+
+### 10.4 遗留问题（不属本切片，未修）
+
+1. `src/rulesets/dnd2024/runtime.py`：
+   - `recent_combat_events` 的 `meaningful` 白名单未包含 `dnd2024.spell.countered`：玩家侧 combat feed 静默跳过该审计事件（不报错）；
+   - 同处 `check.resolved` 白名单仍缺 `ability` 键（P8 已登记）：反制豁免的 `con` 属性名在玩家投影中被剥离。
+   三处权威可见性（`apply_batch` 返回批次、事件 ledger、叙述者上下文）完整，属展示层决策，按裁决未改 `runtime.py`。
+2. `counterspell_dc` 只接入 `combat.start` 临时遭遇（含预设展开后的敌人档案）；内容目录/旧存档若未带该字段一律按 0（不可反制）。
+3. 敌人无通用施法档案，敌我双向反制循环尚不可玩。
+
+### 10.5 验收结果
+
+- 新测试：`13 passed`。
+- §5 回归子集（9 个文件）：`152 passed`；补 `scorching_ray / false_life / stoneskin` 后回归合计 `188 passed`，与改动前基线一致。
+- 全量：`603 passed, 39 deselected, 0 failed`（`--deselect tests/rulesets/test_dnd2024_character_builder.py`，28:17）；590 基线 + 13 新用例。
