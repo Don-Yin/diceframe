@@ -54,7 +54,7 @@ const struck = computed(() => (props.floaters || []).some(
       v-for="item in floaters"
       :key="item.key"
       :class="['floater', item.kind]"
-      :style="{ animationDelay: `${item.delay}s` }"
+      :style="{ animationDelay: `${item.delay}s`, '--slot': item.slot }"
       aria-hidden="true"
     >{{ item.text }}</span>
     <button
@@ -88,7 +88,7 @@ const struck = computed(() => (props.floaters || []).some(
 .token-hit:hover { background: rgb(255 255 255 / 7%); }
 .token-hit:focus-visible { outline: 3px solid #e4b75e; outline-offset: 2px; }
 .battle-token.struck { animation: token-shake .38s ease-out; }
-.floater { position: absolute; top: 30px; left: 50%; z-index: 3; padding: 1px 8px; border-radius: 999px; background: rgb(8 13 20 / 82%); font: 800 20px/1.2 Georgia, serif; white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(-50%, 0); animation: floater-rise 1.5s cubic-bezier(.2, .7, .3, 1) both; text-shadow: 0 2px 0 rgb(0 0 0 / 70%); }
+.floater { position: absolute; top: calc(30px + var(--slot, 0) * 24px); left: 50%; z-index: 3; padding: 1px 8px; border-radius: 999px; background: rgb(8 13 20 / 82%); font: 800 20px/1.2 Georgia, serif; white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(-50%, 0); animation: floater-rise 1.5s cubic-bezier(.2, .7, .3, 1) both; text-shadow: 0 2px 0 rgb(0 0 0 / 70%); }
 .floater.damage { color: #ff6b6b; }
 .floater.crit { color: #ffd166; font-size: 26px; text-shadow: 0 0 10px rgb(255 160 40 / 80%), 0 2px 0 rgb(0 0 0 / 70%); }
 .floater.heal { color: #7fe29a; }

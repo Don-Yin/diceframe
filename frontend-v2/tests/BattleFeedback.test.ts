@@ -47,6 +47,7 @@ describe('combat HUD feedback floaters', () => {
     expect(result.map(item => item.text)).toEqual(['Failed', '-5', 'cond:prone'])
     // Several results on one unit appear one after another, not on top of each other.
     expect(result.map(item => item.delay)).toEqual([0, 0.32, 0.64])
+    expect(result.map(item => item.slot)).toEqual([0, 1, 2])
   })
 
   it('shows healing and blocked healing, and ignores other events and resources', () => {

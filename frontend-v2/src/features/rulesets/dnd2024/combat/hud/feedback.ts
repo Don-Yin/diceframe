@@ -10,6 +10,8 @@ export interface Floater {
   text: string
   /** Seconds before it appears, so several results on one unit read in order. */
   delay: number
+  /** Position among this unit's results; later ones start lower so they don't overlap. */
+  slot: number
 }
 
 export interface FeedbackLabels {
@@ -37,7 +39,7 @@ export function floatersFromEvents(
     if (!targetId) return
     const seen = perTarget.get(targetId) ?? 0
     perTarget.set(targetId, seen + 1)
-    out.push({ key: `${batch}:${out.length}`, targetId, kind, text, delay: seen * STEP })
+    out.push({ key: `${batch}:${out.length}`, targetId, kind, text, delay: seen * STEP, slot: seen })
   }
 
   // A hit is announced by the damage that follows; only say "hit" when none does.
