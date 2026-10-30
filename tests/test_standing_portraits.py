@@ -69,6 +69,9 @@ def test_upload_rejects_oversize_undersize_and_opaque_formats(tmp_path: Path):
     rejected = save_standing_portrait_upload(tmp_path, _b64(jpeg.getvalue()), "x.jpg")
     assert rejected["ok"] is False and "PNG 或 WebP" in rejected["error"]
 
+    assert save_standing_portrait_upload(tmp_path, ["not-base64"])["ok"] is False
+    assert save_standing_portrait_upload(tmp_path, _b64(_png_bytes((64, 128))), {"name": "x.png"})["ok"] is False
+
 
 def test_reference_validation_fails_closed(tmp_path: Path):
     service = StandingPortraitService(tmp_path)
@@ -98,3 +101,12 @@ def test_service_delete_roundtrip(tmp_path: Path):
     assert service.delete(asset_id)["ok"] is True
     assert service.file(asset_id) is None
     assert service.delete(asset_id)["ok"] is False
+
+
+def test_service_delete_refuses_referenced_asset(tmp_path: Path):
+    service = StandingPortraitService(tmp_path, is_referenced=lambda asset_id: True)
+    saved = service.save_upload(_b64(_png_bytes((200, 500))))
+    asset_id = saved["standing_portrait"]["asset_id"]
+    result = service.delete(asset_id)
+    assert result["ok"] is False and "角色引用" in result["error"]
+    assert service.file(asset_id) is not None

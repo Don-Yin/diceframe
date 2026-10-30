@@ -56,13 +56,15 @@ def _normalized_standing_portrait(raw: bytes) -> bytes:
 def save_standing_portrait_upload(
     portraits_dir: Path | None, file_data: str, file_name: str = "",
 ) -> dict[str, Any]:
+    if not isinstance(file_data, str) or not isinstance(file_name, str):
+        return {"ok": False, "error": "立绘文件数据无效"}
     if not file_data:
         return {"ok": False, "error": "未提供立绘文件"}
     if len(file_data) > (MAX_UPLOAD_BYTES * 4 // 3) + 32:
         return {"ok": False, "error": "立绘文件不能超过 8 MB"}
     try:
         raw = base64.b64decode(file_data, validate=True)
-    except (ValueError, binascii.Error):
+    except (TypeError, ValueError, binascii.Error):
         return {"ok": False, "error": "立绘文件数据无效"}
     if not raw or len(raw) > MAX_UPLOAD_BYTES:
         return {"ok": False, "error": "立绘文件不能超过 8 MB"}
@@ -118,8 +120,13 @@ def validate_standing_portrait_ref(
 class StandingPortraitService:
     """Content-addressed standing-portrait storage rooted at one directory."""
 
-    def __init__(self, portraits_dir: Path) -> None:
+    def __init__(
+        self,
+        portraits_dir: Path,
+        is_referenced: Callable[[str], bool] | None = None,
+    ) -> None:
         self._portraits_dir = portraits_dir
+        self._is_referenced = is_referenced
 
     def save_upload(self, file_data: str, file_name: str = "") -> dict[str, Any]:
         return save_standing_portrait_upload(self._portraits_dir, file_data, file_name)
@@ -137,6 +144,8 @@ class StandingPortraitService:
         path = self._portraits_dir / f"{asset_id}.webp"
         if not path.is_file():
             return {"ok": False, "error": "立绘不存在"}
+        if self._is_referenced is not None and self._is_referenced(asset_id):
+            return {"ok": False, "error": "立绘仍被角色引用，请先解除绑定"}
         try:
             path.unlink()
         except OSError:

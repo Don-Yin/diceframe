@@ -403,6 +403,7 @@ class WebAPI:
         self._avatars = avatars.AvatarService(self._reg.save_dir.parent / "avatars")
         self._standing_portraits = standing_portraits.StandingPortraitService(
             self._reg.save_dir.parent / "standing-portraits",
+            is_referenced=lambda asset_id: self._standing_portrait_is_referenced(asset_id),
         )
         self._scene_images = scene_images.SceneImageService(
             scene_images.SceneImageDependencies(
@@ -2748,6 +2749,31 @@ class WebAPI:
 
     def delete_standing_portrait(self, asset_id: str) -> dict[str, Any]:
         return self._standing_portraits.delete(asset_id)
+
+    def _standing_portrait_is_referenced(self, asset_id: str) -> bool:
+        """Refuse asset deletion while any persisted/live character uses it."""
+
+        def contains(value: Any) -> bool:
+            if isinstance(value, dict):
+                if (
+                    value.get("kind") == "upload"
+                    and str(value.get("asset_id") or "") == asset_id
+                ):
+                    return True
+                return any(contains(item) for item in value.values())
+            if isinstance(value, list):
+                return any(contains(item) for item in value)
+            return False
+
+        for instance in self._reg.list_all():
+            if contains(getattr(instance, "players", {})) or contains(getattr(instance, "npcs", {})):
+                return True
+        try:
+            cards = character_cards._read_cards(self._character_card_dependencies, strict=True)
+        except Exception:
+            # A failed reference scan must not make a referenced asset deletable.
+            return True
+        return contains(cards)
 
     def _voice_profile_exists(self, voice_id: str) -> bool:
         """True when the personal voice profile still exists (GAL P8)."""

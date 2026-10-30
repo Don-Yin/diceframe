@@ -60,10 +60,14 @@ async def test_npc_standing_portrait_and_expressions_roundtrip(web_api):
     assert projected["standing_portrait"] == ref
     assert projected["standing_portrait_expressions"]["smile"] == ref
 
+    blocked = api.delete_standing_portrait(ref["asset_id"])
+    assert blocked["ok"] is False and "角色引用" in blocked["error"]
+
     cleared = await api.update_npc_standing_portrait(game_key, "heroine", None, None)
     assert cleared["ok"] is True
     assert "standing_portrait" not in inst.npcs["heroine"]
     assert "standing_portrait_expressions" not in inst.npcs["heroine"]
+    assert api.delete_standing_portrait(ref["asset_id"])["ok"] is True
 
 
 @pytest.mark.asyncio
