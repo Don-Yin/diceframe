@@ -447,6 +447,15 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 - 体验收口验证：场合 B（战斗外 revivify）→ 玩家自助闭环；场合 C（家族空响）→ 显式拒绝 + 不扣位 + 可读消息，`spell.narrative` 兜底对复活家族不再可达。
 - 遗留（不阻塞，任务书 §8.5 登记）：raise_dead / resurrection 待 SP10 D20 聚合与长休衰减钩子；reincarnate 待角色重建；true_resurrection 唤名永久 GM 通道；死亡时刻 / 死因 / 遗体状态维持 GM 叙事裁定（无 canonical 字段，既定口径）。
 
+### P1–P9 / R1 提交后修复记录（2026-10-30）
+
+- 依据：`docs/internal/design/P1_P9_R1_POST_REVIEW_REMEDIATION_TASK_SPEC_2026-10-30.md`（v1.0，执行模型 dsv4.1f）；不新增法术切片，不重排 1C。
+- 修复 A（反应资格与 Counterspell）：人类 GM 的 `counter_spell` pending 不再被自动 `decline`，`available_intents` 允许 assigned GM（即使非当前行动者）处理决策；Counterspell 开窗/最终结算与借机攻击统一复查 HP>0、反应可用、非失能、非 `reaction_blocked`；前端补 counter 入口。
+- 修复 B（Self 与施法契约）：catalog 支持可选 `target_scope: "self"` 并对非法值 fail closed，`false_life` / `misty_step` 声明 Self，validation 统一替代 teleport 特判；`view.py` 投影 `target_side` / `target_count` / `upcast_target_count` / `repeat_targets` / `resist_choice` / target `is_dead`；前端改为投影驱动目标与参数（多目标、resist、teleport、Revivify 仅 dead 盟友）；P2P `ruleset.intent` 白名单新增 `resist_type` / `teleport_distance`。
+- 修复 C（探索资格与死亡豁免）：`exploration/engine.py` 建立并共用施法资格（HP>0、非 dead、非失能），`available_intents` 与 `_validate` 同步；`combat/reducer.py` 在临时 HP 吸收前保存原始伤害事实，0 HP 全吸收仍 +1 失败、重击 +2；P4 任务书已追加 §10.6 勘误。
+- 验收：后端定向 87 passed；全量见任务书 §11 执行报告；前端 86 passed，typecheck / lint / build 通过（环境 npm 11.13.0）。
+- 后置（§8 明确非目标，继续登记）：Counterspell 视觉与视线、复活家族扩展、hosted AI 自动策略、recent combat feed 白名单、全仓库行尾 renormalize 等。
+
 ## 待定决策
 
 | # | 决策点 | 选项 | 当前倾向 |

@@ -389,6 +389,9 @@ class CombatReducerMixin:
         target_id = str(event["target_id"])
         kind, raw_id = _actor_kind(target_id)
         delta = int(event["delta"])
+        # 临时 HP 会在下面被吸收，从而把 delta 改成 0；死亡豁免必须依据
+        # “0 HP 角色是否真的受到伤害”的原始事实，而不是吸收后的剩余伤害。
+        raw_damage = delta
         if kind in {"player", "companion"}:
             character = (
                 snapshot["characters"][raw_id]
@@ -412,7 +415,7 @@ class CombatReducerMixin:
                 # 昏迷即失能：狂暴立即结束。
                 conditions.pop("rage", None)
                 death = conditions.setdefault("death_saves", {"successes": 0, "failures": 0})
-                if before == 0 and delta < 0:
+                if before == 0 and raw_damage < 0:
                     death["failures"] = min(
                         3, int(death.get("failures", 0)) + (2 if event.get("critical") else 1)
                     )

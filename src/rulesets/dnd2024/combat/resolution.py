@@ -716,21 +716,26 @@ class CombatResolutionMixin:
         actor_id = str(intent["actor_id"])
         distance = int(intent["distance"])
         economy = combat.get("economy") or {}
-        adjacent_hostiles = [
-            target for target in self._hostile_targets(instance, combat, actor_id)
-            if self._distance(combat, actor_id, target["actor_id"]) <= 5
-            and self._distance_after_move(combat, actor_id, target["actor_id"], distance) > 5
-            and int(combat.get("reactions", {}).get(target["actor_id"], 0)) > 0
+        adjacent_hostiles: list[dict[str, Any]] = []
+        for target in self._hostile_targets(instance, combat, actor_id):
+            if self._distance(combat, actor_id, target["actor_id"]) > 5:
+                continue
+            if self._distance_after_move(combat, actor_id, target["actor_id"], distance) <= 5:
+                continue
+            threat = self._actor_view(instance, combat, target["actor_id"])
+            # 借机攻击同样是反应：失能 / 禁反应 / 反应已耗尽 / 倒地的威胁者
+            # 不构成威胁，也不能为一次无法结算的攻击消耗反应。
+            if not self._reaction_eligible(combat, threat):
+                continue
             # 借机攻击必须是近战武器攻击：远程武器的持有者不构成威胁，
             # 也不应为一次无法结算的借机攻击消耗其反应。敌方档案与玩家
             # 装备链都携带 range，缺失 range 的档案按近战处理。
-            and any(
+            if not any(
                 int(attack.get("range") or 0) <= 5
-                for attack in self._available_attacks(
-                    self._actor_view(instance, combat, target["actor_id"])
-                )
-            )
-        ]
+                for attack in self._available_attacks(threat)
+            ):
+                continue
+            adjacent_hostiles.append(target)
         actor = self._actor_view(instance, combat, actor_id)
         disengaged = bool(economy.get("disengaged")) or "disengaged" in actor["conditions"]
         if adjacent_hostiles and not disengaged:
@@ -1195,39 +1200,42 @@ class CombatResolutionMixin:
         if intent["option"] == "resolve":
             threat_id = str(decision["threat_actor_ids"][0])
             threat = self._actor_view(instance, combat, threat_id)
-            attack_intent = {
-                "intent_id": f"{decision['decision_id']}:attack",
-                "actor_id": threat_id,
-                "target_id": str(movement["actor_id"]),
-            }
-            # 借机攻击必须是近战武器攻击：只有射程 5 尺的攻击档案才能
-            # 用作借机攻击（长弓等远程武器不构成威胁）；没有近战档案时
-            # 不发生攻击，也不臆造档案。敌方档案与玩家装备链都带 range。
-            melee_attacks = [
-                attack for attack in self._available_attacks(threat)
-                if int(attack.get("range") or 0) <= 5
-            ]
-            if melee_attacks:
-                if threat["kind"] == "enemy":
-                    attack_intent["attack_id"] = str(melee_attacks[0]["id"])
-                else:
-                    attack_intent["weapon_ref"] = str(melee_attacks[0]["weapon_ref"])
-            else:
-                attack_intent = None
-            if attack_intent is not None:
-                opportunity = self._attack_events(instance, combat, attack_intent, rng)
-                # 借机攻击花的是反应而不是攻击动作：替换支付事件本身，
-                # 而不是列表头部——法术提前终止事件（若有）排在支付之前，
-                # 不能被反应支付覆盖掉。
-                cost_index = next(
-                    index for index, event in enumerate(opportunity)
-                    if event["type"] == "dnd2024.attack.spent"
-                )
-                opportunity[cost_index] = {
-                    "type": "dnd2024.reaction.spent", "actor_id": threat_id,
-                    "reason": "opportunity_attack",
+            # 窗口打开后威胁者可能已经失能 / 禁反应 / 耗尽反应：此时借机
+            # 攻击无法发生，移动照常结算，也不支付反应。
+            if self._reaction_eligible(combat, threat):
+                attack_intent = {
+                    "intent_id": f"{decision['decision_id']}:attack",
+                    "actor_id": threat_id,
+                    "target_id": str(movement["actor_id"]),
                 }
-                events.extend(opportunity)
+                # 借机攻击必须是近战武器攻击：只有射程 5 尺的攻击档案才能
+                # 用作借机攻击（长弓等远程武器不构成威胁）；没有近战档案时
+                # 不发生攻击，也不臆造档案。敌方档案与玩家装备链都带 range。
+                melee_attacks = [
+                    attack for attack in self._available_attacks(threat)
+                    if int(attack.get("range") or 0) <= 5
+                ]
+                if melee_attacks:
+                    if threat["kind"] == "enemy":
+                        attack_intent["attack_id"] = str(melee_attacks[0]["id"])
+                    else:
+                        attack_intent["weapon_ref"] = str(melee_attacks[0]["weapon_ref"])
+                else:
+                    attack_intent = None
+                if attack_intent is not None:
+                    opportunity = self._attack_events(instance, combat, attack_intent, rng)
+                    # 借机攻击花的是反应而不是攻击动作：替换支付事件本身，
+                    # 而不是列表头部——法术提前终止事件（若有）排在支付之前，
+                    # 不能被反应支付覆盖掉。
+                    cost_index = next(
+                        index for index, event in enumerate(opportunity)
+                        if event["type"] == "dnd2024.attack.spent"
+                    )
+                    opportunity[cost_index] = {
+                        "type": "dnd2024.reaction.spent", "actor_id": threat_id,
+                        "reason": "opportunity_attack",
+                    }
+                    events.extend(opportunity)
         events.append({
             "type": "dnd2024.position.changed", "actor_id": movement["actor_id"],
             "distance": int(movement["distance"]),

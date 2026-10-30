@@ -68,6 +68,13 @@ class Dnd2024CombatCatalog:
                 raise CombatCatalogError(f"combat spell is not in the spell catalog: {spell_id}")
             if effect.get("mode") not in SPELL_MODES:
                 raise CombatCatalogError(f"combat spell mode is invalid: {spell_id}")
+            # 本批只支持缺省与 self；其它作用域属于未来语义，加载即拒绝，
+            # 避免未实现的声明在前端伪装成合法约束。
+            target_scope = effect.get("target_scope")
+            if target_scope is not None and target_scope != "self":
+                raise CombatCatalogError(
+                    f"combat spell target scope is invalid: {spell_id}"
+                )
             for dice_field in ("damage", "healing", "upcast_damage", "upcast_healing", "extra_damage"):
                 dice = effect.get(dice_field)
                 if dice is not None and not DICE_RE.fullmatch(str(dice)):

@@ -40,7 +40,11 @@ from .resolution import CombatResolutionMixin
 from .validation import CombatValidationMixin
 from .view import CombatViewMixin
 from .triggered_spells import CombatTriggeredSpellsMixin, HIT_SPELL_DECISION, hit_spell_decision
-from .reaction_spells import CombatReactionSpellsMixin, HIT_REACTION_DECISION
+from .reaction_spells import (
+    COUNTER_SPELL_DECISION,
+    CombatReactionSpellsMixin,
+    HIT_REACTION_DECISION,
+)
 
 
 @dataclass(slots=True)
@@ -181,6 +185,19 @@ class Dnd2024CombatEngine(
                 "type": "decision.resolve", "label": "Reaction spell",
                 "expected_version": version, "decisions": deepcopy(reactions),
             }]
+        if actor_id == gm_uid:
+            # 反制/机会攻击等决策指派给 GM，可能出现在非自身回合（例如
+            # 敌方回合触发反制窗口）。不能因“不是当前玩家”而对真实 GM 隐藏。
+            gm_pending = [
+                item for item in combat.get("pending_decisions", [])
+                if item.get("assigned_to") == actor_id
+                and item.get("kind") not in {HIT_SPELL_DECISION, HIT_REACTION_DECISION}
+            ]
+            if gm_pending:
+                return [*communication, {
+                    "type": "decision.resolve", "label": "Resolve reaction",
+                    "expected_version": version, "decisions": deepcopy(gm_pending),
+                }]
         if current.startswith("enemy:"):
             return communication
         requested = _player_actor(actor_id)
@@ -305,6 +322,10 @@ class Dnd2024CombatEngine(
                 return self._automatic_hit_spell(instance, combat, decision, version)
             if decision.get("kind") == HIT_REACTION_DECISION:
                 return self._automatic_hit_reaction(instance, combat, decision, version)
+            if decision.get("kind") == COUNTER_SPELL_DECISION:
+                # 反制是 GM 的人类判断，服务器不代选；窗口保持 pending，
+                # 直到指派对象显式提交 counter / decline。
+                return None
             threats = [str(item) for item in decision.get("threat_actor_ids") or []]
             option = (
                 "resolve"
