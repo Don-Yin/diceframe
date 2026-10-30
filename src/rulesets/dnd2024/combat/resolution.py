@@ -633,6 +633,15 @@ class CombatResolutionMixin:
                     "source_actor_id": actor_id,
                 })
                 succeeded = True
+            elif mode == "revive":
+                # 复活不是治疗：不经过 healing 管线、不发 resource.changed。
+                # 状态语义（hp=1、清 dead/unconscious/stable/death_saves）由
+                # reducer 的 character.revived 处理器承载，这里只发事件。
+                events.append({
+                    "type": "dnd2024.character.revived",
+                    "actor_id": target_id, "hp": 1,
+                })
+                succeeded = True
             elif mode in {"buff", "debuff"}:
                 succeeded = True
             condition = str(effect.get("condition") or "")

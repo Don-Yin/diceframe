@@ -467,10 +467,17 @@ class CombatValidationMixin:
             target = self._actor_view(instance, combat, target_id)
             actor_side = str(actor.get("side") or "")
             target_side = str(target.get("side") or "")
-            if effect["mode"] in {"healing", "buff", "stabilize", "temp_hp", "teleport"}:
+            if effect["mode"] in {
+                "healing", "buff", "stabilize", "temp_hp", "teleport", "revive",
+            }:
                 if target_side != actor_side:
                     raise CombatIntentError("healing and beneficial spells require an allied target")
-                if "dead" in target.get("conditions", {}):
+                if effect["mode"] == "revive":
+                    if target["kind"] != "player":
+                        raise CombatIntentError("revive spells target players only")
+                    if "dead" not in target.get("conditions", {}):
+                        raise CombatIntentError("revive spells require a dead target")
+                elif "dead" in target.get("conditions", {}):
                     raise CombatIntentError("dead targets require a resurrection effect")
             elif target_side == actor_side and effect["mode"] != "dispel":
                 raise CombatIntentError("offensive spells require a hostile target")
@@ -485,7 +492,9 @@ class CombatValidationMixin:
                 or "stable" in target.get("conditions", {})
             ):
                 raise CombatIntentError("this spell requires a dying ally at 0 HP")
-            if target["hp"] <= 0 and effect["mode"] not in {"healing", "buff", "stabilize", "dispel"}:
+            if target["hp"] <= 0 and effect["mode"] not in {
+                "healing", "buff", "stabilize", "dispel", "revive",
+            }:
                 raise CombatIntentError("spell target is not active")
             allowed_types = effect.get("target_creature_types")
             if allowed_types and str(target.get("creature_type") or "") not in allowed_types:
