@@ -32,6 +32,9 @@ import type {
 import { useLocale } from '@/composables/useLocale'
 import CombatLiveBar from '@/components/play/CombatLiveBar.vue'
 import Modal from '@/components/ui/Modal.vue'
+import Battlefield from './hud/Battlefield.vue'
+import { buildBattleTokens } from './hud/battleView'
+import type { BattlefieldLabels } from './hud/labels'
 import SpellAvailability from './SpellAvailability.vue'
 import { spellCopy } from './spellCopy'
 
@@ -359,20 +362,6 @@ const waitingText = computed(() => {
   if (current === `player:${props.actorId}`) return copy.value.waiting
   return `${copy.value.waitingForTeammate}：${targetName(current)}`
 })
-const trackMin = computed(() => {
-  const positions = combat.value?.actors.map(actor => Number(actor.position || 0)) || [0]
-  const movement = Number(moveAction.value?.movement_remaining || 0)
-  return Math.floor((Math.min(0, ...positions) - movement) / 5) * 5
-})
-const trackMax = computed(() => {
-  const positions = combat.value?.actors.map(actor => Number(actor.position || 0)) || [0]
-  const movement = Number(moveAction.value?.movement_remaining || 0)
-  return Math.ceil((Math.max(30, ...positions) + movement) / 5) * 5
-})
-const trackTicks = computed(() => Array.from(
-  { length: Math.max(1, (trackMax.value - trackMin.value) / 5 + 1) },
-  (_, index) => trackMin.value + index * 5,
-))
 const selectedDestination = computed(() => (
   currentActor.value ? Number(currentActor.value.position || 0) + Number(movementDistance.value || 0) : null
 ))
@@ -418,29 +407,36 @@ function chooseTrackPosition(position: number): void {
   movementDistance.value = position - Number(currentActor.value.position || 0)
 }
 
-const trackLaneCount = computed(() => {
-  const positions = combat.value?.actors.map(actor => Number(actor.position || 0)) || []
-  const counts = new Map<number, number>()
-  positions.forEach(position => counts.set(position, (counts.get(position) || 0) + 1))
-  return Math.max(1, ...counts.values())
+const battleTokens = computed(() => buildBattleTokens(
+  combat.value?.actors || [],
+  String(combat.value?.current_actor_id || ''),
+  props.actorId,
+))
+// Units the current intent can legally aim at; the server lists them per action.
+const targetableIds = computed(() => {
+  const ids = new Set<string>()
+  const lists = [
+    attackAction.value?.targets, spellAction.value?.targets,
+    capabilityTargets.value, explorationAction.value?.targets,
+  ]
+  for (const list of lists) for (const item of list || []) ids.add(item.actor_id)
+  return [...ids]
 })
-const trackCanvasStyle = computed(() => ({
-  minWidth: `${Math.max(1, trackTicks.value.length) * 34}px`,
-  paddingTop: `${16 + trackLaneCount.value * 30}px`,
+const battlefieldLabels = computed<BattlefieldLabels>(() => ({
+  hp: copy.value.hp,
+  feet: copy.value.feet,
+  position: copy.value.position,
+  condition: localizedTerm,
+  selectTarget: name => `${copy.value.target}: ${name}`,
 }))
 
-function tokenTrackStyle(position: number, index: number): Record<string, string> {
-  const numericPosition = Number(position || 0)
-  const tickIndex = Math.max(0, Math.min(
-    trackTicks.value.length - 1,
-    Math.round((numericPosition - trackMin.value) / 5),
-  ))
-  const earlierActors = combat.value?.actors.slice(0, index) || []
-  const lane = earlierActors.filter(actor => Number(actor.position || 0) === numericPosition).length
-  return {
-    left: `${(tickIndex + 0.5) / Math.max(1, trackTicks.value.length) * 100}%`,
-    top: `${8 + lane * 30}px`,
-  }
+// Clicking a unit aims every action that can legally reach it, so the choice
+// carries over when the player switches between attack, spell and ability.
+function pickBattleTarget(actorId: string): void {
+  if (attackAction.value?.targets?.some(item => item.actor_id === actorId)) selectedTargetId.value = actorId
+  if (targetsFor(selectedSpell.value).some(item => item.actor_id === actorId)) selectedSpellTargetId.value = actorId
+  if (capabilityTargets.value.some(item => item.actor_id === actorId)) capabilityTargetId.value = actorId
+  if (explorationAction.value?.targets?.some(item => item.actor_id === actorId)) explorationTargetId.value = actorId
 }
 
 function localizedTerm(value: unknown): string {
@@ -1298,49 +1294,21 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
           </li>
         </ol>
 
-        <section class="tactical-track" :aria-label="copy.tacticalTrack">
-          <header><strong>{{ copy.tacticalTrack }}</strong><span>{{ copy.chooseDestination }}</span></header>
-          <div class="track-surface">
-            <div class="track-canvas" :style="trackCanvasStyle">
-              <span
-                v-for="(actor, index) in combat.actors"
-                :key="`track-${actor.actor_id}`"
-                :class="['track-token', actor.kind, { current: actor.actor_id === combat.current_actor_id }]"
-                :style="tokenTrackStyle(actor.position, index)"
-                :title="`${actor.name} · ${actor.position} ${copy.feet}`"
-              >{{ actor.name.slice(0, 2) }}</span>
-              <div class="track-cells" :style="{ gridTemplateColumns: `repeat(${trackTicks.length}, minmax(34px, 1fr))` }">
-                <button
-                  v-for="position in trackTicks"
-                  :key="position"
-                  type="button"
-                  :class="{ reachable: canReachPosition(position), selected: selectedDestination === position }"
-                  :disabled="!canReachPosition(position)"
-                  :aria-label="`${copy.position} ${position} ${copy.feet}`"
-                  @click="chooseTrackPosition(position)"
-                ><span>{{ position }}</span></button>
-              </div>
-            </div>
-          </div>
+        <section class="battlefield" :aria-label="copy.tacticalTrack">
+          <Battlefield
+            :position-mode="combat.position_mode"
+            :tokens="battleTokens"
+            :movement-remaining="Number(moveAction?.movement_remaining || 0)"
+            :target-id="selectedTargetId"
+            :selectable-ids="targetableIds"
+            :selected-destination="selectedDestination"
+            :can-reach="canReachPosition"
+            :labels="battlefieldLabels"
+            @select-token="pickBattleTarget"
+            @choose-position="chooseTrackPosition"
+          />
+          <p class="battlefield-hint">{{ copy.chooseDestination }}</p>
         </section>
-
-        <div class="actor-grid">
-          <article v-for="actor in combat.actors" :key="actor.actor_id" :class="['actor-card', actor.kind, { current: actor.actor_id === combat.current_actor_id, defeated: actor.hp <= 0 }]">
-            <header><strong>{{ actor.name }}</strong><span>{{ actor.position }} {{ copy.feet }}</span></header>
-            <div
-              class="hp-track"
-              role="progressbar"
-              :aria-label="`${actor.name} ${copy.hp}`"
-              aria-valuemin="0"
-              :aria-valuemax="actor.max_hp"
-              :aria-valuenow="actor.hp"
-            ><i :style="{ width: `${Math.max(0, Math.min(100, actor.hp / Math.max(1, actor.max_hp) * 100))}%` }" /></div>
-            <p>{{ copy.hp }} {{ actor.hp }}/{{ actor.max_hp }} · {{ copy.ac }} {{ actor.armor_class }}</p>
-            <small v-if="Object.keys(actor.conditions || {}).length">
-              {{ copy.conditions }}: {{ Object.keys(actor.conditions || {}).map(localizedTerm).join('、') }}
-            </small>
-          </article>
-        </div>
 
         <section v-if="pendingDecision" class="decision-card" aria-live="assertive">
           <strong>{{ pendingDecision.kind === 'melee_hit_spell' ? spellText.hit : pendingDecision.kind === 'hit_reaction_spell' ? spellText.hitReaction : `${copy.reaction} · ${localizedTerm(pendingDecision.kind)}` }}</strong>
@@ -1532,7 +1500,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 
 <style scoped>
 .dnd-combat { display: grid; grid-auto-rows: max-content; align-content: start; gap: 14px; margin: 14px 0; padding: 16px; border: 1px solid #806339; border-radius: 16px; background: linear-gradient(145deg, rgb(23 20 19 / 96%), rgb(19 27 35 / 96%)); color: #f2eadc; box-shadow: 0 18px 48px rgb(0 0 0 / 24%); }
-.combat-header, .actor-card header, .decision-card, .confirm-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.combat-header, .decision-card, .confirm-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .combat-header h2 { margin: 2px 0 0; font: 700 clamp(19px, 2vw, 25px)/1.2 Georgia, serif; }
 .eyebrow { margin: 0; color: #d7b873; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 .preset-description, .combat-state { margin: 0; color: #bcb5aa; font-size: 13px; }
@@ -1609,34 +1577,17 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 .initiative li > span { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; background: #26333d; font-size: 10px; }
 .initiative li.enemy > span { background: #522a2d; }
 .initiative li.current { border-color: #d2a855; background: #362b19; color: #ffe5a8; }
-.tactical-track { display: grid; gap: 7px; padding: 11px; border: 1px solid #3b4650; border-radius: 12px; background: #0e151c; }
-.tactical-track > header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.tactical-track > header span { color: #aeb8c0; font-size: 12px; }
-.track-surface { width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-gutter: stable; }
-.track-canvas { position: relative; width: 100%; }
-.track-cells { display: grid; width: 100%; }
-.track-cells button { min-width: 34px; min-height: 34px; padding: 0; border-radius: 0; border-color: #35414b; color: #89949c; background: #151e26; font-size: 10px; }
-.track-cells button.reachable { border-color: #97783d; color: #f0cf8b; background: #2c261b; cursor: pointer; }
-.track-cells button.selected { border-color: #e4b75e; background: #5c421d; box-shadow: inset 0 0 0 2px #e4b75e; }
-.track-cells button:disabled { opacity: 1; cursor: default; }
-.track-token { position: absolute; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; transform: translateX(-50%); border: 2px solid #6ba2be; border-radius: 50%; background: #173347; color: #eef9ff; font-size: 10px; font-weight: 800; box-shadow: 0 4px 9px rgb(0 0 0 / 38%); }
-.track-token.enemy { border-color: #c56b6b; background: #55292b; }
-.track-token.current { outline: 3px solid #e4b75e; outline-offset: 2px; }
-.actor-grid, .combat-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
-.actor-card, .action-card { display: grid; gap: 8px; padding: 12px; border: 1px solid #3b4650; border-radius: 12px; background: #111820; }
-.actor-card.enemy { border-color: #664446; }
-.actor-card.current { border-color: #d2a855; box-shadow: inset 0 0 0 1px rgb(210 168 85 / 34%); }
-.actor-card.defeated { opacity: .62; }
-.actor-card p, .action-card h3 { margin: 0; }
+.battlefield { display: grid; gap: 6px; }
+.battlefield-hint { margin: 0; color: #8fa0ac; font-size: 12px; }
+.combat-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+.action-card { display: grid; gap: 8px; padding: 12px; border: 1px solid #3b4650; border-radius: 12px; background: #111820; }
+.action-card h3 { margin: 0; }
 .action-card h3, .action-card button { display: flex; align-items: center; justify-content: center; gap: 6px; }
 .action-card h3 { justify-content: flex-start; }
 .available-actions { display: grid; gap: 9px; }
 .available-actions > h3 { margin: 0; color: #f0cf8b; font-size: 14px; }
 .range-guide { margin: 0; color: #b8d7bc; font-size: 12px; line-height: 1.5; }
 .range-guide.blocked { color: #f0b3a7; }
-.actor-card small { color: #c5aa83; }
-.hp-track { height: 6px; overflow: hidden; border-radius: 999px; background: #3a3030; }
-.hp-track i { display: block; height: 100%; background: linear-gradient(90deg, #8d3030, #d77055); }
 .action-card label, .encounter-start label { display: grid; gap: 5px; color: #c8c2b8; font-size: 12px; }
 button, select, input { min-height: 44px; font: inherit; }
 .action-card select, .action-card input, .encounter-start select { width: 100%; min-height: 44px; padding-inline: 10px; border: 1px solid #4a5560; border-radius: 8px; background: #0d1319; color: #f3eee7; }
@@ -1662,8 +1613,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, .confirm-card:f
 :global(body.light .dnd-combat) { border-color: #9b743a; background: linear-gradient(145deg, #fffaf0, #f1f6f7); color: #27231e; box-shadow: 0 14px 34px rgb(76 59 29 / 12%); }
 :global(body.light .dnd-combat .story-bridge) { border-color: #aa8546; background: #fff7e7; }
 :global(body.light .dnd-combat .story-bridge p), :global(body.light .dnd-combat .story-bridge aside) { color: #403728; }
-:global(body.light .dnd-combat .actor-card), :global(body.light .dnd-combat .action-card), :global(body.light .dnd-combat .combat-summary span) { border-color: #b8b2a6; background: #fff; }
-:global(body.light .dnd-combat .tactical-track) { border-color: #b8b2a6; background: #f7f9fa; }
+:global(body.light .dnd-combat .action-card), :global(body.light .dnd-combat .combat-summary span) { border-color: #b8b2a6; background: #fff; }
 :global(body.light .dnd-combat .action-card select), :global(body.light .dnd-combat .action-card input), :global(body.light .dnd-combat .encounter-start select) { border-color: #908779; background: #fff; color: #211e1a; }
 :global(body.light .dnd-combat .class-resource-strip > span) { border-color: #b8b2a6; background: #fff; }
 :global(body.light .dnd-combat .capability-button-cost) { color: #514b43; }
@@ -1682,12 +1632,12 @@ button:focus-visible, select:focus-visible, input:focus-visible, .confirm-card:f
   .dnd-combat { gap: 10px; margin-inline: 0; padding: 10px; border-radius: 12px; }
   .combat-summary { display: flex; gap: 7px; padding-bottom: 3px; overflow-x: auto; scroll-snap-type: x proximity; }
   .combat-summary > span { flex: 0 0 134px; scroll-snap-align: start; }
-  .actor-grid, .combat-actions { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x proximity; }
-  .actor-card, .action-card { flex: 0 0 min(82vw, 280px); scroll-snap-align: start; }
+  .combat-actions { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x proximity; }
+  .action-card { flex: 0 0 min(82vw, 280px); scroll-snap-align: start; }
   .combat-header, .decision-card, .confirm-card { align-items: stretch; flex-direction: column; }
   .turn-banner { align-items: flex-start; flex-direction: column; }
   .turn-banner > span { text-align: left; }
-  .tactical-track > header, .party-readiness header { align-items: flex-start; flex-direction: column; }
+  .party-readiness header { align-items: flex-start; flex-direction: column; }
   .story-bridge, .guided-preset { padding: 10px; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }

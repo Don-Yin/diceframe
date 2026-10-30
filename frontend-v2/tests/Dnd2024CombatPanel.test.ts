@@ -714,7 +714,7 @@ describe('D&D 2024 combat panel', () => {
     })
     await flushPromises()
 
-    expect(wrapper.findAll('.track-token')).toHaveLength(2)
+    expect(wrapper.findAll('.battle-token')).toHaveLength(2)
     const destination = wrapper.get('button[aria-label="Position 20 ft"]')
     expect(destination.classes()).toContain('reachable')
     await destination.trigger('click')
@@ -722,6 +722,29 @@ describe('D&D 2024 combat panel', () => {
     const movementInput = wrapper.get('.action-card input[type="number"]')
     expect((movementInput.element as HTMLInputElement).value).toBe('20')
     expect(destination.classes()).toContain('selected')
+    wrapper.unmount()
+  })
+
+  it('aims the attack when a unit on the battlefield is clicked', async () => {
+    const twoFoes = response('active') as any
+    twoFoes.gameplay.combat.actors.push(
+      { actor_id: 'enemy:goblin-2', kind: 'enemy', name: 'Goblin Archer', hp: 5, max_hp: 5, position: 25, armor_class: 12, conditions: {} },
+    )
+    twoFoes.available_actions[0].targets.push(
+      { actor_id: 'enemy:goblin-2', kind: 'enemy', name: 'Goblin Archer', hp: 5, max_hp: 5, position: 25 },
+    )
+    mocks.fetch.mockResolvedValueOnce(twoFoes)
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true },
+    })
+    await flushPromises()
+
+    const archer = wrapper.get('.battle-token[data-actor-id="enemy:goblin-2"]')
+    await archer.get('.token-hit').trigger('click')
+
+    expect(archer.classes()).toContain('targeted')
+    expect(wrapper.get('.range-bridge').text()).toContain('25 ft')
+    expect(wrapper.find('.battle-token[data-actor-id="player:gm"] .token-hit').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -749,7 +772,7 @@ describe('D&D 2024 combat panel', () => {
     })
     await flushPromises()
 
-    const card = wrapper.findAll('.actor-card.enemy').find(item => item.text().includes('Goblin'))!
+    const card = wrapper.findAll('.battle-token.enemy').find(item => item.text().includes('Goblin'))!
     expect(card.text()).toContain('HP 3/7')
     const bar = card.get('.hp-track')
     expect(bar.attributes('aria-valuenow')).toBe('3')
