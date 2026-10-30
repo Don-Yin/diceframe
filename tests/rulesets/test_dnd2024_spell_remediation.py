@@ -223,6 +223,33 @@ def test_opportunity_attack_is_rechecked_when_the_threat_becomes_incapacitated()
     assert combat_of(instance)["reactions"]["enemy:goblin-1"] == 1
 
 
+def test_opportunity_attack_is_skipped_when_the_threat_has_no_reaction_left() -> None:
+    _runtime, engine, instance = new_combat()
+    _attack_first(instance)
+
+    moved = engine.resolve_intent(instance, {
+        "intent_id": "move-1", "type": "move",
+        "expected_version": int(state(instance)["version"]),
+        "submitted_by": "gm", "actor_id": "player:gm", "distance": -15,
+    }, SequenceRng([]))
+    assert moved["ok"], moved
+    assert engine.apply_batch(instance, moved["event_batch"])["applied"]
+    decision = moved["pending_decision"]
+    assert decision["kind"] == "opportunity_attack"
+
+    # 开窗后威胁者耗尽反应：apply_batch 已替换 canonical combat，必须重新
+    # 取值再修改，否则改到的是旧快照。
+    combat_of(instance)["reactions"]["enemy:goblin-1"] = 0
+    resolved = resolve_decision(engine, instance, decision, "resolve", rolls=[15, 4])
+
+    assert "dnd2024.reaction.spent" not in {
+        event["type"] for event in resolved["event_batch"]["events"]
+    }
+    assert combat_of(instance)["pending_decisions"] == []
+    assert combat_of(instance)["positions"]["player:gm"] == -15
+    assert combat_of(instance)["reactions"]["enemy:goblin-1"] == 0
+
+
 def test_counter_is_rechecked_when_the_threat_becomes_incapacitated() -> None:
     _runtime, engine, instance = new_combat()
 
@@ -297,7 +324,7 @@ def test_false_life_accepts_only_the_caster() -> None:
     assert event["amount"] == 9
 
 
-@pytest.mark.parametrize("scope", ["ally", "enemy", "any", "", 1, True])
+@pytest.mark.parametrize("scope", ["ally", "enemy", "any", "", 1, True, None])
 def test_catalog_rejects_an_unsupported_target_scope(scope) -> None:
     runtime = Dnd2024Runtime()
     bundle = runtime.load_bundle("en")

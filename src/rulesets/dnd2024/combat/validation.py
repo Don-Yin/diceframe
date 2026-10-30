@@ -246,10 +246,9 @@ class CombatValidationMixin:
                     return
             elif submitted_by != str(decision.get("assigned_to") or gm_uid):
                 raise CombatIntentError("only the assigned GM can resolve this reaction")
-            if intent.get("option") == "resolve":
-                threat_ids = list(decision.get("threat_actor_ids") or [])
-                if not threat_ids or int(combat.get("reactions", {}).get(threat_ids[0], 0)) < 1:
-                    raise CombatIntentError("the threatening actor has no reaction available")
+            # 借机攻击的最终资格由 resolution 的 _reaction_eligible 复查：
+            # 开窗后威胁者失能 / 禁反应 / 反应耗尽时清除决策并继续移动。
+            # 这里若提前按反应预算拒绝，最终复查将永远不可达。
             return
         actor_id = str(intent.get("actor_id") or "")
         if actor_id != self._current_actor(combat):

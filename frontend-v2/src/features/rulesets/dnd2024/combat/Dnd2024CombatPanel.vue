@@ -565,9 +565,10 @@ function targetsFor(spell?: RulesetCombatSpell): RulesetCombatTarget[] {
     target.side ? target.side === 'party' : target.kind === currentActor.value?.kind
   )
   if (spell.mode === 'revive') {
-    // 死亡状态由服务端投影；只有明确 is_dead 的盟友才可复活，
-    // 0 HP 仍在死亡豁免中的角色不算 dead。
-    return targets.filter(target => allied(target) && target.is_dead === true)
+    // 死亡状态由服务端投影；只有明确 is_dead 的 player 盟友才可复活，
+    // 0 HP 仍在死亡豁免中的角色不算 dead。服务端 Revivify 只接受 player，
+    // 因此死亡 companion 不能作为合法候选出现。
+    return targets.filter(target => allied(target) && target.kind === 'player' && target.is_dead === true)
   }
   if (spell.target_side === 'ally') return targets.filter(allied)
   if (spell.target_side === 'enemy') return targets.filter(target => !allied(target))

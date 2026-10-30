@@ -68,10 +68,9 @@ class Dnd2024CombatCatalog:
                 raise CombatCatalogError(f"combat spell is not in the spell catalog: {spell_id}")
             if effect.get("mode") not in SPELL_MODES:
                 raise CombatCatalogError(f"combat spell mode is invalid: {spell_id}")
-            # 本批只支持缺省与 self；其它作用域属于未来语义，加载即拒绝，
-            # 避免未实现的声明在前端伪装成合法约束。
-            target_scope = effect.get("target_scope")
-            if target_scope is not None and target_scope != "self":
+            # 本批只支持缺省与 self；显式 null、空串或未来语义都在装载时
+            # fail closed，避免未实现的声明在前端伪装成合法约束。
+            if "target_scope" in effect and effect["target_scope"] != "self":
                 raise CombatCatalogError(
                     f"combat spell target scope is invalid: {spell_id}"
                 )

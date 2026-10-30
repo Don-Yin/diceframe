@@ -263,6 +263,8 @@ describe('D&D 2024 combat panel', () => {
       ...data.gameplay.combat.actors,
       { actor_id: 'player:fallen', kind: 'player', side: 'party', name: 'Fallen', hp: 0, max_hp: 12, position: 0, is_dead: true },
       { actor_id: 'player:dying', kind: 'player', side: 'party', name: 'Dying', hp: 0, max_hp: 12, position: 0, is_dead: false },
+      // 服务端 Revivify 只接受 player，死亡 companion 不能出现在合法候选中。
+      { actor_id: 'companion:fallen', kind: 'companion', side: 'party', name: 'Fallen Companion', hp: 0, max_hp: 12, position: 0, is_dead: true },
     ]
     data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
       targets,
