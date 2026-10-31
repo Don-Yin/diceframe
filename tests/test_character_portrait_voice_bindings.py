@@ -315,3 +315,40 @@ async def test_standing_portrait_kept_while_an_unloaded_save_mentions_it(web_api
 
     (orphan / "state.json").write_text('{"schema_version": 999, "npcs": {}}', encoding="utf-8")
     assert api.delete_standing_portrait(ref["asset_id"])["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_standing_portrait_kept_while_an_old_round_beyond_the_save_window_mentions_it(web_api):
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    _game_key, inst = await _game_with_npc(api, registry)
+    ref = api.save_standing_portrait_upload(_portrait_b64())["standing_portrait"]
+    # Only the first of 150 rounds still carries the reference; the save
+    # encodes the recent rounds only, but a swipe can restore that one.
+    inst.log[:] = [
+        {"round": index + 1, "gm_response": "…", "actions": []} for index in range(150)
+    ]
+    inst.log[0]["pre_state_snapshot"] = {"npcs": {"heroine": {"standing_portrait": ref}}}
+
+    blocked = api.delete_standing_portrait(ref["asset_id"])
+    assert blocked["ok"] is False and "角色引用" in blocked["error"]
+
+    inst.log[0].pop("pre_state_snapshot")
+    assert api.delete_standing_portrait(ref["asset_id"])["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_standing_portrait_kept_while_an_unloaded_chat_log_mentions_it(web_api):
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    await _game_with_npc(api, registry)
+    ref = api.save_standing_portrait_upload(_portrait_b64())["standing_portrait"]
+    orphan = registry.save_dir / "web#unloadable#bot"
+    orphan.mkdir(parents=True)
+    (orphan / "state.json").write_text('{"schema_version": 999, "npcs": {}}', encoding="utf-8")
+    (orphan / "chatlog.jsonl").write_text(
+        '{"round": 1, "pre_state_snapshot": {"npcs": {"x": {"standing_portrait": '
+        f'{{"kind": "upload", "asset_id": "{ref["asset_id"]}"}}}}}}}}}}\n',
+        encoding="utf-8",
+    )
+
+    blocked = api.delete_standing_portrait(ref["asset_id"])
+    assert blocked["ok"] is False and "角色引用" in blocked["error"]

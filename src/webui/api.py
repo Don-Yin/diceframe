@@ -2771,8 +2771,10 @@ class WebAPI:
             for instance in self._reg.list_all():
                 registered_dirs.add(self._reg.save_package_state_path(instance.game_key).parent)
                 # The whole aggregate, not only players / npcs: round snapshots
-                # keep deep copies of NPCs that a rollback restores.
-                if contains(instance.to_dict()):
+                # keep deep copies of NPCs that a rollback restores.  The save
+                # encodes only the recent log, but every loaded round can still
+                # be swiped, so the full in-memory log is scanned too.
+                if contains(instance.to_dict()) or contains(list(instance.log)):
                     return True
             if self._unregistered_save_mentions(asset_id, registered_dirs):
                 return True
@@ -2799,7 +2801,7 @@ class WebAPI:
         for entry in save_dir.iterdir():
             if not entry.is_dir() or entry in registered_dirs:
                 continue
-            for name in ("state.json", "state.backup.json"):
+            for name in ("state.json", "state.backup.json", "chatlog.jsonl"):
                 state = entry / name
                 if state.is_file() and asset_id in state.read_text(encoding="utf-8", errors="replace"):
                     return True
