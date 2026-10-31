@@ -20,6 +20,7 @@ from typing import Any, Literal
 from src.engine.character_utils import calc_hp_from_rule, get_rule_attr_config, make_default_character, parse_tavern_card, roll_attributes
 from src.engine.economy import queue_proposal, resolve_auto_reward_policy
 from src.engine.game_instance import GameRegistry
+from src.engine.game_state import GameState
 from src.engine import persistence
 from src.webui.services.adventure_materialization import materialize_world_seed
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
@@ -2600,12 +2601,18 @@ class WebAPI:
 
         async def confirm(node_id: str) -> dict[str, Any]:
             # 与 GM 命令（adventure_commands.execute）同一并发边界：authoritative
-            # write + instance lock + STALE_RUN 检查；被拒时按 settle 契约丢弃提议。
+            # write + instance lock + STALE_RUN 检查 + 判定中拒绝；被拒时按
+            # settle 契约丢弃提议。
             async with instance.authoritative_write() as write_entered, instance._lock:
                 if not write_entered:
                     raise RuntimeError("historical rewrite is in progress")
                 if self._reg.get(instance.game_key) is not instance:
                     raise RuntimeError("game run was replaced")
+                if instance.state == GameState.ACTIVE_JUDGMENT:
+                    # Another round is being judged; confirming now could reach
+                    # an ending under it.  Keep the proposal: that round's own
+                    # settlement retries it once the round has committed.
+                    raise RuntimeError("a round is being judged")
                 before = {
                     "world_state": deepcopy(instance.world_state),
                     "adventure_progress": deepcopy(adventure_runtime_state.progress(instance)),
@@ -2623,6 +2630,12 @@ class WebAPI:
                         adventure_runtime.AdventureRuntimeError,
                         ProgressError,
                         OutcomeError,
+                        # Deterministic failures of the transaction itself (e.g.
+                        # WorldStateError from world ops) reject the proposal like
+                        # the GM command does; retrying them would block the queue.
+                        ValueError,
+                        KeyError,
+                        TypeError,
                     ) as exc:
                         raise adventure_effects.AdventureCompletionRejected(
                             str(exc),

@@ -1413,6 +1413,9 @@ class GameInstance:
             round_safety.require_writable(self)
             adventure_runtime_state.require_writable(self)
             economy_state.state(self)
+            # Check before the log entry is committed: a refusal after the
+            # append would leave an orphan round in history (and on disk).
+            progression.ensure_advancement_allowed(self)
             round_recovery.finish_judgment_locked(
                 self,
                 gm_response,
