@@ -269,6 +269,8 @@ class Dnd2024ExplorationEngine:
             for target_id in targets:
                 if target_id not in party_ids:
                     raise ExplorationIntentError("spell target must be a party member")
+            if effect.get("target_scope") == "self" and targets != [actor_id]:
+                raise ExplorationIntentError("this spell can only target the caster")
 
     def resolve_intent(
         self, instance: Any, intent: dict[str, Any], rng: Any,

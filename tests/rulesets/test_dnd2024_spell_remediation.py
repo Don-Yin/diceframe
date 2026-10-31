@@ -75,7 +75,10 @@ def _attack_first(instance) -> None:
 # --- A1 the automatic ladder must not consume a human GM's window --------
 
 def test_automatic_ladder_does_not_decline_a_counter_window() -> None:
+    # 独立 GM（自己没有队伍角色）亲手决定反制；GM 自己在队伍里时由服务器
+    # 替敌人反制，见 test_dnd2024_counterspell。
     _runtime, engine, instance = new_combat()
+    instance.gm_uid = "host"
 
     result = cast(engine, instance, "spell:fire_bolt", 0, ["enemy:goblin-1"])
 
@@ -97,10 +100,11 @@ async def test_service_keeps_the_counter_decision_pending(tmp_path) -> None:
     instance.world_id = "greymoor"
     instance.state = GameState.ACTIVE_ACTION
     instance.round_number = 1
+    instance.gm_uid = "host"  # 独立 GM：反制窗口留给他亲手决定
     # 确定性地进入先攻，避免服务层随机地先生成一次被命中反应窗口。
     started = engine.resolve_intent(instance, {
         "intent_id": "service-start", "type": "combat.start", "expected_version": 0,
-        "submitted_by": "gm", "enemies": [enemy()],
+        "submitted_by": "host", "enemies": [enemy()],
     }, SequenceRng([20, 1]))
     assert started["ok"] is True, started
     assert engine.apply_batch(instance, started["event_batch"])["applied"]
