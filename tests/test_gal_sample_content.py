@@ -63,9 +63,18 @@ def make_gal_instance(resolver) -> GameInstance:
 # ---- 内容契约 -----------------------------------------------------------------
 
 
-@pytest.mark.parametrize("locale", ["zh-CN", "en"])
-def test_sample_package_loads_in_both_locales(locale):
-    bundle = AdventureBundleLoader(TEMPLATES_ADVENTURES).load("lighthouse_summer", locale)
+def test_sample_package_is_chinese_only_until_npc_identity_is_locale_neutral():
+    # 好感按 NPC 登记名记账，门写的是中文名；graph-v2 节点文案也还不能本地化。
+    # 在 NPC 有与语言无关的稳定身份之前，英文局只会拿到永远打不开的告白门，
+    # 所以样板包与世界都只声明 zh-CN，英文请求回落到中文内容。
+    bundle = AdventureBundleLoader(TEMPLATES_ADVENTURES).load("lighthouse_summer", "en")
+    assert bundle.manifest.supported_locales == ("zh-CN",)
+    assert bundle.locale == "zh-CN"
+    assert not (TEMPLATES_ADVENTURES.parent / "worlds" / "horizon_strait_en.json").exists()
+
+
+def test_sample_package_contract():
+    bundle = AdventureBundleLoader(TEMPLATES_ADVENTURES).load("lighthouse_summer", "zh-CN")
     graph = bundle.adventure
     endings = [node for node in graph["nodes"] if node["type"] == "ending"]
     assert len(endings) == 3

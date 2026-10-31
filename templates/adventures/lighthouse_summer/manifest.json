@@ -10,5 +10,5 @@
     "minimum_version": 1
   },
   "default_locale": "zh-CN",
-  "supported_locales": ["zh-CN", "en"]
+  "supported_locales": ["zh-CN"]
 }
