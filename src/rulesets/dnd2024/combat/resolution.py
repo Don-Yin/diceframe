@@ -396,6 +396,9 @@ class CombatResolutionMixin:
             "slot_level": slot_level, "target_ids": target_ids,
         })
         defeated_targets: set[str] = set()
+        # 多道射线/多目标按目标累计本次伤害：每束都用施法前的 HP 判断会漏掉
+        # 几束合计才击倒的目标，全部敌人倒下时战斗也不会结束。
+        dealt: dict[str, int] = {}
         # 同一次施法的多道射线共用一个事件批次：已消耗条件只在局部隐藏，
         # 事件仍在批次末尾统一移除，状态写入时机不变。
         consumed_conditions: set[tuple[str, str]] = set()
@@ -459,7 +462,8 @@ class CombatResolutionMixin:
                         damage_event["resistance"] = resistance
                     events.append(damage_event)
                     events.extend(self._concentration_events(target, damage, rng))
-                    if self._last_hostile_defeated(combat, target, damage):
+                    dealt[target_id] = dealt.get(target_id, 0) + damage
+                    if target["kind"] == "enemy" and target["hp"] - dealt[target_id] <= 0:
                         defeated_targets.add(target_id)
                 consumed_events = self._consume_attack_conditions(
                     actor_id, target_id, visible_actor, visible_target,
@@ -531,7 +535,8 @@ class CombatResolutionMixin:
                             damage_event["resistance"] = resistance
                         events.append(damage_event)
                         events.extend(self._concentration_events(target, damage, rng))
-                        if self._last_hostile_defeated(combat, target, damage):
+                        dealt[target_id] = dealt.get(target_id, 0) + damage
+                        if target["kind"] == "enemy" and target["hp"] - dealt[target_id] <= 0:
                             defeated_targets.add(target_id)
             elif mode == "automatic_damage":
                 damage_node = spell_formula_node(
@@ -552,7 +557,8 @@ class CombatResolutionMixin:
                     damage_event["resistance"] = resistance
                 events.append(damage_event)
                 events.extend(self._concentration_events(target, damage, rng))
-                if self._last_hostile_defeated(combat, target, damage):
+                dealt[target_id] = dealt.get(target_id, 0) + damage
+                if target["kind"] == "enemy" and target["hp"] - dealt[target_id] <= 0:
                     defeated_targets.add(target_id)
                 succeeded = True
             elif mode == "healing":
