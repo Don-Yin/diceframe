@@ -891,8 +891,10 @@ def parse_tavern_card(file_path: str | Path) -> dict:
 
     try:
         data = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:
         return {"error": f"JSON 解析失败: {exc}"}
+    if not isinstance(data, dict):
+        return {"error": "JSON 解析失败: 角色卡必须是对象"}
 
     return _extract_tavern_fields(data)
 
@@ -914,7 +916,7 @@ def parse_character_card_document(file_path: str | Path) -> dict:
         return {"spec": data.get("spec", "chara_card_v3"), "spec_version": data.get("spec_version", "3.0"), "data": data.get("data", data)}
     try:
         data = json.loads(raw_data.decode("utf-8-sig"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
         return {"error": f"JSON 解析失败: {exc}"}
     inner = data.get("data", data) if isinstance(data, dict) else {}
     book = inner.get("character_book") if isinstance(inner, dict) else None
@@ -942,38 +944,62 @@ def _decode_card_text(payload: bytes) -> dict | None:
     candidates.append(text)
     for candidate in candidates:
         try:
-            data = json.loads(candidate.decode("utf-8-sig"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+            decoded = candidate.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            # tEXt 按规范是 Latin-1，部分卡直接写入了非 UTF-8 的原始 JSON。
+            decoded = candidate.decode("utf-8", errors="replace").lstrip("﻿")
+        try:
+            data = json.loads(decoded)
+        except (json.JSONDecodeError, RecursionError):
             continue
         if isinstance(data, dict):
             return data
     return None
 
 
+def _usable_card(data: dict) -> bool:
+    """A card whose ``data`` (when present) is an object; anything else cannot be read."""
+    return isinstance(data.get("data", data), dict)
+
+
+# 单个文本 chunk 与整个文件的解压输出上限：一张卡的 JSON 远小于此。
 _MAX_PNG_TEXT_BYTES = 50_000_000
+_CARD_KEYWORDS = ("ccv3", "chara")
 
 
-def _bounded_decompress(data: bytes) -> bytes:
+class _DecompressBudgetExceeded(zlib.error):
+    """The text would expand past what is left of the file's budget."""
+
+
+def _bounded_decompress(data: bytes, limit: int = _MAX_PNG_TEXT_BYTES) -> bytes:
     """解压 zlib 数据并限制输出大小，防止压缩炸弹。"""
     decompressor = zlib.decompressobj()
-    out = decompressor.decompress(data, _MAX_PNG_TEXT_BYTES + 1)
-    if len(out) > _MAX_PNG_TEXT_BYTES:
-        raise zlib.error("PNG 文本 chunk 解压后过大")
+    out = decompressor.decompress(data, limit + 1)
+    if len(out) > limit:
+        raise _DecompressBudgetExceeded("PNG 文本 chunk 解压后过大")
     return out
 
 
-def _png_text_chunk(chunk_type: str, chunk_data: bytes) -> tuple[str, bytes] | None:
-    """解出 tEXt / zTXt / iTXt chunk 的 (keyword, 文本字节)；其它 chunk 返回 None。"""
+def _png_text_chunk(
+    chunk_type: str, chunk_data: bytes, limit: int = _MAX_PNG_TEXT_BYTES,
+) -> tuple[str, bytes] | None:
+    """解出角色卡 tEXt / zTXt / iTXt chunk 的 (keyword, 文本字节)。
+
+    其它 chunk、以及关键字不是角色卡的文本 chunk 返回 None：先比对关键字再解压，
+    无关的压缩文本不消耗解压预算。
+    """
     null_pos = chunk_data.find(b"\x00")
     if null_pos == -1:
         return None
     keyword = chunk_data[:null_pos].decode("latin-1").lower()
+    if keyword not in _CARD_KEYWORDS:
+        return None
     rest = chunk_data[null_pos + 1:]
     if chunk_type == "tEXt":
         return keyword, rest
     if chunk_type == "zTXt":
         # 1 字节压缩方法 + zlib 数据
-        return keyword, _bounded_decompress(rest[1:])
+        return keyword, _bounded_decompress(rest[1:], limit)
     if chunk_type == "iTXt":
         # 压缩标志、压缩方法、语言标签\0、翻译关键字\0、文本
         compressed = rest[0] == 1
@@ -983,16 +1009,18 @@ def _png_text_chunk(chunk_type: str, chunk_data: bytes) -> tuple[str, bytes] | N
             if idx == -1:
                 return None
             rest = rest[idx + 1:]
-        return keyword, _bounded_decompress(rest) if compressed else rest
+        return keyword, _bounded_decompress(rest, limit) if compressed else rest
     return None
 
 
 def _parse_tavern_png_document(raw_data: bytes) -> dict | None:
     """Extract the raw Character Card JSON from a PNG without projecting fields away.
 
-    V3 卡写在 ``ccv3`` 关键字下，V2 卡写在 ``chara`` 下；两者并存时优先 V3。
+    V3 卡写在 ``ccv3`` 关键字下，V2 卡写在 ``chara`` 下；两者并存时优先 V3，
+    但 V3 内容不可用（例如 ``data`` 不是对象）时回退到 V2。
     """
     found: dict[str, dict] = {}
+    budget = _MAX_PNG_TEXT_BYTES
     try:
         # 跳过 8 字节 PNG 签名
         pos = 8
@@ -1011,14 +1039,21 @@ def _parse_tavern_png_document(raw_data: bytes) -> dict | None:
             chunk_count += 1
 
             if chunk_type in ("tEXt", "zTXt", "iTXt"):
+                if budget <= 0:
+                    break
                 try:
-                    entry = _png_text_chunk(chunk_type, chunk_data)
+                    entry = _png_text_chunk(chunk_type, chunk_data, budget)
+                except _DecompressBudgetExceeded:
+                    # 预算耗尽即停止扫描：不允许靠大量超限 chunk 反复解压。
+                    logger.debug("酒馆 PNG 文本解压超出预算", exc_info=True)
+                    break
                 except (IndexError, zlib.error):
                     logger.debug("酒馆 PNG 文本 chunk 解压失败", exc_info=True)
                     continue
-                if entry and entry[0] in ("ccv3", "chara") and entry[0] not in found:
+                if entry and entry[0] not in found:
+                    budget -= len(entry[1])
                     data = _decode_card_text(entry[1])
-                    if data is not None:
+                    if data is not None and _usable_card(data):
                         found[entry[0]] = data
             elif chunk_type == "IEND":
                 break
@@ -1033,6 +1068,8 @@ def _extract_tavern_fields(data: dict) -> dict:
         inner = data["data"]
     else:
         inner = data
+    if not isinstance(inner, dict):
+        inner = {}
 
     result: dict = {
         "name": str(inner.get("name", "") or "").strip() or "未命名",
