@@ -25,6 +25,7 @@ from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch
 
 from .primitives import (
     INTENT_TYPES,
+    RAGE_MAX_ROUNDS,
     UNARMED_STRIKE_REF,
     CombatIntentError,
     actor_kind as _actor_kind,
@@ -1199,7 +1200,9 @@ class Dnd2024CombatEngine(
                     rage["established"] = True
                     rage["sustained_this_turn"] = False
                 elif rage.get("sustained_this_turn"):
-                    remaining = int(rage.get("turns_remaining", 10) or 10) - 1
+                    remaining = int(
+                        rage.get("turns_remaining", RAGE_MAX_ROUNDS) or RAGE_MAX_ROUNDS
+                    ) - 1
                     if remaining <= 0:
                         previous_conditions.pop("rage", None)
                     else:

@@ -266,6 +266,8 @@ class CombatViewMixin:
                 reason = "not_automated"
             elif not is_current:
                 reason = "not_your_turn"
+            elif "rage" in actor["conditions"]:
+                reason = "raging"
             elif effect["mode"] == "reaction_defense":
                 reason = "requires_being_hit"
             elif effect["mode"] == "triggered_damage" and not trigger:

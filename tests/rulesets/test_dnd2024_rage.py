@@ -27,6 +27,7 @@ from dnd2024_monk_common import (
     capability_intent,
     monk_instance,
     start_combat,
+    with_equipment,
 )
 
 
@@ -151,11 +152,11 @@ def test_entering_rage_spends_a_use_and_applies_the_condition() -> None:
     assert (applied[1]["resource_id"], applied[1]["amount"]) == ("rages", 1)
     assert applied[2]["condition"] == "rage"
     assert applied[2]["duration"] == "rage"
-    assert applied[2]["turns_remaining"] == 10
+    assert applied[2]["turns_remaining"] == 100
     assert applied[2]["target_id"] == "player:gm"
 
     rage = _conditions(instance)["rage"]
-    assert rage["turns_remaining"] == 10
+    assert rage["turns_remaining"] == 100
     assert rage["sustained_this_turn"] is False
     assert _player(instance)["resources"]["class"]["rages"]["current"] == 2
     assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 0
@@ -256,7 +257,7 @@ def test_rage_keeps_ticking_only_while_it_is_renewed() -> None:
     _end_turn(engine, instance)
     rage = _conditions(instance)["rage"]
     assert rage["established"] is True
-    assert rage["turns_remaining"] == 10
+    assert rage["turns_remaining"] == 100
     assert rage["sustained_this_turn"] is False
 
     _end_turn(engine, instance, actor_id="enemy:goblin-1", intent_id="end-2")
@@ -270,7 +271,7 @@ def test_rage_keeps_ticking_only_while_it_is_renewed() -> None:
     # 下个回合攻击续期：该回合结束时消耗一轮。
     _end_turn(engine, instance, intent_id="end-3")
     rage = _conditions(instance)["rage"]
-    assert rage["turns_remaining"] == 9
+    assert rage["turns_remaining"] == 99
     assert rage["sustained_this_turn"] is False
 
 
@@ -292,7 +293,7 @@ def test_rage_ends_at_turn_end_without_renewal() -> None:
 def test_bonus_action_renewal_keeps_the_rage_alive() -> None:
     engine, instance = _instance(level=5, conditions={
         "rage": {
-            "duration": "rage", "turns_remaining": 10, "source_actor_id": "player:gm",
+            "duration": "rage", "turns_remaining": 100, "source_actor_id": "player:gm",
             "established": True,
         },
     })
@@ -304,7 +305,7 @@ def test_bonus_action_renewal_keeps_the_rage_alive() -> None:
     _end_turn(engine, instance)
 
     rage = _conditions(instance)["rage"]
-    assert rage["turns_remaining"] == 9
+    assert rage["turns_remaining"] == 99
     assert rage["sustained_this_turn"] is False
 
 
@@ -623,6 +624,11 @@ def test_raging_barbarian_cannot_cast_or_be_offered_spells() -> None:
     _resolve_and_apply(engine, instance, capability_intent(engine, instance, "rage", intent_id="rage-1"))
 
     assert not any(row["type"] == "cast_spell" for row in engine.available_intents(instance, "gm"))
+    actor = next(
+        row for row in engine.gameplay_view(instance)["combat"]["actors"]
+        if row["actor_id"] == "player:gm"
+    )
+    assert {row["blocked_reason"] for row in actor["spells"]} == {"raging"}
     rejected = engine.resolve_intent(
         instance, _cast_intent(instance, "spell:fire_bolt", ["enemy:goblin-1"]), SequenceRng([15, 5]),
     )
@@ -646,3 +652,51 @@ def test_entering_rage_ends_concentration() -> None:
     assert {"type": "dnd2024.concentration.ended", "actor_id": "player:gm", "reason": "rage"} in events
     assert _player(instance)["spellcasting"]["concentration"] is None
     assert "rage" in _player(instance)["conditions"]
+
+
+def _end_combat_by_gm(engine, instance) -> list[dict]:
+    return _apply(engine, instance, {
+        "intent_id": "end-combat", "type": "combat.end",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm",
+    })
+
+
+def _end_combat_by_victory(engine, instance) -> list[dict]:
+    ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"] = 1
+    events = _apply(
+        engine, instance, _attack_intent(engine, instance, "item:greataxe", intent_id="atk-kill"),
+        SequenceRng([15, 7]),
+    )
+    assert {"type": "dnd2024.combat.ended", "reason": "victory"} in events
+    return events
+
+
+@pytest.mark.parametrize("end_combat", [_end_combat_by_gm, _end_combat_by_victory])
+def test_rage_ends_with_the_combat(end_combat) -> None:
+    engine, instance = _instance(level=5)
+    _enter_rage(engine, instance)
+    assert "rage" in _conditions(instance)
+
+    end_combat(engine, instance)
+
+    assert ruleset_runtime.state(instance)["combat"]["status"] == "ended"
+    assert "rage" not in _conditions(instance)
+
+
+def test_a_thrown_strength_weapon_keeps_strength_and_rage_damage() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = with_equipment(runtime, _barbarian_sheet(runtime, level=5), "item:handaxe")
+    engine, instance = monk_instance(runtime, sheet)
+    start_combat(engine, instance, position=15)  # 投掷距离内，但不在近战范围
+    _enter_rage(engine, instance)
+    strength = (int(_player(instance)["abilities"]["str"]) - 10) // 2
+
+    events = _apply(
+        engine, instance, _attack_intent(engine, instance, "item:handaxe"),
+        SequenceRng([15, 4]),
+    )
+    damage = _damage_event(events)
+
+    assert damage["rolls"] == [4]
+    assert damage["amount"] == 4 + strength + 2
