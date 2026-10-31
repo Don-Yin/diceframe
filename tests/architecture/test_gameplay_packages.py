@@ -129,13 +129,18 @@ def test_gal_mode_delegates_adventure_compatibility_to_lifecycle() -> None:
 )
 def test_registry_rejects_invalid_declarations(mode_id: str, surface: str) -> None:
     with pytest.raises(ValueError):
-        contracts.GameplayRegistry([contracts.GameplayMode(mode_id, surface, lambda _request: None)])
+        contracts.GameplayRegistry([contracts.GameplayMode(mode_id, surface, lambda _request: None, "narrative_round")])
+
+
+def test_registry_rejects_modes_without_a_turn_driver() -> None:
+    with pytest.raises(ValueError):
+        contracts.GameplayRegistry([contracts.GameplayMode("ok", "full", lambda _request: None, "")])
 
 
 def test_registry_rejects_duplicate_modes() -> None:
     registry = build_default_gameplay_registry()
     with pytest.raises(ValueError):
-        registry.register(contracts.GameplayMode("gal", "none", lambda _request: None))
+        registry.register(contracts.GameplayMode("gal", "none", lambda _request: None, "narrative_round"))
 
 
 def test_contracts_stay_free_of_concrete_and_platform_imports() -> None:

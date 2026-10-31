@@ -226,6 +226,18 @@ def normalize_decoded_play_mode(instance: Any) -> None:
     slot["play_mode"] = derive_play_mode(slot.get("play_mode"), getattr(instance, "adventure_binding", None))
 
 
+def peek_play_mode(instance: Any) -> str:
+    """Effective play mode without repairing or materializing the slot.
+
+    A missing, corrupt or unknown-schema slot reads as an empty stored value,
+    so the decode-time derivation from the Adventure binding applies.
+    """
+    modules = getattr(instance, "modules", None)
+    slot = modules.get(MODULE_NAME) if isinstance(modules, dict) else None
+    stored = slot.get("play_mode") if isinstance(slot, dict) and slot.get("schema_version") == SCHEMA_VERSION else ""
+    return derive_play_mode(stored, getattr(instance, "adventure_binding", None))
+
+
 def effective_bot_surface(instance: Any) -> str:
     """Bot surface of the run's effective play mode (decode-time derivation)."""
     return gameplay_builtin.DEFAULT_GAMEPLAYS.bot_surface(
