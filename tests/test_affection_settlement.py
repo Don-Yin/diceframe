@@ -75,6 +75,9 @@ def test_valid_proposals_apply_and_report_the_settled_change():
     {"subject": "艾莉丝", "delta": "３"},
     {"subject": "艾莉丝", "delta": ""},
     {"subject": "", "delta": "3"},
+    {"subject": "艾莉丝", "delta": "1234567"},
+    {"subject": "艾莉丝", "delta": "+" + "9" * 5000},  # int() would raise past 4300 digits
+    {"subject": "艾莉:丝", "delta": "3"},  # NPC tags split on the first colon, so no NPC has one
     "AFFECTION:艾莉丝:3",
 ])
 def test_unknown_subjects_and_non_integer_changes_are_dropped(proposal):

@@ -23,6 +23,9 @@ from src.rules.affection_config import AffectionConfig
 logger = logging.getLogger("trpg")
 
 MAX_SUBJECTS_PER_ROUND = 8
+# A real change is a few digits; longer text is malformed, and very long digit
+# strings would make int() raise instead of being dropped like other bad values.
+MAX_DELTA_DIGITS = 6
 
 
 def _delta(raw: Any) -> int | None:
@@ -31,7 +34,7 @@ def _delta(raw: Any) -> int | None:
     text = str(raw or "").strip()
     sign = text[:1] if text[:1] in "+-" else ""
     digits = text[len(sign):]
-    if not digits.isascii() or not digits.isdigit():
+    if not digits.isascii() or not digits.isdigit() or len(digits) > MAX_DELTA_DIGITS:
         return None
     return int(sign + digits)
 
