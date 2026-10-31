@@ -310,7 +310,7 @@ class GameHandler:
         Returns: (narration: str, info_asymmetry: dict | None)
             info_asymmetry 格式: {"user_qq_xxx": "仅该玩家可见的消息", ...}
 
-        推进由对局玩法声明的驱动执行（ADR-0012 §2）；跑团各模式绑定 RoundProcessor。
+        推进由对局玩法声明的驱动执行（ADR-0013 §2）；跑团各模式绑定 RoundProcessor。
         """
         driver = self._turn_drivers.for_mode(
             DEFAULT_GAMEPLAYS, adventure_runtime_state.peek_play_mode(instance).casefold(),

@@ -1,4 +1,4 @@
-"""Turn dispatch by gameplay mode (ADR-0012 §2, track P0.5c)."""
+"""Turn dispatch by gameplay mode (ADR-0013 §2, track P0.5c)."""
 
 from __future__ import annotations
 

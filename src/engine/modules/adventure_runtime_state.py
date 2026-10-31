@@ -12,7 +12,7 @@ has done with that binding:
 - ``play_mode``: a gameplay mode id from ``src.gameplays`` chosen at creation.
   An empty or unknown value is derived from the binding when a save is
   decoded, exactly as the codec did when the field lived at the top level.
-  This slot only stores the id (transitional location, ADR-0012); the modes
+  This slot only stores the id (transitional location, ADR-0013); the modes
   themselves, their bot surface and creation rules belong to the gameplay
   registry.
 
