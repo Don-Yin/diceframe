@@ -910,6 +910,53 @@ describe('D&D 2024 combat panel', () => {
     wrapper.unmount()
   })
 
+  it("keeps the dock closed on another actor's turn and never shows their economy", async () => {
+    const data = response('active') as any
+    data.gameplay.combat.current_actor_id = 'enemy:goblin-1'
+    data.gameplay.combat.turn_index = 1
+    data.gameplay.combat.economy = { action: 0, bonus_action: 1, movement: 0, reaction: 1 }
+    data.gameplay.combat.reactions = { 'player:gm': 0 }
+    data.available_actions = [{ type: 'combat.message', label: 'Combat message', expected_version: 1 }]
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: false } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-tile]').exists()).toBe(false)
+    expect(wrapper.find('[role=tab]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Pick an action')
+    expect(wrapper.find('.combat-state').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('still lets the GM end the combat while an enemy acts', async () => {
+    const data = response('active') as any
+    data.gameplay.combat.current_actor_id = 'enemy:goblin-1'
+    data.gameplay.combat.turn_index = 1
+    data.available_actions = [{ type: 'combat.end', label: 'End Combat', expected_version: 1 }]
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-tile]').exists()).toBe(false)
+    expect(wrapper.find('.dock-end').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it("reads the reaction tab from the viewer's own reaction, not the turn economy", async () => {
+    const data = response('active') as any
+    data.gameplay.combat.economy = { action: 1, bonus_action: 1, movement: 30, reaction: 1 }
+    data.gameplay.combat.reactions = { 'player:gm': 0 }
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+
+    const tabs = wrapper.findAll('[role=tab]')
+    const reaction = tabs[tabs.length - 1]
+    expect(reaction.text()).toContain('Reaction')
+    expect(reaction.classes()).toContain('spent')
+    wrapper.unmount()
+  })
+
   it('shows a seated player the exact current and maximum HP of a wounded enemy', async () => {
     const wounded = response('active') as any
     wounded.available_actions = []

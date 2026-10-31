@@ -23,7 +23,7 @@ defineProps<{
       <li
         v-for="token in order"
         :key="token.id"
-        :class="[token.side, { current: token.isCurrent, defeated: token.isDefeated }]"
+        :class="[token.side, { current: token.isCurrent, defeated: token.isDefeated, dying: token.isDying }]"
         :aria-current="token.isCurrent ? 'step' : undefined"
       >
         <BattleAvatar :name="token.name" :side="token.side" :size="token.isCurrent ? 46 : 36" />
@@ -50,6 +50,7 @@ defineProps<{
 .initiative li.current :deep(.battle-avatar) { border-color: #e4b75e; box-shadow: 0 0 0 3px rgb(228 183 94 / 45%), 0 0 16px rgb(228 183 94 / 55%); }
 .initiative li.current strong { color: #ffe5a8; }
 .initiative li.defeated { opacity: .4; filter: grayscale(.8); }
+.initiative li.dying { outline: 1px dashed #ff8a65; }
 @media (max-width: 700px) {
   .turn-banner { flex-direction: column; align-items: stretch; gap: 8px; }
   .initiative li:first-child { margin-left: 0; }

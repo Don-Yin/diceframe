@@ -24,6 +24,17 @@ describe('combat HUD battle view', () => {
     })
   })
 
+  it('tells a downed party member apart from a defeated enemy or a dead ally', () => {
+    const [dying, enemy, dead] = buildBattleTokens([
+      actor('player:a', 0, { hp: 0, conditions: { unconscious: {}, death_saves: {} } }),
+      actor('enemy:b', 5, { hp: 0 }),
+      actor('player:c', 0, { hp: 0, conditions: { dead: {} } }),
+    ], '', 'a')
+    expect(dying).toMatchObject({ isDying: true, isDefeated: false })
+    expect(enemy).toMatchObject({ isDying: false, isDefeated: true })
+    expect(dead).toMatchObject({ isDying: false, isDefeated: true })
+  })
+
   it('clamps the HP ratio and survives a zero max HP', () => {
     const [over, none] = buildBattleTokens([
       actor('player:a', 0, { hp: 30, max_hp: 10 }), actor('player:b', 0, { hp: 0, max_hp: 0 }),

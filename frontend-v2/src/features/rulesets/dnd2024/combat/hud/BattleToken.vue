@@ -28,7 +28,7 @@ const struck = computed(() => (props.floaters || []).some(
 <template>
   <div
     :class="['battle-token', token.side, {
-      current: token.isCurrent, targeted, defeated: token.isDefeated, own: token.isOwn, selectable, struck,
+      current: token.isCurrent, targeted, defeated: token.isDefeated, dying: token.isDying, own: token.isOwn, selectable, struck,
     }]"
     :data-actor-id="token.id"
   >
@@ -75,6 +75,7 @@ const struck = computed(() => (props.floaters || []).some(
 .battle-token.current { border-color: #e4b75e; box-shadow: 0 0 0 2px rgb(228 183 94 / 55%), 0 0 18px rgb(228 183 94 / 45%), 0 6px 16px rgb(0 0 0 / 45%); }
 .battle-token.targeted { border-color: #ff6b6b; box-shadow: 0 0 0 2px rgb(255 107 107 / 65%), 0 0 20px rgb(255 80 80 / 50%), 0 6px 16px rgb(0 0 0 / 45%); }
 .battle-token.defeated { opacity: .55; filter: grayscale(.7); }
+.battle-token.dying { border-style: dashed; border-color: #ff8a65; }
 .token-marker { position: absolute; top: -11px; left: 50%; width: 0; height: 0; transform: translateX(-50%); border-top: 8px solid #e4b75e; border-right: 7px solid transparent; border-left: 7px solid transparent; filter: drop-shadow(0 0 4px rgb(228 183 94 / 80%)); }
 .token-plate { display: grid; width: 100%; min-width: 0; gap: 3px; }
 .token-name { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }

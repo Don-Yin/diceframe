@@ -296,15 +296,20 @@ const initiativeTokens = computed(() => (combat.value?.initiative || [])
   .map(id => battleTokens.value.find(token => token.id === id))
   .filter((token): token is NonNullable<typeof token> => Boolean(token)))
 const ownToken = computed(() => battleTokens.value.find(token => token.isOwn) || currentToken.value)
+// `combat.economy` belongs to whoever is acting, so the dock only opens on the
+// viewer's own turn; everyone else keeps the read-only waiting state.
+const isOwnTurn = computed(() => combat.value?.current_actor_id === `player:${props.actorId}`)
 const dockTabs = computed<DockTab[]>(() => {
   const economy = combat.value?.economy || {}
   const movement = Number(economy.movement ?? 0)
+  // Reactions are tracked per actor, not in the turn economy.
+  const reaction = Number(combat.value?.reactions?.[`player:${props.actorId}`] ?? 0) > 0
   const spent = copy.value.spent
   return [
     { id: 'action', label: copy.value.tabAction, available: Boolean(economy.action), note: economy.action ? '' : spent },
     { id: 'bonus', label: copy.value.tabBonus, available: Boolean(economy.bonus_action), note: economy.bonus_action ? '' : spent },
     { id: 'move', label: copy.value.tabMove, available: movement > 0, note: `${movement} ${copy.value.feet}` },
-    { id: 'reaction', label: copy.value.tabReaction, available: Boolean(economy.reaction), note: economy.reaction ? '' : spent },
+    { id: 'reaction', label: copy.value.tabReaction, available: reaction, note: reaction ? '' : spent },
   ]
 })
 const dockTargetToken = computed(() => battleTokens.value.find(token => token.id === aimedTargetId.value) || null)
@@ -821,7 +826,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
         </section>
 
         <ActionDock
-          v-if="actions.length && (!pendingDecision || pendingDecision.kind === 'melee_hit_spell')"
+          v-if="isOwnTurn && actions.length && (!pendingDecision || pendingDecision.kind === 'melee_hit_spell')"
           :active-tab="dockTab"
           :own="ownToken"
           :hp-label="copy.hp"
@@ -993,7 +998,10 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
             <button v-if="action('combat.end')" type="button" class="danger dock-end" :disabled="busy" @click="stageSimple('combat.end')"><NIcon :component="ShieldOutline" />{{ copy.endCombat }}</button>
           </template>
         </ActionDock>
-        <p v-else class="combat-state">{{ waitingText }}</p>
+        <template v-else>
+          <p class="combat-state">{{ waitingText }}</p>
+          <button v-if="action('combat.end')" type="button" class="danger dock-end" :disabled="busy" @click="stageSimple('combat.end')"><NIcon :component="ShieldOutline" />{{ copy.endCombat }}</button>
+        </template>
 
         <section v-if="staged" ref="confirmCard" class="confirm-card" role="group" :aria-label="copy.confirm" tabindex="-1">
           <strong>{{ copy.confirm }}</strong>

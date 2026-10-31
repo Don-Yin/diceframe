@@ -25,7 +25,10 @@ export interface BattleToken {
   conditions: string[]
   coord: BattleCoord
   isCurrent: boolean
+  /** Out of the fight: an enemy at 0 HP, or anyone who is dead. */
   isDefeated: boolean
+  /** A party member at 0 HP who is still making death saves (or is stable). */
+  isDying: boolean
   isOwn: boolean
 }
 
@@ -51,6 +54,8 @@ export function buildBattleTokens(
   return actors.map((actor) => {
     const maxHp = Math.max(1, Number(actor.max_hp) || 1)
     const hp = Number(actor.hp) || 0
+    const dead = Boolean(actor.conditions?.dead)
+    const down = hp <= 0 && actor.kind !== 'enemy' && !dead
     return {
       id: actor.actor_id,
       name: actor.name,
@@ -62,7 +67,8 @@ export function buildBattleTokens(
       conditions: Object.keys(actor.conditions || {}),
       coord: { x: Number(actor.position || 0) },
       isCurrent: actor.actor_id === currentActorId,
-      isDefeated: hp <= 0,
+      isDefeated: dead || (hp <= 0 && !down),
+      isDying: down,
       isOwn: actor.actor_id === `player:${ownActorId}`,
     }
   })
