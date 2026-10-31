@@ -27,6 +27,10 @@ _PERSON_SUFFIXES = (
 _SCENE_PANEL_TOKEN_RE = re.compile(r"(?i)(?<![A-Za-z0-9_])SCENE_PANEL\s*[:：]")
 
 
+# 中文输出常把字段分隔写成全角冒号；标签名之后的分隔已由协议层归一。
+_FIELD_SEPARATOR = re.compile("[:：]")
+
+
 def _looks_like_person(name: str) -> bool:
     return any(name.endswith(suffix) for suffix in _PERSON_SUFFIXES)
 
@@ -93,14 +97,14 @@ def parse_world_tag(tag: str, value: str, result: dict) -> None:
                     "description": description[:700],
                 })
     elif tag == "NPC":
-        parts = value.split(":", 1)
+        parts = _FIELD_SEPARATOR.split(value, 1)
         if len(parts) == 2:
             name, relation = parts[0].strip()[:80], parts[1].strip()[:40]
             result["state_update"]["npcs"][name] = {"name": name, "tier": relation}
     elif tag == "AFFECTION":
         # AFFECTION:NPC名:变化量[:原因]。只是提议；是否启用、对象与幅度由
         # affection_effects 按规则配置结算。
-        parts = value.split(":", 2)
+        parts = _FIELD_SEPARATOR.split(value, 2)
         if len(parts) >= 2:
             result["state_update"].setdefault("affection", []).append({
                 "subject": parts[0].strip()[:80],

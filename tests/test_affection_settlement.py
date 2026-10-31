@@ -51,6 +51,13 @@ def test_tag_is_parsed_as_a_proposal():
     assert data["state_update"]["affection"] == [{"subject": "艾莉丝", "delta": "-2", "reason": ""}]
 
 
+def test_full_width_colons_separate_npc_and_affection_fields():
+    data = parse_tag_state("她笑了。\n---\nNPC：林晚晴：friendly\nAFFECTION：林晚晴：+3：帮忙：搬书", "narrative")
+    assert data["state_update"]["npcs"]["林晚晴"]["tier"] == "friendly"
+    # Only the first two separators split; the reason keeps its own colon.
+    assert data["state_update"]["affection"] == [{"subject": "林晚晴", "delta": "+3", "reason": "帮忙：搬书"}]
+
+
 def test_disabled_rule_settles_nothing():
     inst = game("艾莉丝")
     assert settle_affection(inst, [{"subject": "艾莉丝", "delta": "3"}], None) == []
