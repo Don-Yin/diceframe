@@ -48,6 +48,7 @@ const show = ref(false)
         </ol>
       </NTabPane>
     </NTabs>
+    <p class="access-help-env">{{ t('accessHelpEnvToken') }}</p>
     <p class="access-help-gone">
       {{ t('accessHelpGone') }}
       {{ t('resetPasswordHintBefore') }} <code>data/reset_access_password.txt</code>{{ t('resetPasswordHintAfter') }}
@@ -82,6 +83,7 @@ const show = ref(false)
   background: var(--df-surface-2);
   border-radius: var(--df-radius-md);
 }
+.access-help-env,
 .access-help-gone,
 .access-help-player { margin: 16px 0 0; font-size: 13px; line-height: 1.7; color: var(--df-text-secondary); }
 .access-help-player { padding-top: 12px; border-top: 1px solid var(--df-border-soft); }

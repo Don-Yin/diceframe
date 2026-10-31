@@ -21,6 +21,7 @@ describe('AccessPasswordHelp', () => {
     expect(text).toContain('Docker')
     expect(text).toContain(String.raw`data\access_token.txt`)
     expect(text).toContain('data/reset_access_password.txt')
+    expect(text).toContain('TRPG_ACCESS_TOKEN')
     expect(text).toContain('邀请链接')
     wrapper.unmount()
   })
