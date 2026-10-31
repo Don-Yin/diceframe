@@ -1,4 +1,4 @@
-"""Architecture contracts for gameplay packages (ADR-0010 §2/§6, ADR-0012).
+"""Architecture contracts for gameplay packages (ADR-0010 §2/§6, ADR-0013).
 
 - 每种玩法是 ``src/gameplays/<mode>`` 下的独立包，通过 ``GameplayMode`` 契约
   声明自己；只有 ``src/gameplays/builtin.py`` 可以 import 具体玩法包，generic
