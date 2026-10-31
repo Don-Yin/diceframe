@@ -175,3 +175,61 @@ def test_affection_gate_fails_closed_without_a_score():
     instance = make_gal_instance(resolver)  # 未做任何好感结算
     gate = [{"type": "affection.score", "id": HEROINE, "value": 40}]
     assert gates_satisfied(gate, instance=instance, progress={}, rules_evaluator=None) is False
+
+
+def test_affection_gate_boundary_survives_save_and_reload():
+    """39 keeps the confession locked, 40 opens it; both after a save round-trip."""
+
+    from src.adventures.progress import ProgressError
+    from src.compat.saves import normalize_save_payload
+    from src.engine.modules import affection
+
+    def reload(instance: GameInstance) -> GameInstance:
+        return GameInstance.from_dict(normalize_save_payload(instance.to_dict()))
+
+    resolver, runtime_deps = _runtime_deps()
+    instance = make_gal_instance(resolver)
+    adventure_runtime.initialize_adventure_run(runtime_deps, instance)
+    for _ in range(7):
+        _settle_affection(instance, "+5")
+    _settle_affection(instance, "+4")
+    # A round proposing far beyond the cap is clamped, not applied whole.
+    _settle_affection(instance, "-99")
+    assert affection.score(instance, HEROINE) == 34
+    _settle_affection(instance, "+5")
+    for node_id in ("n_arrival", "n_lighthouse", "n_festival"):
+        adventure_runtime.complete_adventure_node(runtime_deps, instance, node_id)
+
+    instance = reload(instance)
+    assert affection.score(instance, HEROINE) == 39
+    assert adventure_runtime_state.progress(instance)["active_nodes"] == ["n_confession"]
+    with pytest.raises(ProgressError):
+        adventure_runtime.complete_adventure_node(
+            runtime_deps, instance, "n_confession", choice_id="confess",
+        )
+
+    _settle_affection(instance, "+1")
+    instance = reload(instance)
+    assert affection.score(instance, HEROINE) == 40
+    adventure_runtime.complete_adventure_node(
+        runtime_deps, instance, "n_confession", choice_id="confess",
+    )
+    assert adventure_runtime_state.progress(instance)["active_nodes"] == ["n_warm_end"]
+
+
+def test_silence_choice_reaches_the_summer_ending_and_freezes():
+    resolver, runtime_deps = _runtime_deps()
+    instance = make_gal_instance(resolver)
+    adventure_runtime.initialize_adventure_run(runtime_deps, instance)
+    for node_id in ("n_arrival", "n_lighthouse", "n_festival"):
+        adventure_runtime.complete_adventure_node(runtime_deps, instance, node_id)
+    adventure_runtime.complete_adventure_node(
+        runtime_deps, instance, "n_confession", choice_id="drift_apart",
+    )
+    adventure_runtime.complete_adventure_node(runtime_deps, instance, "n_summer_end")
+
+    progress = adventure_runtime_state.progress(instance)
+    assert ending_node_id(progress) == "n_summer_end"
+    assert progress["active_nodes"] == []
+    with pytest.raises(ValueError, match="has ended"):
+        progression.ensure_advancement_allowed(instance)
