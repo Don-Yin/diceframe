@@ -9,6 +9,8 @@
    (and with it the ending freeze); seed restarts pass creation validation.
 3) A deterministic failure of the completion transaction (e.g. a world op
    past the fact cap) rejects that proposal instead of blocking the queue.
+4) Transition narration lands on the round that committed, even when the
+   next round starts while the narration is generated.
 """
 
 from __future__ import annotations
@@ -200,3 +202,29 @@ async def test_deterministic_transaction_failure_rejects_the_proposal_and_unbloc
     progress = adventure_runtime_state.progress(inst)
     assert progress["completed_nodes"] == ["b"]
     assert progress.get("completion_suggestions") in (None, [])
+
+
+@pytest.mark.asyncio
+async def test_transition_narration_stays_on_the_round_that_committed():
+    """The narration call runs after confirming; a newer round may start meanwhile."""
+    from src.engine.game_instance import GameInstance
+    from src.webui.services import turns
+
+    instance = GameInstance(game_key=("web", "transition-round", "bot"))
+    instance.log.append({"round": 1, "gm_response": "first", "actions": []})
+    progression_state.set_round_value(instance, 2)  # round 1 just committed
+
+    async def settle(inst):
+        # Another request processes round 2 while the narration is generated.
+        inst.log.append({"round": 2, "gm_response": "second", "actions": []})
+        progression_state.set_round_value(inst, 3)
+        return {"node_id": "mid", "transition_narration": "The tide turns."}
+
+    async def save(_inst):
+        return None
+
+    dependencies = SimpleNamespace(settle_adventure_completion=settle, save_instance=save)
+    await turns._settle_adventure_completion(dependencies, instance, "web|transition-round|bot")
+
+    assert instance.log[0].get("state_changes") == ["The tide turns."]
+    assert "state_changes" not in instance.log[1]

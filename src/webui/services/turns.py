@@ -451,6 +451,10 @@ async def _settle_adventure_completion(
         return
     if run_changed is not None and run_changed():
         return
+    # The round that just committed.  Read it before awaiting: settlement runs
+    # the transition narration call after confirming, and another request can
+    # start the next round meanwhile.
+    committed_round = int(progression_state.round_value(instance)) - 1
     try:
         settlement = await settle(instance)
     except Exception:
@@ -469,10 +473,9 @@ async def _settle_adventure_completion(
         )
         return
     transition = str(settlement.get("transition_narration") or "")
-    latest_round = int(progression_state.round_value(instance)) - 1
     if transition:
         for entry in reversed(instance.log):
-            if not (isinstance(entry, dict) and int(entry.get("round") or 0) == latest_round):
+            if not (isinstance(entry, dict) and int(entry.get("round") or 0) == committed_round):
                 continue
             changes = entry.setdefault("state_changes", [])
             if isinstance(changes, list):
