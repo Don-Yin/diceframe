@@ -33,6 +33,7 @@ def test_adjust_starts_at_zero_clamps_to_range_and_reports_applied_change():
 
 @pytest.mark.parametrize("subject, delta", [
     ("", 1), (" padded", 1), ("line" + chr(10) + "break", 1), (None, 1), ("x" * 81, 1),
+    ("zero" + chr(0x200B) + "width", 1), ("line" + chr(0x2028) + "sep", 1),
     ("npc:heroine", 1.5), ("npc:heroine", True), ("npc:heroine", "3"),
 ])
 def test_adjust_rejects_malformed_input_without_mutation(subject, delta):
@@ -48,6 +49,9 @@ def test_npc_display_names_in_any_script_are_subjects():
     assert affection.adjust(inst, "艾莉丝", 5) == 5
     assert affection.adjust(inst, "老格里莫 the Elder", -3) == -3
     assert affection.scores(inst) == {"艾莉丝": 5, "老格里莫 the Elder": -3}
+    # Japanese names often carry an ideographic space; NBSP is a space too.
+    assert affection.adjust(inst, "山田" + chr(0x3000) + "花子", 2) == 2
+    assert affection.adjust(inst, "Jean" + chr(0xA0) + "Luc", 1) == 1
 
 
 def test_subject_count_is_bounded():

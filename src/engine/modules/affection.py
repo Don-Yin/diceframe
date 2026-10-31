@@ -21,6 +21,7 @@ through ``module_hooks``; without it a game simply has no affection.
 
 from __future__ import annotations
 
+import unicodedata
 from copy import deepcopy
 from typing import Any
 
@@ -44,12 +45,17 @@ def fresh() -> dict[str, Any]:
     return {"schema_version": SCHEMA_VERSION, "scores": {}}
 
 
+# Control, format and line/paragraph separators; ordinary spaces (U+0020,
+# the ideographic space in Japanese names, NBSP) are part of a name.
+_FORBIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+
+
 def _valid_subject(subject: Any) -> bool:
     return (
         isinstance(subject, str)
         and 0 < len(subject) <= MAX_SUBJECT_CHARS
         and subject == subject.strip()
-        and subject.isprintable()
+        and not any(unicodedata.category(char) in _FORBIDDEN_CATEGORIES for char in subject)
     )
 
 
