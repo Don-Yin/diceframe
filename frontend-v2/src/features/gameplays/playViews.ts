@@ -1,6 +1,6 @@
 import { defineAsyncComponent, type Component } from 'vue'
 
-// Play view per gameplay mode (ADR-0012 §4). Each mode owns its view under
+// Play view per gameplay mode (ADR-0013 §4). Each mode owns its view under
 // features/<mode>/; the tabletop PlayView stays free of other modes' branches.
 const PlayView = defineAsyncComponent(() => import('@/features/play/PlayView.vue').then(module => module.default))
 const GalPlayView = defineAsyncComponent(() => import('@/features/gal/GalPlayView.vue').then(module => module.default))

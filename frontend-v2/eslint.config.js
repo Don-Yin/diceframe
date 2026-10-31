@@ -23,7 +23,7 @@ export default [
       'vue/multi-word-component-names': 'off',
     },
   },
-  // Gameplay packages stay apart (ADR-0012): the tabletop play feature never
+  // Gameplay packages stay apart (ADR-0013): the tabletop play feature never
   // reaches into another mode's feature, and gal only reuses the tabletop
   // PlayView entry while its v0 preview delegates to it.
   {
