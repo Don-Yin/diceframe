@@ -116,7 +116,7 @@ const assistantOutputHint = computed(() => assistantOutputEngine.value === 'serv
 const releaseNotesText = computed(() =>
   selectReleaseNotes(updateInfo.value?.latest?.body, locale.value).text,
 )
-const releaseNotesHtml = computed(() => renderSafeMarkdown(releaseNotesText.value))
+const releaseNotesHtml = computed(() => renderSafeMarkdown(releaseNotesText.value, { images: false }))
 const { current: themeMode, skin: activeSkin, builtinSkins, apply: applyThemeMode, applySkin } = useTheme()
 const standaloneFrontend = isStandaloneFrontend()
 const backendUrl = ref(standaloneFrontend ? currentBackendUrl() : '')
