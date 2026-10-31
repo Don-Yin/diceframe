@@ -554,3 +554,95 @@ def test_an_opportunity_attack_on_another_actors_turn_does_not_renew_rage() -> N
     assert not any(
         event["type"] == "dnd2024.condition.sustained" for event in decided
     )
+
+
+# ---- No Concentration or Spells ----------------------------------------------
+
+
+def _initiate_barbarian(runtime: Dnd2024Runtime, feat_ref: str, answers: dict) -> dict:
+    """Barbarian whose background grants Magic Initiate (spells without a casting class)."""
+
+    choices = runtime.builder_choices(None, {"locale": "en"})
+    preset = next(
+        item for item in choices["quick_presets"] if item["id"] == "relentless_vanguard"
+    )
+    background = "sage" if feat_ref.endswith("wizard") else "acolyte"
+    draft = {
+        **preset["draft"], "locale": "en", "name": "Barbarian",
+        "background_ref": f"background:{background}",
+        "background_equipment_package_ref": f"equipment_package:{background}_b",
+    }
+    choices = runtime.builder_choices(None, draft)
+    refs = choices["background_ability_refs"]
+    draft["background_ability_bonuses"] = {
+        refs[0].split(":", 1)[1]: 2, refs[1].split(":", 1)[1]: 1,
+    }
+    draft["feat_choice_answers"] = {
+        feat["feat_ref"]: {
+            spec["id"]: [option["value"] for option in spec["options"]][: int(spec["count"])]
+            for spec in feat["specs"]
+        }
+        for feat in choices["feat_choices"]
+    }
+    draft["feat_choice_answers"][feat_ref] = answers
+    assert runtime.validate_character(None, draft) == []
+    return runtime.finalize_character(None, draft)
+
+
+def _initiate_instance(feat_ref: str, answers: dict):
+    runtime = Dnd2024Runtime()
+    engine, instance = monk_instance(runtime, _initiate_barbarian(runtime, feat_ref, answers))
+    start_combat(engine, instance, hp=100)
+    return engine, instance
+
+
+def _resolve_and_apply(engine, instance, intent, rolls=()):
+    resolved = engine.resolve_intent(instance, intent, SequenceRng(list(rolls)))
+    assert resolved["ok"] is True, resolved
+    assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
+    return resolved["event_batch"]["events"]
+
+
+def _cast_intent(instance, spell_ref: str, target_ids: list[str]) -> dict:
+    version = ruleset_runtime.state(instance)["version"]
+    return {
+        "intent_id": f"cast:{version}", "type": "cast_spell", "expected_version": version,
+        "submitted_by": "gm", "actor_id": "player:gm", "spell_ref": spell_ref,
+        "target_ids": target_ids, "slot_level": 0,
+    }
+
+
+def test_raging_barbarian_cannot_cast_or_be_offered_spells() -> None:
+    engine, instance = _initiate_instance("feat:magic_initiate_wizard", {
+        "spellcasting_ability": ["int"],
+        "cantrips": ["fire_bolt", "chill_touch"],
+        "level_1_spell": ["shield"],
+    })
+    assert any(row["type"] == "cast_spell" for row in engine.available_intents(instance, "gm"))
+
+    _resolve_and_apply(engine, instance, capability_intent(engine, instance, "rage", intent_id="rage-1"))
+
+    assert not any(row["type"] == "cast_spell" for row in engine.available_intents(instance, "gm"))
+    rejected = engine.resolve_intent(
+        instance, _cast_intent(instance, "spell:fire_bolt", ["enemy:goblin-1"]), SequenceRng([15, 5]),
+    )
+    assert rejected["ok"] is False
+    assert "raging" in str(rejected)
+
+
+def test_entering_rage_ends_concentration() -> None:
+    engine, instance = _initiate_instance("feat:magic_initiate_cleric", {
+        "spellcasting_ability": ["wis"],
+        "cantrips": ["sacred_flame", "spare_the_dying"],
+        "level_1_spell": ["bless"],
+    })
+    _resolve_and_apply(engine, instance, _cast_intent(instance, "spell:bless", ["player:gm"]))
+    assert _player(instance)["spellcasting"]["concentration"]["spell_ref"] == "spell:bless"
+    # Bless costs the Action; Rage still has the Bonus Action this turn.
+    events = _resolve_and_apply(
+        engine, instance, capability_intent(engine, instance, "rage", intent_id="rage-1"),
+    )
+
+    assert {"type": "dnd2024.concentration.ended", "actor_id": "player:gm", "reason": "rage"} in events
+    assert _player(instance)["spellcasting"]["concentration"] is None
+    assert "rage" in _player(instance)["conditions"]

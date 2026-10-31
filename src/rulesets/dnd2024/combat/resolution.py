@@ -712,6 +712,12 @@ class CombatResolutionMixin:
                     **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
                 })
             elif action.kind == "rage":
+                # 狂暴不能维持专注：进入狂暴即结束正在维持的专注法术。
+                if actor.get("concentration"):
+                    events.append({
+                        "type": "dnd2024.concentration.ended", "actor_id": actor_id,
+                        "reason": "rage",
+                    })
                 events.append({
                     "type": "condition.applied", "target_id": actor_id,
                     "condition": "rage", "duration": "rage", "turns_remaining": 10,

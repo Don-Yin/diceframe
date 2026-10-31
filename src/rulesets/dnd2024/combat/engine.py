@@ -97,7 +97,9 @@ class Dnd2024CombatEngine(
         re-entered while raging, and Sustain Rage is meaningless outside it.
         """
 
-        views = super()._available_class_capabilities(
+        # slots=True rebuilds the class, so zero-argument super() fails on
+        # Python < 3.14 (the __class__ cell still points at the old class).
+        views = super(Dnd2024CombatEngine, self)._available_class_capabilities(
             actor, economy, include_unavailable=include_unavailable,
         )
         if not views:
