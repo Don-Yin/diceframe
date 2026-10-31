@@ -1299,7 +1299,6 @@ body.light .message.player strong {
   margin: 14px 0;
   padding: 14px 16px;
   border: 1px solid color-mix(in srgb, var(--df-warning) 52%, var(--df-border-soft));
-  border-left: 4px solid var(--df-warning);
   border-radius: var(--df-radius-md);
   background: linear-gradient(145deg, color-mix(in srgb, var(--df-warning) 11%, var(--df-surface-2)), var(--df-surface-1));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .045), var(--df-shadow);
@@ -1307,7 +1306,6 @@ body.light .message.player strong {
 
 .economy-proposal-card.economy-proposal-reward {
   border-color: color-mix(in srgb, var(--df-success) 58%, var(--df-border-soft));
-  border-left-color: var(--df-success);
   background: linear-gradient(145deg, color-mix(in srgb, var(--df-success) 12%, var(--df-surface-2)), var(--df-surface-1));
 }
 
@@ -2319,7 +2317,6 @@ body.light .thinking-message {
   border: 1px solid color-mix(in srgb, var(--df-interactive) 34%, var(--df-border-soft));
   border-radius: var(--df-radius-md);
   background: color-mix(in srgb, var(--df-surface-2) 82%, var(--df-surface-1));
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--df-interactive) 64%, transparent);
 }
 
 .character-vitals .hp, .character-vitals .stat-head {
@@ -2483,7 +2480,6 @@ body.light .thinking-message {
   min-height: 27px;
   padding: 4px 8px;
   border: 1px solid var(--df-border-soft);
-  border-left: 2px solid var(--df-accent);
   border-radius: 5px;
   background: linear-gradient(145deg, color-mix(in srgb, var(--df-surface-3) 58%, transparent), var(--df-surface-1));
   color: var(--df-text-secondary);
@@ -2593,7 +2589,6 @@ body.light .thinking-message {
   box-sizing: border-box;
   padding: 5px 8px;
   border: 1px solid var(--df-border-soft);
-  border-left: 2px solid var(--df-interactive);
   border-radius: 4px;
   background: color-mix(in srgb, var(--df-surface-3) 52%, var(--df-surface-1));
   color: var(--df-text-secondary);
