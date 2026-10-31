@@ -31,6 +31,7 @@ from src.engine.modules import (
 )
 from src.engine.action_gate import (
     ACTOR_DECEASED,
+    ADVENTURE_ENDED,
     ECONOMY_DECISION_PENDING,
     HUMAN_FREE_TEXT_POST_RETRY_POLICY,
     HUMAN_FREE_TEXT_PRE_RETRY_POLICY,
@@ -216,6 +217,11 @@ def _gate_rejection(instance: "GameInstance", actor_uid: str, code: str) -> Turn
     if code == ROUND_PROCESSING:
         return _result({
             "error": "本轮正在推进剧情，请等待下一轮开始", "phase": "processing", "error_code": code,
+        }, 409)
+    if code == ADVENTURE_ENDED:
+        return _result({
+            "ok": False, "error_code": code, "phase": "ended",
+            "error": "故事已经抵达结局，不能再提交行动",
         }, 409)
     return _result({"ok": False, "error_code": code, "error": code}, 409)
 
