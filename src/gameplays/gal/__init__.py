@@ -1,4 +1,4 @@
-"""Gal gameplay mode (ADR-0010, ADR-0012).
+"""Gal gameplay mode (ADR-0010, ADR-0013).
 
 Everything gal-specific lives in this package.  It may use the shared
 platform (engine core, content, LLM, memory, TTS) but not the tabletop

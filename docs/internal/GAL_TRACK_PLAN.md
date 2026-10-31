@@ -53,7 +53,7 @@ gal = 组合：freeform 系规则皮 + affection 模块槽 + Adventure 图（补
 | P0 | 契约与守卫：`play_mode` 增 `gal`（创建流接受 / 校验，fail-closed）；玩法模式 transport 声明 `bot_surface`；绑定准入单点检查（现有跑团 = full，行为不变）；`tests/architecture/` 守卫：generic path 无具体玩法分支、bot bridge 与插件无玩法词表。纯契约，gal 尚不可玩 | 无 | `services/game_lifecycle.py`、`routes/pairing.py` / bind 命令、`tests/architecture/` |
 | P1 | **v0 gal 预览**：gal 规则皮 JSON（照 tavern_free）；创建流入口（实验性标注）；现有 GameTimeline / 头像 / TTS / swipe 呈现。无好感度、无路线锁、无结局，仅需求验证，不作为正式功能宣传 | P0 | `templates/rules/`、创建流前端 |
 | P0.5a | 玩法注册表外移：`src/gameplays/`（contracts / builtin / trpg / gal 包），bot surface 与创建校验归注册表，`game_lifecycle.py` 不再内联 gal 分支；守卫 `test_gameplay_packages.py`。行为不变 | P1 | `src/gameplays/`、`adventure_runtime_state.py`、`game_lifecycle.py` |
-| P0.5b | **推迟**（ADR-0012 §3）：玩法 id 迁入独立 `gameplay` 模块槽、实例 schema +1。gal 绑定路线图不依赖它（P4 / P6 时只改 gal 创建校验）；出现确实需要的消费方时再做 | P0.5a | `src/gameplays/`、`engine/modules/`、`migrations/instance.py` |
+| P0.5b | **推迟**（[ADR-0013](../adr/0013-gameplay-packages.md) §3）：玩法 id 迁入独立 `gameplay` 模块槽、实例 schema +1。gal 绑定路线图不依赖它（P4 / P6 时只改 gal 创建校验）；出现确实需要的消费方时再做 | P0.5a | `src/gameplays/`、`engine/modules/`、`migrations/instance.py` |
 | P0.5c | 推进驱动接缝：`RoundProcessor` 原样登记为跑团 `narrative_round` 驱动，回合入口按玩法分发；跑团全绿为验收 | P0.5a | `src/gameplays/`、`commands/game_handler.py` |
 | P0.5d | 前端按玩法分发视图：`/play` 入口从注册表选视图，新建 `features/gal/` 骨架；`PlayView.vue` 不加 gal 分支 | P0.5a | `frontend-v2/src/features/game-profiles/`、`features/gal/` |
 | P2 | affection 模块槽：五件套（状态 / codec / 迁移 / 投影 / 测试），按当前模块槽 + lifecycle hooks 模式（#525–#532 之后的模板），实例 schema +1；relation 数值投影供 gates；TRPG 侧 NPC 态度复用同一模块 | P0 | `engine/modules/affection.py`、`migrations/instance.py`、`tests/` |
