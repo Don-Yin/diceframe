@@ -90,8 +90,7 @@ class ManualRollService:
         if target not in req.get("target_uids",[]) or (uid!=target and uid!=inst.gm_uid): return {"ok":False,"error":"无权投掷"}
         if req.get("status") == "cancelled": return {"ok":False,"error":"请求已取消"}
         if target in req["results"]:
-            # A previous save may have failed after recording this result in memory.
-            # Confirm persistence before acknowledging it, without rolling again.
+            # An earlier save may have failed after the result was recorded.
             await self.d.save_instance(inst)
             return {"ok":True,"result":req["results"][target],"idempotent":True}
         session_stats.require_writable(inst)
