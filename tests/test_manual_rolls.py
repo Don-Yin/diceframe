@@ -1,6 +1,13 @@
 import asyncio
+import errno
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
+import pytest
+
+from src.engine import dice_rng
+from src.engine.game_instance import GameInstance, GameRegistry
 from src.engine.modules import checks
 from src.llm.context_builder import format_manual_roll_context
 from src.webui.services.manual_rolls import ManualRollDependencies, ManualRollService
@@ -52,7 +59,64 @@ def test_manual_roll_create_resolve_is_idempotent_and_bound_to_target():
         )
         assert result["result"] == again["result"]
         assert created["request"]["status"] == "resolved"
-        assert len(saves) == 2
+        assert len(saves) == 3  # Creation, resolution, and durable acknowledgement of the retry.
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("failed_attempts", [1, 2])
+def test_manual_roll_retry_after_save_failure_persists_before_success(tmp_path, monkeypatch, failed_attempts):
+    registry = GameRegistry(tmp_path / "saves")
+    instance = GameInstance(
+        game_key=("web", "manual-roll-save", "test"), gm_uid="gm",
+        players={"p1": {"character_name": "Alice", "character_sheet": {"hp": 10}}},
+    )
+    registry.register(instance)
+    service = ManualRollService(ManualRollDependencies(
+        lambda _: instance.game_key, registry.get, registry.save,
+    ))
+    die = Mock(side_effect=[7, 19])
+    monkeypatch.setattr(dice_rng, "roll_die", die)
+    state_path = registry.save_package_state_path(instance.game_key)
+    write_text = Path.write_text
+
+    def fail_state_write(path, *args, **kwargs):
+        if path == state_path.with_name("state.tmp.json"):
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return write_text(path, *args, **kwargs)
+
+    async def scenario():
+        created = await service.create("game", "gm", {
+            "operation_id": "save-failure", "run_id": instance.run_id,
+            "target_uids": ["p1"], "formula": "d20",
+        })
+        request = created["request"]
+        body = {"run_id": instance.run_id, "target_uid": "p1"}
+        with monkeypatch.context() as failure:
+            failure.setattr(Path, "write_text", fail_state_write)
+            for _ in range(failed_attempts):
+                with pytest.raises(OSError) as error:
+                    await service.resolve("game", "p1", request["id"], body)
+                assert error.value.errno == errno.ENOSPC
+        assert request["results"]["p1"]["total"] == 7
+
+        retry = await service.resolve("game", "p1", request["id"], body)
+        assert retry["ok"] is True
+        assert retry["idempotent"] is True
+        assert retry["result"]["total"] == 7
+
+        # A successful retry must survive a cold load without another die roll.
+        restarted = GameRegistry(registry.save_dir)
+        loaded = await restarted.load(instance.game_key)
+        assert loaded is not None
+        service_after_restart = ManualRollService(ManualRollDependencies(
+            lambda _: instance.game_key, restarted.get, restarted.save,
+        ))
+        again = await service_after_restart.resolve("game", "p1", request["id"], body)
+        assert again["result"] == retry["result"]
+        assert again["idempotent"] is True
+        die.assert_called_once_with(20)
 
     asyncio.run(scenario())
 
