@@ -38,6 +38,7 @@ from src.adventures.progress import (
     complete_milestone,
     complete_node,
     complete_objective,
+    ending_node_id,
     new_progress,
     validate_choice_state,
 )
@@ -89,6 +90,33 @@ def resolve_instance_adventure(
     if not isinstance(binding, dict) or not binding.get("adventure_id"):
         return None
     return dependencies.resolve_binding(instance)
+
+
+def restore_completion_before_image(instance: Any, before: dict[str, Any]) -> None:
+    """Restore an automatic-completion transaction after persistence fails.
+
+    The application facade owns orchestration, while this module owns the
+    adventure progress/economy before-image writes.  Keeping the restore here
+    preserves the same authority boundary as normal node completion.
+    """
+
+    instance.world_state = before["world_state"]
+    adventure_runtime_state.replace_progress(instance, before["adventure_progress"])
+    economy_state.replace_state(instance, before["economy"])
+
+
+def discard_completion_suggestion(instance: Any, node_id: str) -> None:
+    """Remove one rejected narrator proposal through the adventure owner."""
+
+    adventure_runtime_state.clear_completion_suggestion(instance, node_id)
+
+
+def restore_completion_progress_before_image(
+    instance: Any, before_progress: dict[str, Any],
+) -> None:
+    """Restore proposal state when rejected-proposal persistence fails."""
+
+    adventure_runtime_state.replace_progress(instance, before_progress)
 
 
 def initialize_adventure_run(
@@ -355,6 +383,14 @@ def advance_adventure_world(
         raise AdventureRuntimeError("adventure progress is not initialized")
     validate_choice_state(progress, graph)
 
+    # An ending freezes the adventure permanently. Keep this guard at the
+    # world-sync authority boundary so gate re-evaluation cannot reopen nodes
+    # after a reload or through another time/process advancement entry point.
+    if ending_node_id(progress):
+        progress["active_nodes"] = []
+        progress["choice_requests"] = []
+        return {"ok": True, "advanced": False, "reason": "ended", "activated_nodes": []}
+
     from src.adventures.gates import GateError, gates_satisfied
 
     active = list(progress.get("active_nodes") or [])
@@ -405,8 +441,11 @@ __all__ = [
     "advance_adventure_world",
     "adventure_graph",
     "complete_adventure_node",
+    "discard_completion_suggestion",
     "initialize_adventure_new_run",
     "initialize_adventure_run",
+    "restore_completion_before_image",
     "resolve_instance_adventure",
     "request_adventure_choice",
+    "restore_completion_progress_before_image",
 ]

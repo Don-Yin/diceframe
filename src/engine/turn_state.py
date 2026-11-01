@@ -24,11 +24,18 @@ from __future__ import annotations
 from src.engine.modules import game_config
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from src.engine.contracts import ActionRecord
+from src.engine.action_gate import (
+    AI_SEAT_COMMIT_POLICY,
+    GateRequest,
+    SOURCE_AI_SEAT,
+    StructuredIntentRequirement,
+    evaluate,
+)
 from src.engine import module_hooks, progression
 from src.engine.game_state import GameState
 from src.engine.modules import progression_state, room_access
@@ -158,9 +165,15 @@ def multiplayer_status(instance: GameInstance) -> dict:
 
 
 def should_advance(instance: GameInstance) -> bool:
-    """任一满足即推进：所有存活玩家已就绪，或单人模式下任一玩家已行动。"""
+    """任一满足即推进：所有存活玩家已就绪，或单人模式下任一玩家已行动。
+
+    scene 推进（GAL P7）固定单人语义：任一行动即推进，不依赖 solo_mode
+    配置——防止未来非 solo 局误装 scene 模式时挂死在多人就绪屏障上。
+    """
     if instance.has_pending_dice():
         return False
+    if progression_state.mode(instance) == progression_state.SCENE:
+        return bool(instance.action_queue)
     if game_config.solo_mode(instance) and instance.action_queue:
         return True
     return instance.all_alive_ready()
@@ -206,6 +219,67 @@ def ai_player_action_stale_reason(
         ),
         AI_SEAT_STALE_POLICY,
     )
+
+
+def commit_ai_player_action_locked(
+    instance: GameInstance,
+    user_id: str,
+    action_text: str,
+    *,
+    source: str,
+    expected_run_id: str,
+    expected_round_number: int,
+    expected_control_revision: int,
+    action_metadata: dict | None = None,
+    requires_structured_intent: StructuredIntentRequirement = False,
+    admission_check: Callable[[], str] | None = None,
+    evaluate_fn: Callable[..., str] = evaluate,
+    policy: Any = AI_SEAT_COMMIT_POLICY,
+) -> str:
+    """Re-confirm a hosted seat and commit its action while ``instance._lock`` is held.
+
+    The aggregate remains the lock/authority owner and the public facade keeps
+    the injectable ``GameInstance`` seams used by existing callers and tests.
+    """
+    stale = instance.ai_player_action_stale_reason(
+        user_id,
+        expected_run_id=expected_run_id,
+        expected_round_number=expected_round_number,
+        expected_control_revision=expected_control_revision,
+    )
+    if stale:
+        return stale
+    if admission_check is not None:
+        code = admission_check()
+        if code:
+            return code
+    code = evaluate_fn(
+        instance,
+        GateRequest(
+            actor_uid=user_id,
+            source=SOURCE_AI_SEAT,
+            expected_run_id=expected_run_id,
+            expected_round_number=expected_round_number,
+            expected_control_revision=expected_control_revision,
+            action_source=source,
+            requires_structured_intent=requires_structured_intent,
+        ),
+        policy,
+    )
+    if code:
+        return code
+    from src.engine.modules import session_stats
+
+    progression.require_writable(instance)
+    session_stats.require_writable(instance)
+    added = instance._add_action_locked(
+        user_id,
+        action_text,
+        source=source,
+        action_metadata=action_metadata,
+        defer_out_of_phase=False,
+    )
+    return "" if added else "action_rejected"
 
 
 def has_pending_dice(instance: GameInstance, user_id: str | None = None) -> bool:
@@ -328,6 +402,9 @@ def start_round_locked(instance: GameInstance) -> None:
     session_stats.require_writable(instance)
     checks.require_writable(instance)
     round_safety.require_writable(instance)
+    # GAL P7：scene 推进在冒险抵达结局（P4 冻结）后不再开启新推进；
+    # narrative_round 跑团不受影响（冻结的冒险进度不拦跑团回合）。
+    progression.ensure_advancement_allowed(instance)
     progression.open_next_round(instance)
     current = str(progression_state.round_value(instance))
     round_safety.keep_death_saves_for(instance, current)
@@ -400,6 +477,57 @@ def set_player_away_locked(instance: GameInstance, user_id: str, away: bool) -> 
         instance.away_players.discard(user_id)
     session_stats.touch(instance)
     return True
+
+
+def apply_away_transition_locked(
+    instance: GameInstance,
+    user_id: str,
+    away: bool,
+    *,
+    policy: str,
+    control_change_block_fn: Any,
+    begin_away_hosting_fn: Any,
+    end_away_hosting_fn: Any,
+) -> str:
+    """Apply presence and temporary control handover in one held-lock boundary."""
+    handover = away and policy == "ai_takeover"
+    if handover or not away:
+        block = control_change_block_fn(instance)
+        if block:
+            return block
+    if not instance._set_player_away_locked(user_id, away):
+        return "UNKNOWN_PLAYER"
+    if handover:
+        begin_away_hosting_fn(instance, user_id)
+    elif not away:
+        end_away_hosting_fn(instance, user_id)
+    return ""
+
+
+def apply_player_control_change_locked(
+    instance: GameInstance,
+    user_id: str,
+    mode: str,
+    *,
+    control_change_block_fn: Any,
+    set_control_fn: Any,
+    player_control_error_type: type[Exception],
+) -> str:
+    """Apply a GM control handover while the authority/state locks are held."""
+    block = control_change_block_fn(instance)
+    if block:
+        return block
+    if user_id not in instance.players:
+        return "UNKNOWN_PLAYER"
+    try:
+        set_control_fn(instance, user_id, mode)
+    except player_control_error_type:
+        logger.warning(
+            "拒绝托管切换: game_key=%s uid=%s mode=%s",
+            instance.game_key, user_id, mode, exc_info=True,
+        )
+        return "CONTROL_REJECTED"
+    return ""
 
 
 def do_advance_locked(instance: GameInstance) -> bool:
