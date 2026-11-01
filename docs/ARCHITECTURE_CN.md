@@ -667,6 +667,8 @@ frontend-v2/src/
 - 不把按钮是否显示当成权限检查；
 - UI capability gating 只是体验层，服务端仍需重新校验。
 
+首页“加入好友”由 `features/peer/FriendJoinPanel.vue` 提供，`joinInvitation.ts` 在本地识别普通邀请链接与 `DFP2-` 直连码，不探测远端或消费凭据。普通链接保留原站点、部署路径、后端参数与席位凭据，经玩家明确点击后打开；直连码交给现有 P2P 流程，连接前仍需隐私同意。Hub 的入口开关只控制实验性直连，不隐藏普通链接加入。游玩邀请弹窗提供独立的官方联机文档链接，不携带游戏或邀请凭据。
+
 全局样式通过 `frontend-v2/src/styles/index.css` 单一入口加载：共享基础与控件归
 `shared.css`，应用和二级导航归 `navigation.css`，各页面的布局、状态与媒体查询归
 `pages/<feature>.css`。组件内样式继续由所属功能维护；tokens、Tailwind 和 Markdown
@@ -4216,7 +4218,7 @@ Agent 不提供永久清空，归档仅限 10 个明确自建条目或不超过 
 插件、内置来源与整本主册受保护。插件具名工具进入 Agent 需明确声明
 `agent_effect=read_only/mutation/destructive`；动态具名适配器对三类原生插件调用均要求具体人工确认，
 未知声明不注册。旧通用插件入口仍只接受 read_only。该声明不构成原生插件进程沙箱，
-插件副作用不提供通用撤销。详细边界见 `docs/design/DF_AGENT_DELETE_POLICY.md`。
+插件副作用不提供通用撤销。详细边界见 `docs/internal/design/DF_AGENT_DELETE_POLICY.md`。
 
 v4 → v5 → v6 migration 保留 worlds 与 entry ids，并为每个 world 创建 deterministic
 `world:<id>` primary book；`list_entries(world_id)` 是该 primary book 的兼容 façade。
@@ -5247,7 +5249,7 @@ GM style 只能影响：
 
 Adventure v2 可由 GM 提示词输出 `ADVENTURE_COMPLETE` 建议。建议只在对应回合日志提交后，校验其活动节点、理由及已存在的 GM 日志回合，并存入 Adventure runtime 进度；它不会推进节点或执行 outcome。建议和证据仅投影给 GM；GM 可在 AdventurePanel 查看、关闭提示或忽略建议，忽略会按节点抑制重复提示。节点仍须由 GM 使用既有 `adventure.node.complete` 命令确认；节点完成事务会清理对应建议，失败则随进度快照回滚。
 
-GM 工作台在桌面和手机上均由显式收起按钮或 Esc 关闭，点击外部区域及操作嵌套弹窗不会收起工作台，未完成输入保持挂载。队伍成员列表下方并排提供“邀请玩家”和 GM 专用“房间密码”入口；`RoomPasswordDialog` 独立负责设置、替换与显式移除密码，继续使用已有服务端校验和权限接口。对局设置只提交已修改的奖励与暂离策略，不再拥有密码字段或密码写入路径。
+GM 工作台在桌面和手机上均由显式收起按钮或 Esc 关闭，点击外部区域及操作嵌套弹窗不会收起工作台，未完成输入保持挂载。队伍成员列表下方并排提供“邀请好友”和 GM 专用“房间密码”入口；`RoomPasswordDialog` 独立负责设置、替换与显式移除密码，继续使用已有服务端校验和权限接口。对局设置只提交已修改的奖励与暂离策略，不再拥有密码字段或密码写入路径。
 
 设置的版本检查、更新渠道、下载与安装位于“关于”；只有已保留版本的回退入口位于“通用 → 系统维护”。搜索及更新通知深链接分别指向对应位置，回退仍调用既有确认与启动器流程。
 
@@ -6352,7 +6354,7 @@ HTTP 与 Agent 的专业休息共同调用 `ruleset_rest.submit_live`：单人�
 
 `assistant_agent_knowledge.py` 注册只读 `search_documentation`，只在 Agent 请求使用说明时检索。`assistant_knowledge.py` 的当前版本模式使用现有本地文档或版本匹配的预建索引，只接受本仓库版本文档来源；不查询移动远程指南，不自动注入每条聊天。能力、canonical ID 与可执行操作仍由真实工具目录和服务观察决定。
 
-`assistant_content.py` 生成无副作用草稿，复用 ContentTextReview 的 review/commit 和 ContentDraft/CommitPlan。游戏创建沿用事务、规则和 canonical book bindings；行动采用当前服务端 actor 与服务器骰。执行记录保存在数据目录 `assistant_agent`，断线恢复与重复确认使用原结果；进程中断且结果未知的修改禁止盲目重放。完整协议与能力见 [DF_AGENT_IMPLEMENTATION.md](design/DF_AGENT_IMPLEMENTATION.md)。
+`assistant_content.py` 生成无副作用草稿，复用 ContentTextReview 的 review/commit 和 ContentDraft/CommitPlan。游戏创建沿用事务、规则和 canonical book bindings；行动采用当前服务端 actor 与服务器骰。执行记录保存在数据目录 `assistant_agent`，断线恢复与重复确认使用原结果；进程中断且结果未知的修改禁止盲目重放。完整协议与能力见 [DF_AGENT_IMPLEMENTATION.md](internal/design/DF_AGENT_IMPLEMENTATION.md)。
 
 
 ## 存储分叉读取与功能整合边界

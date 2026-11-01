@@ -675,6 +675,8 @@ Frontend rules:
 - Do not treat whether a button is visible as authorization;
 - UI capability gating is an experience layer only; the server must validate again.
 
+The homepage's “Join friends” entry is owned by `features/peer/FriendJoinPanel.vue`. `joinInvitation.ts` classifies regular invitation URLs and `DFP2-` direct-connect codes locally without probing remote hosts or consuming credentials. Regular URLs retain their original origin, deployment path, backend parameter and seat credential and open only after an explicit click. Direct codes enter the existing P2P flow with its connection consent intact. The Hub entry switch gates experimental direct connect only; ordinary invitation joining remains available. The play invitation dialog links to official multiplayer documentation without attaching game or invitation credentials.
+
 Global styles load through the single `frontend-v2/src/styles/index.css` entry.
 `shared.css` owns document and control primitives, `navigation.css` owns application
 and section navigation, and `pages/<feature>.css` owns each feature's global layout,
@@ -4277,7 +4279,7 @@ Named plugin tools require explicit `agent_effect=read_only/mutation/destructive
 All three native-process classes require concrete manual approval; unknown effects
 are not registered. The legacy generic entry remains read-only. Declarations do not
 sandbox native processes, and plugin side effects have no generic undo. See
-`docs/design/DF_AGENT_DELETE_POLICY.md` for precise limits.
+`docs/internal/design/DF_AGENT_DELETE_POLICY.md` for precise limits.
 
 The v4 → v5 → v6 migrations preserve worlds and entry IDs, and create a deterministic
 `world:<id>` primary book for every world. `list_entries(world_id)` remains the
@@ -5318,7 +5320,7 @@ The play view places the `AdventurePanel` trigger beside Checks in the scene hea
 
 Adventure v2 may receive an `ADVENTURE_COMPLETE` suggestion from the GM prompt. After the round log is committed, the server validates the active node, bounded reason, and cited existing GM-log rounds before storing it in Adventure runtime progress; the suggestion never advances a node or runs outcomes. Suggestions and evidence are projected to the GM only. In AdventurePanel the GM can review a suggestion, close its transient notice, or dismiss it; dismissal suppresses repeat suggestions for that node. The node still advances only through the existing GM-authorized `adventure.node.complete` command. Node completion clears its suggestion in the authoritative transaction, and failures restore it with the progress snapshot.
 
-On desktop and mobile the GM workbench closes through its explicit toggle or Escape; outside clicks and nested dialogs leave it open, and unfinished inputs stay mounted. Invite player and the GM-only Room password entry sit together below party members. `RoomPasswordDialog` owns password creation, replacement and explicit removal using the existing server validation and authorization endpoint. Game settings submit only edited reward and away policies and no longer own password fields or password writes.
+On desktop and mobile the GM workbench closes through its explicit toggle or Escape; outside clicks and nested dialogs leave it open, and unfinished inputs stay mounted. Invite friends and the GM-only Room password entry sit together below party members. `RoomPasswordDialog` owns password creation, replacement and explicit removal using the existing server validation and authorization endpoint. Game settings submit only edited reward and away policies and no longer own password fields or password writes.
 
 Version checks, update channels, downloads and installation belong to Settings → About; only the retained-version rollback entry belongs to General → System maintenance. Search and update-notification deep links target the corresponding locations. Rollback retains the existing confirmation and launcher flow.
 
@@ -6416,7 +6418,7 @@ HTTP and Agent professional rests share `ruleset_rest.submit_live`: solo games k
 
 `assistant_agent_knowledge.py` registers read-only `search_documentation`, retrieved only when the Agent asks for usage guidance. The current-version mode in `assistant_knowledge.py` uses current local files or a version-matched bundled index and accepts only this repository's versioned document sources. Moving remote guides are excluded and no documentation is injected into every chat. Actual tools and service observations determine capabilities, canonical IDs and executable operations.
 
-`assistant_content.py` generates side-effect-free drafts and delegates to ContentTextReview's ContentDraft/CommitPlan review/commit boundary. Game creation preserves transactions, rules and explicit canonical book bindings; actions use the server actor and server dice. Durable execution receipts live under the data directory's `assistant_agent` folder. Repeated confirmations return the original result; interrupted writes with uncertain outcomes cannot be blindly replayed. See [DF_AGENT_IMPLEMENTATION.md](design/DF_AGENT_IMPLEMENTATION.md) for the complete capability and transport contract.
+`assistant_content.py` generates side-effect-free drafts and delegates to ContentTextReview's ContentDraft/CommitPlan review/commit boundary. Game creation preserves transactions, rules and explicit canonical book bindings; actions use the server actor and server dice. Durable execution receipts live under the data directory's `assistant_agent` folder. Repeated confirmations return the original result; interrupted writes with uncertain outcomes cannot be blindly replayed. See [DF_AGENT_IMPLEMENTATION.md](internal/design/DF_AGENT_IMPLEMENTATION.md) for the complete capability and transport contract.
 
 
 ## Storage branch recognition and integration ownership

@@ -5,7 +5,7 @@
 
 ## Context
 
-[ADR-0005](0005-composable-game-platform.md) 与 [vNext 母方案](../ARCHITECTURE_VNEXT_MASTER_PLAN.md)把组合层的启动条件定为"第一个非跑团玩法立项"。本 ADR 记录该立项（GAL / 结构化视觉小说玩法）及其长期边界决策。施工顺序见 [轨道 P 计划](../GAL_TRACK_PLAN.md)，本文只记录决策。
+[ADR-0005](0005-composable-game-platform.md) 与 [vNext 母方案](../internal/CONTENT_ARCHITECTURE_VNEXT_MASTER_PLAN.md)把组合层的启动条件定为"第一个非跑团玩法立项"。本 ADR 记录该立项（GAL / 结构化视觉小说玩法）及其长期边界决策。施工顺序见 [轨道 P 计划](../internal/GAL_TRACK_PLAN.md)，本文只记录决策。
 
 ### 产品与市场
 
@@ -111,4 +111,4 @@ affection 是自持五件套的模块槽（状态 / codec / 迁移 / 投影 / �
 
 ## Supersedes / Superseded By
 
-None。本 ADR 触发 [ADR-0005](0005-composable-game-platform.md) 组合层部分的立项条件，不取代它。
+None。本 ADR 触发 [ADR-0005](0005-composable-game-platform.md) 组合层部分的立项条件，不取代它。§2 的 gal 概念落点与 §4 的实施方式由 [ADR-0013](0013-gameplay-packages.md) 修订。

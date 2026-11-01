@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from src.engine.modules import economy_state
+from src.engine.modules import adventure_runtime_state, economy_state
+from src.adventures.outcomes import OutcomeError
+from src.adventures.progress import ProgressError
 from src.assistant_agent_limits import DEFAULT_TASK_MAX_TOKENS
 from src.generation_limits import DEFAULT_TEXT_GEN_MAX_TOKENS
 
@@ -10,6 +12,7 @@ import asyncio
 import json
 import logging
 import time
+from copy import deepcopy
 from pathlib import Path
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
@@ -17,6 +20,7 @@ from typing import Any, Literal
 from src.engine.character_utils import calc_hp_from_rule, get_rule_attr_config, make_default_character, parse_tavern_card, roll_attributes
 from src.engine.economy import queue_proposal, resolve_auto_reward_policy
 from src.engine.game_instance import GameRegistry
+from src.engine.game_state import GameState
 from src.engine import persistence
 from src.webui.services.adventure_materialization import materialize_world_seed
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
@@ -50,6 +54,8 @@ from src.webui.services.resource_recovery import RecoveryDependencies, RecoveryS
 from src.game_preferences import UNSET, validate_preferences
 from src.webui.services.check_modes import CheckModeDependencies, CheckModeService
 from src.commands.hosted_combat import HostedCombatScheduler
+from src.commands import adventure_effects
+from src.commands.scene_transition import SceneTransitionNarrator
 from src.webui.services import ruleset_characters
 from src.webui.services import character_card_import
 from src.webui.services import content_sync
@@ -748,6 +754,7 @@ class WebAPI:
             drain_economy_outbox=self._drain_economy_outbox,
             economy_auto_reward_settings=self.economy_auto_reward_settings,
             resolve_reward=self.resolve_reward_as_gm,
+            settle_adventure_completion=self._settle_adventure_completion_for,
         )
         self._map_dependencies = maps.MapDependencies(
             get_instance=self._reg.get,
@@ -2573,6 +2580,124 @@ class WebAPI:
             global_enabled=global_enabled,
             global_cap=global_cap,
         )
+
+    async def _settle_adventure_completion_for(self, instance: Any) -> dict[str, Any] | None:
+        """回合提交后结算叙事者节点完成提议（GAL 轨道 P6）。
+
+        规则未声明 ``adventure_progression`` 时不做任何事（提议保持
+        advisory-only）。确认走标准完成事务（gates / world ops / ending
+        冻结 / 奖励出口，全有或全无回滚）；场景过渡叙事为纯文本，不向
+        叙事者开放状态写权。
+        """
+
+        try:
+            rule = self._load_rule_for_game(instance)
+        except Exception:
+            logger.warning("读取规则失败，跳过节点完成提议结算", exc_info=True)
+            return None
+        config = getattr(rule, "adventure_progression", None) if rule is not None else None
+        if config is None or not getattr(config, "auto_confirm_completion", False):
+            return None
+
+        async def confirm(node_id: str) -> dict[str, Any]:
+            # 与 GM 命令（adventure_commands.execute）同一并发边界：authoritative
+            # write + instance lock + STALE_RUN 检查 + 判定中拒绝；被拒时按
+            # settle 契约丢弃提议。
+            async with instance.authoritative_write() as write_entered, instance._lock:
+                if not write_entered:
+                    raise RuntimeError("historical rewrite is in progress")
+                if self._reg.get(instance.game_key) is not instance:
+                    raise RuntimeError("game run was replaced")
+                if instance.state == GameState.ACTIVE_JUDGMENT:
+                    # Another round is being judged; confirming now could reach
+                    # an ending under it.  Keep the proposal: that round's own
+                    # settlement retries it once the round has committed.
+                    raise RuntimeError("a round is being judged")
+                before = {
+                    "world_state": deepcopy(instance.world_state),
+                    "adventure_progress": deepcopy(adventure_runtime_state.progress(instance)),
+                    "economy": deepcopy(economy_state.state(instance)),
+                }
+                try:
+                    try:
+                        result = adventure_runtime.complete_adventure_node(
+                            self._adventure_runtime_dependencies,
+                            instance,
+                            node_id,
+                            actor_uid="narrator-auto",
+                        )
+                    except (
+                        adventure_runtime.AdventureRuntimeError,
+                        ProgressError,
+                        OutcomeError,
+                        # Deterministic failures of the transaction itself (e.g.
+                        # WorldStateError from world ops) reject the proposal like
+                        # the GM command does; retrying them would block the queue.
+                        ValueError,
+                        KeyError,
+                        TypeError,
+                    ) as exc:
+                        raise adventure_effects.AdventureCompletionRejected(
+                            str(exc),
+                        ) from exc
+                    # Persist the authority mutation before narration runs.  A
+                    # failed save restores the full before-image so the
+                    # proposal remains recoverable and can be retried.
+                    await self._reg.save(instance)
+                    return result
+                except BaseException:
+                    adventure_runtime.restore_completion_before_image(instance, before)
+                    raise
+
+        async def discard(node_id: str) -> None:
+            """Drop a rejected proposal under the same authority boundary.
+
+            A failed confirmation still mutates the proposal queue.  Keep that
+            cleanup serialized with node completion and persist it immediately;
+            otherwise a restart can resurrect a proposal rejected in memory.
+            """
+
+            async with instance.authoritative_write() as write_entered, instance._lock:
+                if not write_entered:
+                    raise RuntimeError("historical rewrite is in progress")
+                if self._reg.get(instance.game_key) is not instance:
+                    raise RuntimeError("game run was replaced")
+                before_progress = deepcopy(adventure_runtime_state.progress(instance))
+                try:
+                    adventure_runtime.discard_completion_suggestion(instance, node_id)
+                    await self._reg.save(instance)
+                except BaseException:
+                    adventure_runtime.restore_completion_progress_before_image(
+                        instance, before_progress,
+                    )
+                    raise
+
+        narration_fn = None
+        if getattr(config, "activation_narration", False):
+            narrator = SceneTransitionNarrator(
+                self._llm_client,
+                getattr(self._handler, "prompt_composer", None),
+            )
+
+            async def narration_fn(result: dict[str, Any], activated_nodes: list[str]) -> str:
+                return await narrator.narrate(
+                    instance, completed_node_id=str(result.get("node_id") or ""),
+                )
+
+        settlement = await adventure_effects.settle_adventure_completion(
+            instance,
+            config=config,
+            confirm=confirm,
+            discard=discard,
+            narration=narration_fn,
+        )
+        if settlement is None:
+            return None
+        return {
+            "node_id": settlement.node_id,
+            "activated_nodes": settlement.activated_nodes,
+            "transition_narration": settlement.transition_narration,
+        }
 
     async def set_economy_reward_policy(
         self, game_key: str, policy: dict[str, Any],
